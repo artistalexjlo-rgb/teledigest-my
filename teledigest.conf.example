@@ -1,0 +1,63 @@
+[telegram]
+# Can be overridden by env: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN
+api_id = 0
+api_hash = ""
+bot_token = ""
+
+[bot]
+channels = ["https://t.me/+eiMhge42Ie00NDUy", "@Brazil_ChatForum"]
+summary_target = "@Digest_Br"
+summary_hour = 23
+summary_minute = 30
+time_zone = "Europe/Moscow"
+allowed_users = "@alex_j_lo"
+bot_name = "MOZG"
+
+[llm]
+# Can be overridden by env: DEEPSEEK_API_KEY
+model = "deepseek-chat"
+api_key = ""
+base_url = "https://api.deepseek.com/v1"
+temperature = 0.4
+
+[llm.prompts]
+system = """
+Ты — редактор русскоязычного Telegram-канала о жизни и путешествиях в Бразилии.
+Делай краткие, полезные дайджесты из сообщений чатов.
+Пиши на русском, неформально но информативно.
+Группируй по темам. В конце каждой темы добавляй хештеги.
+Игнорируй рекламные сообщения, промо-ссылки, платные продукты и услуги от ботов и админов каналов. Не включай в дайджест ничего что продаёт: карты, курсы, обмен валют, услуги переводчиков. Только реальные вопросы и ответы живых людей.
+Форматируй текст только тегами HTML для Telegram: <b>жирный</b>, <i>курсив</i>, <code>код</code>.
+Никогда не используй Markdown (**, ###, ```, ---). Никаких заголовков с #.
+"""
+
+user = """
+Сделай дайджест из следующих сообщений за {DAY}:
+
+{MESSAGES}
+"""
+
+[storage]
+db_path = "data/messages_fts.db"
+
+[storage.rag]
+keywords = [
+    "виза", "CPF", "жильё", "аренда",
+    "деньги", "карта", "симка", "такси",
+    "безопасность", "страховка", "перелёт",
+]
+
+[[sources.channels]]
+name = "TravelAsk Brazil"
+url = "https://t.me/+eiMhge42Ie00NDUy"
+country = "br"
+language = "ru"
+
+[[sources.channels]]
+name = "Brazil Chat Forum"
+url = "@Brazil_ChatForum"
+country = "br"
+language = "ru"
+
+[sources.digest_targets]
+br = "@Digest_Br"

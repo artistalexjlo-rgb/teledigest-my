@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tomllib
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -21,6 +22,33 @@ class TelegramConfig:
     sessions_dir: Path = Path("data")
 
 
+@dataclass
+class SourceChannel:
+    """A single Telegram source channel/chat."""
+    name: str
+    url: str
+    country: str
+    language: str = "ru"
+
+
+@dataclass
+class SourcesConfig:
+    """Multi-country source configuration."""
+    channels: List[SourceChannel] = field(default_factory=list)
+    digest_targets: Dict[str, str] = field(default_factory=dict)
+
+    def countries(self) -> list[str]:
+        """List of unique country codes."""
+        return list(dict.fromkeys(ch.country for ch in self.channels))
+
+    def channels_for_country(self, country: str) -> list[SourceChannel]:
+        return [ch for ch in self.channels if ch.country == country]
+
+    def channel_urls(self) -> list[str]:
+        """All channel URLs (for Telegram joining)."""
+        return [ch.url for ch in self.channels]
+
+
 _DEFAULT_SYSTEM_PROMPT = """You are a helpful assistant that summarizes Telegram messages into a concise digest."""
 _DEFAULT_USER_PROMPT = (
     """Summarize the following Telegram messages for {DAY}:\n\n{MESSAGES}"""
@@ -30,6 +58,15 @@ _DEFAULT_USER_BRIEF_PROMPT = (
     "Create a brief summary (max 4000 characters including HTML)"
     " of the following digest:\n\n{DIGEST}"
 )
+
+
+@dataclass
+class ExtractionLLMConfig:
+    """Separate LLM config for heavy Q&A extraction (e.g. free Yandex tier)."""
+    model: str = ""
+    api_key: str = ""
+    base_url: Optional[str] = None
+    temperature: float = 0.2
 
 
 @dataclass
@@ -45,6 +82,7 @@ class LLMConfig:
         default_factory=lambda: _DEFAULT_SYSTEM_BRIEF_PROMPT
     )
     user_brief_prompt: str = field(default_factory=lambda: _DEFAULT_USER_BRIEF_PROMPT)
+    extraction: ExtractionLLMConfig = field(default_factory=ExtractionLLMConfig)
 
 
 @dataclass
@@ -63,6 +101,8 @@ class BotConfig:
     summary_minute: int = 0
     summary_brief: bool = False
     allowed_users_raw: str = ""  # e.g. "@user1,12345678"
+    bot_name: str = "МОЗГ"
+    blocked_senders: frozenset = frozenset()  # bot usernames/IDs to ignore
 
     def _raw_parts(self) -> List[str]:
         return [x.strip() for x in self.allowed_users_raw.split(",") if x.strip()]
@@ -104,6 +144,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=lambda: StorageConfig([]))
     logging: LoggingConfig = field(default_factory=lambda: LoggingConfig())
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
+    sources: SourcesConfig = field(default_factory=SourcesConfig)
 
 
 _CONFIG: Optional[AppConfig] = None
@@ -159,9 +200,9 @@ def _parse_telegram(raw: Dict[str, Any]) -> TelegramConfig:
     tg_raw = raw.get("telegram") or {}
     try:
         return TelegramConfig(
-            api_id=int(tg_raw["api_id"]),
-            api_hash=str(tg_raw["api_hash"]),
-            bot_token=str(tg_raw["bot_token"]),
+            api_id=int(os.environ.get("TELEGRAM_API_ID") or tg_raw["api_id"]),
+            api_hash=str(os.environ.get("TELEGRAM_API_HASH") or tg_raw["api_hash"]),
+            bot_token=str(os.environ.get("TELEGRAM_BOT_TOKEN") or tg_raw["bot_token"]),
             sessions_dir=Path(tg_raw.get("sessions_dir", "data")),
         )
     except KeyError as e:
@@ -182,6 +223,10 @@ def _parse_bot(raw: Dict[str, Any]) -> BotConfig:
         summary_brief=bool(bot_raw.get("summary_brief", False)),
         allowed_users_raw=str(bot_raw.get("allowed_users", "")),
         time_zone=str(bot_raw.get("time_zone", "Europe/Warsaw")),
+        bot_name=str(bot_raw.get("bot_name", "МОЗГ")),
+        blocked_senders=frozenset(
+            str(s).strip().lower() for s in (bot_raw.get("blocked_senders") or [])
+        ),
     )
 
     if not bot.summary_target:
@@ -206,7 +251,7 @@ def _parse_llm(raw: Dict[str, Any]) -> LLMConfig:
     llm_raw = raw.get("llm") or {}
     prompts_raw = llm_raw.get("prompts") or {}
     llm = LLMConfig(
-        api_key=str(llm_raw.get("api_key", "")),
+        api_key=str(os.environ.get("DEEPSEEK_API_KEY") or llm_raw.get("api_key", "")),
         model=str(llm_raw.get("model", "gpt-5.1")),
         system_prompt=str(prompts_raw.get("system", _DEFAULT_SYSTEM_PROMPT)),
         user_prompt=str(prompts_raw.get("user", _DEFAULT_USER_PROMPT)),
@@ -225,6 +270,16 @@ def _parse_llm(raw: Dict[str, Any]) -> LLMConfig:
         raise ValueError("Config [llm].temperature must be between 0.0 and 2.0.")
     if not llm.api_key:
         raise ValueError("Config [llm].api_key is required.")
+
+    # Parse optional [llm.extraction] for separate extraction LLM
+    ext_raw = llm_raw.get("extraction") or {}
+    if ext_raw.get("api_key"):
+        llm.extraction = ExtractionLLMConfig(
+            model=str(ext_raw.get("model", "")),
+            api_key=str(ext_raw.get("api_key", "")),
+            base_url=str(ext_raw.get("base_url", "")) or None,
+            temperature=float(ext_raw.get("temperature", 0.2)),
+        )
 
     return llm
 
@@ -251,11 +306,32 @@ def _parse_telegraph(raw: Dict[str, Any]) -> TelegraphConfig:
     )
 
 
+def _parse_sources(raw: Dict[str, Any]) -> SourcesConfig:
+    sources_raw = raw.get("sources") or {}
+    channels_raw = sources_raw.get("channels") or []
+    targets_raw = sources_raw.get("digest_targets") or {}
+
+    channels = []
+    for ch in channels_raw:
+        channels.append(SourceChannel(
+            name=str(ch.get("name", "")),
+            url=str(ch.get("url", "")),
+            country=str(ch.get("country", "")).lower(),
+            language=str(ch.get("language", "ru")),
+        ))
+
+    digest_targets = {str(k).lower(): str(v) for k, v in targets_raw.items()}
+
+    return SourcesConfig(channels=channels, digest_targets=digest_targets)
+
+
 def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
     """
     Convert the raw TOML dict into typed AppConfig.
     Raises KeyError/ValueError if required sections/fields are missing or invalid.
     """
+    sources = _parse_sources(raw)
+
     return AppConfig(
         telegram=_parse_telegram(raw),
         bot=_parse_bot(raw),
@@ -263,6 +339,7 @@ def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
         storage=_parse_storage(raw),
         logging=_parse_logging(raw),
         telegraph=_parse_telegraph(raw),
+        sources=sources,
     )
 
 

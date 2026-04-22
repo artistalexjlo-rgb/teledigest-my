@@ -1,0 +1,16 @@
+.git/
+.github/
+.vscode/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.session
+*.session-journal
+*.db
+*.conf
+.env
+data/
+tests/
+qa_*.txt
+start.bat
+*.md

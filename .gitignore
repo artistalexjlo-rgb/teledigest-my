@@ -18,6 +18,16 @@ venv/
 
 #  Environment / secrets
 .env
+teledigest.conf
+*.conf
+
+# Data / runtime
+data/
+qa_check.txt
+qa_latest.txt
+qa_stats.txt
+start.bat
+*_old.py
 
 # OS files
 .DS_Store

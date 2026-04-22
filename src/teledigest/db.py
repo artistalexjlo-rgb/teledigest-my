@@ -56,7 +56,9 @@ def get_db_connection() -> Iterator[sqlite3.Connection]:
 
 
 def init_db() -> None:
-    """Initialize the database schema."""
+    """Initialize the database schema (messages + knowledge tables)."""
+    from .knowledge_db import init_knowledge_tables
+
     db_path = get_config().storage.db_path
     log.info("Initializing SQLite database at %s", db_path)
 
@@ -70,10 +72,25 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 channel TEXT NOT NULL,
                 date TEXT NOT NULL,
-                text TEXT NOT NULL
+                text TEXT NOT NULL,
+                reply_to_msg_id TEXT DEFAULT NULL,
+                sender_id INTEGER DEFAULT NULL,
+                is_bot INTEGER DEFAULT 0
             )
             """
         )
+
+        # Add columns if upgrading from old schema
+        for col, coldef in [
+            ("reply_to_msg_id", "TEXT DEFAULT NULL"),
+            ("sender_id", "INTEGER DEFAULT NULL"),
+            ("is_bot", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE messages ADD COLUMN {col} {coldef}")
+                log.info("Added %s column to messages table.", col)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
         # Add indices for common queries
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date)")
@@ -99,8 +116,19 @@ def init_db() -> None:
             log.error("Failed to create FTS5 table: %s", e)
             raise DatabaseError(f"FTS5 initialization failed: {e}") from e
 
+    # Initialize knowledge base tables
+    init_knowledge_tables()
 
-def save_message(msg_id: str, channel: str, date: dt.datetime, text: str) -> None:
+
+def save_message(
+    msg_id: str,
+    channel: str,
+    date: dt.datetime,
+    text: str,
+    reply_to_msg_id: str | None = None,
+    sender_id: int | None = None,
+    is_bot: bool = False,
+) -> None:
     """
     Save a message to the database.
 
@@ -109,6 +137,9 @@ def save_message(msg_id: str, channel: str, date: dt.datetime, text: str) -> Non
         channel: Channel name
         date: Message timestamp
         text: Message content
+        reply_to_msg_id: ID of the message this is replying to (if any)
+        sender_id: Telegram user/bot ID of the sender
+        is_bot: Whether the sender is a bot
 
     Raises:
         DatabaseError: If save operation fails
@@ -126,10 +157,10 @@ def save_message(msg_id: str, channel: str, date: dt.datetime, text: str) -> Non
             # Insert into main table
             cur.execute(
                 """
-                INSERT OR IGNORE INTO messages (id, channel, date, text)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO messages (id, channel, date, text, reply_to_msg_id, sender_id, is_bot)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (msg_id, channel, iso, text),
+                (msg_id, channel, iso, text, reply_to_msg_id, sender_id, int(is_bot)),
             )
 
             # Only mirror to FTS when the row was actually inserted.
@@ -285,6 +316,51 @@ def get_relevant_messages_for_range(
 
     # Fallback to simple scan
     return get_messages_for_range(start, end, limit=max_docs)
+
+
+def delete_bot_messages() -> int:
+    """Delete all messages from bots (is_bot=1) from both messages and FTS tables."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Get IDs to delete from FTS too
+            cur.execute("SELECT id FROM messages WHERE is_bot = 1")
+            bot_ids = [row[0] for row in cur.fetchall()]
+            if not bot_ids:
+                log.info("No bot messages to delete.")
+                return 0
+            # Delete from FTS
+            for bid in bot_ids:
+                try:
+                    cur.execute("DELETE FROM messages_fts WHERE id = ?", (bid,))
+                except sqlite3.OperationalError:
+                    pass
+            # Delete from main table
+            cur.execute("DELETE FROM messages WHERE is_bot = 1")
+            count = cur.rowcount
+            log.info("Deleted %d bot messages from database.", count)
+            return count
+    except sqlite3.Error as e:
+        log.error("Failed to delete bot messages: %s", e)
+        raise DatabaseError(f"Failed to delete bot messages: {e}") from e
+
+
+def clear_knowledge_for_reextraction() -> None:
+    """Clear knowledge and extraction_log tables for a fresh re-extraction."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM knowledge")
+            k_count = cur.rowcount
+            cur.execute("DELETE FROM extraction_log")
+            e_count = cur.rowcount
+            log.info(
+                "Cleared knowledge (%d entries) and extraction_log (%d entries) for re-extraction.",
+                k_count, e_count,
+            )
+    except sqlite3.Error as e:
+        log.error("Failed to clear knowledge tables: %s", e)
+        raise DatabaseError(f"Failed to clear knowledge tables: {e}") from e
 
 
 def get_relevant_messages_for_day(day: dt.date, max_docs: int = 1000) -> list[Message]:
