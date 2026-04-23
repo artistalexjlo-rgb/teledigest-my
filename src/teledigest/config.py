@@ -242,7 +242,7 @@ def _parse_bot(raw: Dict[str, Any]) -> BotConfig:
 def _parse_storage(raw: Dict[str, Any]) -> StorageConfig:
     storage_raw = raw.get("storage") or {}
     rag_raw = storage_raw.get("rag") or {}
-    db_path_str = storage_raw.get("db_path", "data/messages_fts.db")
+    db_path_str = storage_raw.get("db_path", "/data/messages_fts.db")
     keywords = rag_raw.get("keywords") or []
     return StorageConfig(db_path=Path(db_path_str), rag_keywords=keywords)
 
