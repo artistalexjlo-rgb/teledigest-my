@@ -63,17 +63,22 @@ def clear_conv(user_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 def main_menu_keyboard():
-    """Main menu inline keyboard."""
-    return [
-        [
-            Button.inline("📡 Источники", b"menu:sources"),
-            Button.inline("📊 Статус", b"menu:status"),
+    """Persistent reply keyboard — always visible at bottom."""
+    from telethon.tl.types import ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButton
+    return ReplyKeyboardMarkup(
+        rows=[
+            KeyboardButtonRow(buttons=[
+                KeyboardButton(text="📡 Источники"),
+                KeyboardButton(text="📊 Статус"),
+            ]),
+            KeyboardButtonRow(buttons=[
+                KeyboardButton(text="📰 Дайджест"),
+                KeyboardButton(text="🧠 МОЗГ инфо"),
+            ]),
         ],
-        [
-            Button.inline("📰 Дайджест", b"menu:digest"),
-            Button.inline("🧠 МОЗГ инфо", b"menu:brain"),
-        ],
-    ]
+        resize=True,
+        persistent=True,
+    )
 
 
 def sources_menu_keyboard():
@@ -319,18 +324,33 @@ async def _show_brain_info(event) -> None:
 
 async def handle_text_in_conversation(event) -> bool:
     """
-    Handle text input during a multi-step dialog.
+    Handle text input during a multi-step dialog or reply keyboard press.
 
-    Returns True if message was consumed by dialog, False if not in dialog.
+    Returns True if message was consumed, False if not.
     """
     user_id = event.sender_id
+    text = (event.raw_text or "").strip()
+    if not text:
+        return False
+
+    # --- Reply keyboard buttons ---
+    if text == "📡 Источники":
+        await _list_sources_reply(event)
+        return True
+    if text == "📊 Статус":
+        await _show_status_reply(event)
+        return True
+    if text == "📰 Дайджест":
+        await event.reply("Используй /today для генерации дайджеста.")
+        return True
+    if text == "🧠 МОЗГ инфо":
+        await _show_brain_info_reply(event)
+        return True
+
+    # --- Multi-step dialog ---
     conv = get_conv(user_id)
 
     if not conv.step:
-        return False
-
-    text = (event.raw_text or "").strip()
-    if not text:
         return False
 
     # Step: waiting for country name
@@ -385,6 +405,71 @@ async def handle_text_in_conversation(event) -> bool:
         return True
 
     return False
+
+
+async def _list_sources_reply(event) -> None:
+    """Show all active sources — reply version."""
+    countries = get_active_countries()
+    if not countries:
+        await event.reply("Нет активных источников.\n\nИспользуй /menu → ➕ Добавить страну")
+        return
+
+    lines = ["📡 <b>Активные источники:</b>\n"]
+    for code in countries:
+        name = COUNTRY_NAMES.get(code, code.upper())
+        sources = get_active_sources(code)
+        digest = get_digest_target(code)
+        lines.append(f"<b>{name}</b>")
+        for s in sources:
+            lines.append(f"  • {s['name'] or s['url']}")
+        if digest:
+            lines.append(f"  📰 → {digest}")
+        lines.append("")
+
+    await event.reply("\n".join(lines), parse_mode="html")
+
+
+async def _show_status_reply(event) -> None:
+    """Show bot status — reply version."""
+    from .db import get_db_connection
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        msg_count = cur.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+
+    countries = get_active_countries()
+    total_sources = len(get_active_sources())
+
+    lines = [
+        "📊 <b>Статус бота:</b>\n",
+        f"💬 Сообщений: {msg_count:,}",
+        f"🧠 Записей в базе: {kb_count:,}",
+        f"🌍 Стран: {len(countries)} ({', '.join(countries)})",
+        f"📡 Источников: {total_sources}",
+    ]
+    await event.reply("\n".join(lines), parse_mode="html")
+
+
+async def _show_brain_info_reply(event) -> None:
+    """МОЗГ info — reply version."""
+    from .db import get_db_connection
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+        cats = cur.execute(
+            "SELECT category, COUNT(*) FROM knowledge WHERE is_outdated=0 GROUP BY category ORDER BY COUNT(*) DESC"
+        ).fetchall()
+
+    lines = [
+        "🧠 <b>МОЗГ — база знаний:</b>\n",
+        f"Всего записей: {kb_count:,}\n",
+        "<b>По категориям:</b>",
+    ]
+    for cat, cnt in cats:
+        lines.append(f"  • {cat}: {cnt}")
+    lines.append("\nЧтобы спросить, напиши в чат упоминая бота.")
+
+    await event.reply("\n".join(lines), parse_mode="html")
 
 
 async def _finish_add_from_reply(event) -> None:

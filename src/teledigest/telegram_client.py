@@ -776,10 +776,11 @@ def _session_paths(cfg: AppConfig) -> tuple[Path, Path]:
 # ---------------------------------------------------------------------------
 
 async def menu_command(event):
-    """Handle /menu — show interactive keyboard."""
+    """Handle /menu — show persistent reply keyboard."""
     if not await is_user_allowed(event):
         return
-    await event.reply("Главное меню:", buttons=main_menu_keyboard())
+    markup = main_menu_keyboard()
+    await event.respond("Главное меню:", reply_markup=markup)
 
 
 async def menu_callback_handler(event):
