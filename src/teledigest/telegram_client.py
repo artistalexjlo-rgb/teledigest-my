@@ -772,6 +772,38 @@ def _session_paths(cfg: AppConfig) -> tuple[Path, Path]:
 
 
 # ---------------------------------------------------------------------------
+# Dynamic channel subscription (called from bot_menu on add)
+# ---------------------------------------------------------------------------
+
+async def subscribe_channel(url: str) -> str | None:
+    """
+    Subscribe user_client to a channel at runtime.
+    Returns channel name on success, None on failure.
+    """
+    global scraped_chat_ids
+    try:
+        ent = await user_client.get_entity(url)
+        peer_id = await user_client.get_peer_id(ent)
+
+        username = getattr(ent, "username", None)
+        name = username if username else str(peer_id)
+        chat_id_to_name[peer_id] = name
+
+        try:
+            await user_client(JoinChannelRequest(ent))
+            log.info("Subscribed to channel: %s", url)
+        except Exception as e:
+            log.warning("Could not join %s (maybe already joined): %s", url, e)
+
+        scraped_chat_ids.add(peer_id)
+        _url_to_peer_id[url] = peer_id
+        return name
+    except Exception as e:
+        log.warning("Cannot resolve channel %s: %s", url, e)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Menu & conversation handlers
 # ---------------------------------------------------------------------------
 

@@ -228,7 +228,7 @@ async def _finish_add(event) -> None:
         lines.append(f"\nДайджест → {digest}")
     else:
         lines.append("\nДайджест: не настроен")
-    lines.append("\n⚡ Парсинг начнётся автоматически при следующем запуске.")
+    lines.append("\n⚡ Парсинг уже запущен.")
 
     clear_conv(event.sender_id)
     await event.edit("\n".join(lines), buttons=back_to_main_keyboard())
@@ -368,12 +368,21 @@ async def handle_text_in_conversation(event) -> bool:
             )
             return True
 
-        # Try to add
-        sid = add_source(conv.country_code, url, name=url)
+        # Try to add and subscribe
+        from .telegram_client import subscribe_channel
+        channel_name = await subscribe_channel(url)
+        if not channel_name:
+            await event.reply(
+                f"❌ Не удалось подключиться к {url}. Проверь ссылку.",
+                buttons=[[Button.inline("◀️ Назад", b"menu:sources")]],
+            )
+            return True
+
+        sid = add_source(conv.country_code, url, name=channel_name)
         if sid:
             conv.channels_added += 1
             await event.reply(
-                f"✅ Канал добавлен: {url}\n"
+                f"✅ Канал подключён: {channel_name}\n"
                 f"(всего для {conv.country_name}: {conv.channels_added})",
                 buttons=after_channel_keyboard(),
             )
@@ -479,7 +488,7 @@ async def _finish_add_from_reply(event) -> None:
         lines.append(f"  • {s['name'] or s['url']}")
     if digest:
         lines.append(f"\nДайджест → {digest}")
-    lines.append("\n⚡ Парсинг начнётся автоматически при следующем запуске.")
+    lines.append("\n⚡ Парсинг уже запущен.")
 
     clear_conv(event.sender_id)
     await event.reply("\n".join(lines), buttons=back_to_main_keyboard())
