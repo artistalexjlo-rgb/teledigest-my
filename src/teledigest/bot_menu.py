@@ -415,7 +415,13 @@ async def _list_sources_reply(event) -> None:
             lines.append(f"  📰 → {digest}")
         lines.append("")
 
-    await event.reply("\n".join(lines), parse_mode="html")
+    await event.reply(
+        "\n".join(lines),
+        parse_mode="html",
+        buttons=[
+            [Button.inline("➕ Добавить страну", b"src:add")],
+        ],
+    )
 
 
 async def _show_status_reply(event) -> None:
