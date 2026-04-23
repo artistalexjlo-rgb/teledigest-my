@@ -47,6 +47,7 @@ COUNTRY_MAP: dict[str, str] = {
     "марокко": "ma",
     "шри-ланка": "lk",
     "шриланка": "lk",
+    "шри ланка": "lk",
     "малайзия": "my",
     "парагвай": "py",
     "уругвай": "uy",
@@ -123,6 +124,14 @@ def resolve_country(text: str) -> tuple[str, str] | None:
     Returns None if not recognized.
     """
     text = text.strip().lower()
+
+    # Try original, then with dash, then without separators
+    variants = [text, text.replace(" ", "-"), text.replace("-", " "), text.replace(" ", "").replace("-", "")]
+
+    for t in variants:
+        if t in COUNTRY_MAP:
+            code = COUNTRY_MAP[t]
+            return code, COUNTRY_NAMES.get(code, code.upper())
 
     # Direct code match
     if text in COUNTRY_NAMES:
