@@ -779,8 +779,7 @@ async def menu_command(event):
     """Handle /menu — show persistent reply keyboard."""
     if not await is_user_allowed(event):
         return
-    markup = main_menu_keyboard()
-    await event.respond("Главное меню:", reply_markup=markup)
+    await event.reply("Главное меню:", buttons=main_menu_keyboard())
 
 
 async def menu_callback_handler(event):

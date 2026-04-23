@@ -64,21 +64,10 @@ def clear_conv(user_id: int) -> None:
 
 def main_menu_keyboard():
     """Persistent reply keyboard — always visible at bottom."""
-    from telethon.tl.types import ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButton
-    return ReplyKeyboardMarkup(
-        rows=[
-            KeyboardButtonRow(buttons=[
-                KeyboardButton(text="📡 Источники"),
-                KeyboardButton(text="📊 Статус"),
-            ]),
-            KeyboardButtonRow(buttons=[
-                KeyboardButton(text="📰 Дайджест"),
-                KeyboardButton(text="🧠 МОЗГ инфо"),
-            ]),
-        ],
-        resize=True,
-        persistent=True,
-    )
+    return [
+        [Button.text("📡 Источники", resize=True), Button.text("📊 Статус", resize=True)],
+        [Button.text("📰 Дайджест", resize=True), Button.text("🧠 МОЗГ инфо", resize=True)],
+    ]
 
 
 def sources_menu_keyboard():
