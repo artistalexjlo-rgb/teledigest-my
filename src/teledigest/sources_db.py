@@ -13,141 +13,21 @@ from typing import Any
 
 from .config import log
 from .db import get_db_connection
+from .country_codes import resolve_country as _resolve, display_name, COUNTRIES
 
-
-# ---------------------------------------------------------------------------
-# Country name → code mapping
-# ---------------------------------------------------------------------------
-
-COUNTRY_MAP: dict[str, str] = {
-    # Russian names
-    "бразилия": "br",
-    "турция": "tr",
-    "таиланд": "th",
-    "португалия": "pt",
-    "испания": "es",
-    "италия": "it",
-    "грузия": "ge",
-    "армения": "am",
-    "сербия": "rs",
-    "черногория": "me",
-    "аргентина": "ar",
-    "мексика": "mx",
-    "индонезия": "id",
-    "вьетнам": "vn",
-    "оаэ": "ae",
-    "эмираты": "ae",
-    "кипр": "cy",
-    "германия": "de",
-    "франция": "fr",
-    "чехия": "cz",
-    "польша": "pl",
-    "израиль": "il",
-    "египет": "eg",
-    "марокко": "ma",
-    "шри-ланка": "lk",
-    "шриланка": "lk",
-    "шри ланка": "lk",
-    "малайзия": "my",
-    "парагвай": "py",
-    "уругвай": "uy",
-    "чили": "cl",
-    "колумбия": "co",
-    "перу": "pe",
-    "боливия": "bo",
-    "эквадор": "ec",
-    "доминикана": "do",
-    "куба": "cu",
-    "коста-рика": "cr",
-    "панама": "pa",
-    # English / short codes
-    "brazil": "br",
-    "turkey": "tr",
-    "thailand": "th",
-    "portugal": "pt",
-    "spain": "es",
-    "italy": "it",
-    "georgia": "ge",
-    "argentina": "ar",
-    "mexico": "mx",
-    "indonesia": "id",
-    "vietnam": "vn",
-    "uae": "ae",
-}
-
-# Reverse: code → display name (Russian)
-COUNTRY_NAMES: dict[str, str] = {
-    "br": "🇧🇷 Бразилия",
-    "tr": "🇹🇷 Турция",
-    "th": "🇹🇭 Таиланд",
-    "pt": "🇵🇹 Португалия",
-    "es": "🇪🇸 Испания",
-    "it": "🇮🇹 Италия",
-    "ge": "🇬🇪 Грузия",
-    "am": "🇦🇲 Армения",
-    "rs": "🇷🇸 Сербия",
-    "me": "🇲🇪 Черногория",
-    "ar": "🇦🇷 Аргентина",
-    "mx": "🇲🇽 Мексика",
-    "id": "🇮🇩 Индонезия",
-    "vn": "🇻🇳 Вьетнам",
-    "ae": "🇦🇪 ОАЭ",
-    "cy": "🇨🇾 Кипр",
-    "de": "🇩🇪 Германия",
-    "fr": "🇫🇷 Франция",
-    "cz": "🇨🇿 Чехия",
-    "pl": "🇵🇱 Польша",
-    "il": "🇮🇱 Израиль",
-    "eg": "🇪🇬 Египет",
-    "ma": "🇲🇦 Марокко",
-    "lk": "🇱🇰 Шри-Ланка",
-    "my": "🇲🇾 Малайзия",
-    "py": "🇵🇾 Парагвай",
-    "uy": "🇺🇾 Уругвай",
-    "cl": "🇨🇱 Чили",
-    "co": "🇨🇴 Колумбия",
-    "pe": "🇵🇪 Перу",
-    "bo": "🇧🇴 Боливия",
-    "ec": "🇪🇨 Эквадор",
-    "do": "🇩🇴 Доминикана",
-    "cu": "🇨🇺 Куба",
-    "cr": "🇨🇷 Коста-Рика",
-    "pa": "🇵🇦 Панама",
-}
+# Display names from country_codes.py
+COUNTRY_NAMES: dict[str, str] = {code: f"{flag} {name}" for code, (name, flag) in COUNTRIES.items()}
 
 
 def resolve_country(text: str) -> tuple[str, str] | None:
     """
     Resolve user input to (country_code, display_name).
-
-    Accepts: full name in Russian/English, ISO code, partial match.
-    Returns None if not recognized.
+    Delegates to country_codes.resolve_country().
     """
-    text = text.strip().lower()
-
-    # Try original, then with dash, then without separators
-    variants = [text, text.replace(" ", "-"), text.replace("-", " "), text.replace(" ", "").replace("-", "")]
-
-    for t in variants:
-        if t in COUNTRY_MAP:
-            code = COUNTRY_MAP[t]
-            return code, COUNTRY_NAMES.get(code, code.upper())
-
-    # Direct code match
-    if text in COUNTRY_NAMES:
-        return text, COUNTRY_NAMES[text]
-
-    # Full name match
-    if text in COUNTRY_MAP:
-        code = COUNTRY_MAP[text]
-        return code, COUNTRY_NAMES.get(code, code.upper())
-
-    # Prefix match (e.g. "тур" → "турция")
-    candidates = [(k, v) for k, v in COUNTRY_MAP.items() if k.startswith(text)]
-    if len(candidates) == 1:
-        code = candidates[0][1]
-        return code, COUNTRY_NAMES.get(code, code.upper())
-
+    result = _resolve(text)
+    if result:
+        code, name, flag = result
+        return code, f"{flag} {name}"
     return None
 
 
