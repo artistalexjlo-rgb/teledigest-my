@@ -162,6 +162,20 @@ async def handle_callback(event) -> None:
     elif data == "src:skip_digest":
         await _finish_add(event)
 
+    elif data.startswith("src:edit_digest:"):
+        code = data.split(":")[2]
+        conv = get_conv(event.sender_id)
+        conv.step = "await_digest_target"
+        conv.country_code = code
+        conv.country_name = COUNTRY_NAMES.get(code, code.upper())
+        current = get_digest_target(code) or "не задан"
+        await event.edit(
+            f"✏️ Изменить дайджест для {conv.country_name}\n"
+            f"Сейчас: {current}\n\n"
+            "Отправь новый @username канала:",
+            buttons=[[Button.inline("◀️ Отмена", b"src:list")]],
+        )
+
     await event.answer()
 
 
@@ -424,11 +438,21 @@ async def _list_sources_reply(event) -> None:
             lines.append(f"  📰 → {digest}")
         lines.append("")
 
+    # Build per-country edit buttons
+    country_buttons = [
+        [Button.inline(
+            f"✏️ Дайджест {COUNTRY_NAMES.get(code, code.upper())}",
+            f"src:edit_digest:{code}".encode()
+        )]
+        for code in get_active_countries()
+    ]
+
     await event.reply(
         "\n".join(lines),
         parse_mode="html",
         buttons=[
             [Button.inline("➕ Добавить страну", b"src:add")],
+            *country_buttons,
         ],
     )
 
