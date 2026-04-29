@@ -86,3 +86,49 @@ def test_build_channel_country_map_includes_all_keys(app_config: cfg.AppConfig) 
     assert mapping["Brazil Chat Forum"] == "br"      # name with spaces
     assert mapping["balichat"] == "id"               # via url + via name
     assert mapping["-1001646838441"] == "mu"
+
+
+# ---------------------------------------------------------------------------
+# sources.chat_id (added in feat/sources-chat-id PR)
+# ---------------------------------------------------------------------------
+
+
+def test_set_source_chat_id_persists(app_config: cfg.AppConfig) -> None:
+    sources_db.set_source_chat_id("@Brazil_ChatForum", -1001234567890)
+    conn = sqlite3.connect(app_config.storage.db_path)
+    row = conn.execute(
+        "SELECT chat_id FROM sources WHERE url = '@Brazil_ChatForum'"
+    ).fetchone()
+    conn.close()
+    assert row == (-1001234567890,)
+
+
+def test_set_source_chat_id_no_match_is_noop(app_config: cfg.AppConfig) -> None:
+    # url not in sources — must not raise
+    sources_db.set_source_chat_id("@nonexistent", 12345)
+
+
+def test_resolve_country_via_chat_id(app_config: cfg.AppConfig) -> None:
+    # Simulate Telethon resolving the invite-link source to a numeric chat_id
+    sources_db.set_source_chat_id("https://t.me/+iVaiJserqqNkNTc6", -1001646838441)
+    # The pre-existing sources.name='-1001646838441' already matches by rule #2,
+    # but now we also have rule #1 via chat_id. Use a fresh row to isolate.
+    conn = sqlite3.connect(app_config.storage.db_path)
+    conn.execute(
+        "INSERT INTO sources (country, url, name, language, added_at, chat_id) "
+        "VALUES ('lk', 'https://t.me/+sri_lanka_link', 'https://t.me/+sri_lanka_link', "
+        "'ru', '2026-04-24T00:00:00', -1001605996131)"
+    )
+    conn.commit()
+    conn.close()
+    # name='https://...' and url-handle='+sri_lanka_link' would NOT match
+    # the numeric channel; only the chat_id rule resolves it.
+    assert sources_db.resolve_country_for_channel("-1001605996131") == "lk"
+
+
+def test_build_channel_country_map_includes_chat_id(app_config: cfg.AppConfig) -> None:
+    sources_db.set_source_chat_id("https://t.me/+iVaiJserqqNkNTc6", -1001646838441)
+    sources_db.set_source_chat_id("@Brazil_ChatForum", -1001631614451)
+    mapping = sources_db.build_channel_country_map()
+    assert mapping["-1001646838441"] == "mu"
+    assert mapping["-1001631614451"] == "br"
