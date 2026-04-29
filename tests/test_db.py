@@ -475,6 +475,7 @@ def _seed_sources(db_path: Path) -> None:
             digest_target TEXT DEFAULT NULL,
             active INTEGER NOT NULL DEFAULT 1,
             added_at TEXT NOT NULL,
+            chat_id INTEGER DEFAULT NULL,
             UNIQUE(country, url)
         )
         """

@@ -49,14 +49,41 @@ def init_sources_table() -> None:
                 digest_target TEXT DEFAULT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
                 added_at TEXT NOT NULL,
+                chat_id INTEGER DEFAULT NULL,
                 UNIQUE(country, url)
             )
         """)
+        # Upgrade path: add chat_id column to existing tables.
+        try:
+            cur.execute("ALTER TABLE sources ADD COLUMN chat_id INTEGER DEFAULT NULL")
+            log.info("Added chat_id column to sources table.")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_sources_country
             ON sources(country)
         """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sources_chat_id
+            ON sources(chat_id)
+        """)
         log.info("Sources table initialized.")
+
+
+def set_source_chat_id(url: str, chat_id: int) -> None:
+    """
+    Persist the resolved Telegram peer_id for a source row identified by url.
+
+    Called after Telethon resolves the channel — lets backfill match invite-link
+    sources (whose `messages.channel` value is a numeric chat_id, not a handle).
+    No-op if no row matches the url.
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE sources SET chat_id = ? WHERE url = ? AND (chat_id IS NULL OR chat_id != ?)",
+            (chat_id, url, chat_id),
+        )
 
 
 def migrate_from_config(channels: list[dict[str, str]],
@@ -211,8 +238,11 @@ def resolve_country_for_channel(channel: str) -> str | None:
     Resolve a `messages.channel` value to a country code via the `sources` table.
 
     Matching rules (first hit wins):
-        1. sources.name == channel  (covers numeric chat_ids stored in name)
-        2. handle extracted from sources.url == channel
+        1. sources.chat_id (as string) == channel  (covers invite-link channels
+           whose messages.channel value is a Telegram peer_id like '-1001631614451')
+        2. sources.name == channel  (covers numeric chat_ids stored in name
+           by older code paths)
+        3. handle extracted from sources.url == channel
            ('@Brazil_ChatForum' -> 'Brazil_ChatForum'; 'https://t.me/balichat' -> 'balichat')
 
     Args:
@@ -225,9 +255,11 @@ def resolve_country_for_channel(channel: str) -> str | None:
         return None
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT country, url, name FROM sources WHERE active = 1")
+        cur.execute("SELECT country, url, name, chat_id FROM sources WHERE active = 1")
         rows = cur.fetchall()
-    for country, url, name in rows:
+    for country, url, name, chat_id in rows:
+        if chat_id is not None and str(chat_id) == channel:
+            return country
         if name and name == channel:
             return country
         handle = _normalize_url_handle(url or "")
@@ -240,14 +272,17 @@ def build_channel_country_map() -> dict[str, str]:
     """
     Build a {channel_value -> country_code} map from all active sources.
 
-    Used at startup to populate an in-memory cache. Includes both the `name`
-    field and the URL-extracted handle as separate keys for the same country.
+    Used at startup to populate an in-memory cache. Includes the resolved
+    chat_id (as string), the `name` field, and the URL-extracted handle as
+    separate keys for the same country.
     """
     mapping: dict[str, str] = {}
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT country, url, name FROM sources WHERE active = 1")
-        for country, url, name in cur.fetchall():
+        cur.execute("SELECT country, url, name, chat_id FROM sources WHERE active = 1")
+        for country, url, name, chat_id in cur.fetchall():
+            if chat_id is not None:
+                mapping[str(chat_id)] = country
             if name:
                 mapping[name] = country
             handle = _normalize_url_handle(url or "")

@@ -22,7 +22,7 @@ from .telegraph import post_to_telegraph
 from .knowledge_search import is_brain_query, search_and_format
 from .sources_db import (
     init_sources_table, migrate_from_config, get_active_sources,
-    get_active_countries, get_digest_target,
+    get_active_countries, get_digest_target, set_source_chat_id,
 )
 from .bot_menu import (
     handle_callback, handle_text_in_conversation, get_conv,
@@ -676,6 +676,12 @@ async def ensure_joined_and_resolve_channels():
                 source_chat_id_to_country[peer_id] = country
             else:
                 log.warning("No country mapping for source channel %s", ch)
+            # Persist peer_id back to sources so backfill can match invite-link
+            # channels (whose messages.channel is the numeric chat_id, not handle)
+            try:
+                set_source_chat_id(ch, peer_id)
+            except Exception as e:
+                log.warning("Failed to persist sources.chat_id for %s: %s", ch, e)
             log.info("Will scrape chat %s (peer_id=%s, country=%s)", name, peer_id, country)
 
         except Exception as e:
@@ -729,6 +735,21 @@ async def ensure_joined_and_resolve_channels():
                 )
         except Exception as e:
             log.warning("Bot cannot resolve digest target %s: %s", target, e)
+
+    # --- 3. Re-run country backfill now that sources.chat_id is populated ---
+    # The startup-time backfill (in main._run) ran before Telethon resolved
+    # invite-link sources, so it could not match their numeric chat_ids.
+    # Doing it here, after resolve, picks up rows that were left as NULL.
+    try:
+        from .db import backfill_message_countries
+        matched, unmatched = backfill_message_countries()
+        if matched or unmatched:
+            log.info(
+                "Post-resolve country backfill: matched=%d unmatched=%d",
+                matched, unmatched,
+            )
+    except Exception as e:
+        log.error("Post-resolve country backfill failed: %s", e)
 
 
 async def backfill_history(limit: int = 1000):
@@ -830,6 +851,10 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
         _url_to_peer_id[url] = peer_id
         if country:
             source_chat_id_to_country[peer_id] = country
+        try:
+            set_source_chat_id(url, peer_id)
+        except Exception as e:
+            log.warning("Failed to persist sources.chat_id for %s: %s", url, e)
         return name
     except Exception as e:
         log.warning("Cannot resolve channel %s: %s", url, e)
