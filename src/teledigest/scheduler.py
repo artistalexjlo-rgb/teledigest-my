@@ -61,25 +61,30 @@ async def _post_digest(bot_client, target: str, day: dt.date, messages, country:
 
 def _run_daily_understanding(day: dt.date, country: str) -> int:
     """
-    Daily understanding pipeline:
-    1. Build artifact from day's messages (heuristic, no LLM)
+    Daily understanding pipeline (per country):
+    1. Build artifact from day's messages — scoped to this country's channels
     2. Extract claims from artifact
     3. Load claims into knowledge table via merger
 
     Returns number of new claims loaded.
     """
-    cfg = get_config()
-    country_channels = cfg.sources.channels_for_country(country)
-    channel_names = []
-    # We need chat names as stored in DB, not URLs
-    # Channel names in DB are usernames (e.g. "Brazil_ChatForum")
-    # For now pass None to include all channels for the day
-    # (daily artifact filters by is_bot already)
+    from .sources_db import get_channel_values_for_country
 
-    artifact = build_daily_artifact(day, channels=None)
+    channel_values = get_channel_values_for_country(country)
+    if not channel_values:
+        log.warning(
+            "Daily understanding skipped for country=%s: no channels in sources DB.",
+            country,
+        )
+        return 0
+
+    artifact = build_daily_artifact(day, channels=list(channel_values))
 
     if artifact["claims_count"] == 0:
-        log.info("No claims extracted for %s (country=%s)", day.isoformat(), country)
+        log.info(
+            "No claims extracted for %s (country=%s, %d messages)",
+            day.isoformat(), country, artifact["messages_count"],
+        )
         return 0
 
     claims = artifact_claims_as_dicts(artifact)
@@ -130,9 +135,12 @@ async def summary_scheduler():
                 log.info("Marked %d knowledge entries as outdated.", outdated)
 
             # --- STEP 1: Daily understanding (heuristic, no LLM) ---
-            # Build artifact from yesterday's messages and load claims
+            # Build artifact from yesterday's messages and load claims.
+            # Country list comes from the sources DB — that is the authoritative
+            # source for active countries. Static config is only bootstrap.
+            from .sources_db import get_active_countries
             yesterday = today - dt.timedelta(days=1)
-            countries = cfg.sources.countries()
+            countries = get_active_countries()
 
             if countries:
                 for country in countries:

@@ -207,6 +207,44 @@ def get_active_countries() -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
+def get_channels_for_country(country: str) -> list[dict[str, Any]]:
+    """
+    Active source channels for a country, read from the `sources` table.
+
+    Authoritative for runtime decisions (scheduler, extract, backfill commands).
+    The static config (`teledigest.conf [[sources.channels]]`) is only used as
+    bootstrap — `migrate_from_config` copies it into this table on startup.
+    """
+    return get_active_sources(country)
+
+
+def get_channel_values_for_country(country: str) -> set[str]:
+    """
+    Return all `messages.channel` values that belong to a country.
+
+    Combines every shape a channel value can take in the messages table:
+        - sources.chat_id (as string) — for invite-link channels
+        - sources.name — when name was set to numeric chat_id by older code paths
+        - URL handle (`@foo` -> `foo`, `https://t.me/foo` -> `foo`)
+
+    Used to scope queries against `messages` to a single country in modules
+    that already have country-aware paths but need to filter by channel
+    (e.g. daily_artifact._fetch_day_messages with explicit channel list).
+    """
+    values: set[str] = set()
+    for src in get_active_sources(country):
+        chat_id = src.get("chat_id")
+        if chat_id is not None:
+            values.add(str(chat_id))
+        name = src.get("name") or ""
+        if name:
+            values.add(name)
+        handle = _normalize_url_handle(src.get("url") or "")
+        if handle:
+            values.add(handle)
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Channel → country resolution
 # ---------------------------------------------------------------------------

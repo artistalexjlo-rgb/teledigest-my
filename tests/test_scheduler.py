@@ -234,3 +234,132 @@ async def test_summary_scheduler_handles_rpc_error_without_propagating(app_confi
 
     # The error was swallowed; the post-error sleep(65) still ran.
     assert sleep_durations == [65]
+
+
+# ---------------------------------------------------------------------------
+# End-to-end mini-pipeline: country-scoped daily understanding
+# (rule: per-country knowledge must be built ONLY from per-country messages)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def realdb_app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
+    """A config wired to a real (file) SQLite DB so we can exercise db queries."""
+    import sqlite3 as _sqlite
+    db_path = tmp_path / "messages_fts.db"
+    app_cfg = _make_app_config()
+    app_cfg.storage.db_path = db_path
+    monkeypatch.setattr(cfg, "_CONFIG", app_cfg, raising=False)
+
+    # Init schema like production does
+    from teledigest import db as _db
+    from teledigest import sources_db as _sdb
+    _db.init_db()
+    _sdb.init_sources_table()
+
+    # Seed sources: br (with digest_target) + lk (without)
+    conn = _sqlite.connect(db_path)
+    conn.executemany(
+        "INSERT INTO sources (country, url, name, language, added_at, chat_id, digest_target) "
+        "VALUES (?, ?, ?, 'ru', '2026-04-24T00:00:00', ?, ?)",
+        [
+            ("br", "@Brazil_ChatForum", "Brazil Chat Forum", -1001221994108, "@Digest_Br"),
+            ("lk", "https://t.me/+sri_lanka", "https://t.me/+sri_lanka", -1001605996131, None),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    return app_cfg
+
+
+def test_daily_understanding_only_uses_messages_from_its_country(realdb_app_config):
+    """
+    End-to-end mini-pipeline scenario:
+      Setup: 2 countries — br (with digest_target) and lk (without).
+      Insert 3 messages from a br-channel and 3 from an lk-channel.
+      Run _run_daily_understanding(day, 'br') and (day, 'lk').
+      Expectation:
+        - The artifact built for 'br' sees ONLY br-channel messages.
+        - The artifact built for 'lk' sees ONLY lk-channel messages.
+
+    Catches BUG #2 (claims from all countries mixed into each country's
+    knowledge) which was present before this PR.
+    """
+    from teledigest import db as _db
+    from teledigest import scheduler as _sched
+
+    day = real_dt.date(2026, 4, 28)
+    base = real_dt.datetime.combine(day, real_dt.time(12, 0), real_dt.timezone.utc)
+
+    # br-channel messages — channel name matches the URL handle of the br source
+    for i in range(3):
+        _db.save_message(
+            f"br_{i}", "Brazil_ChatForum", base + real_dt.timedelta(minutes=i),
+            f"br message about price reais {i}", country="br",
+        )
+    # lk-channel messages — channel value is the numeric chat_id (invite link)
+    for i in range(3):
+        _db.save_message(
+            f"lk_{i}", "-1001605996131", base + real_dt.timedelta(minutes=i),
+            f"lk message about visa rupees {i}", country="lk",
+        )
+
+    captured: dict[str, list[str] | None] = {}
+
+    def fake_build(day_arg, channels):
+        # Capture which channels were requested + manually filter messages
+        # exactly the way real _fetch_day_messages would.
+        captured.setdefault("calls", []).append(list(channels) if channels else None)
+        # Pull from the real DB, filtered by channels just like prod.
+        import sqlite3
+        conn = sqlite3.connect(realdb_app_config.storage.db_path)
+        rows = conn.execute(
+            "SELECT channel, text FROM messages WHERE substr(date,1,10) = ?",
+            (day_arg.isoformat(),),
+        ).fetchall()
+        conn.close()
+        if channels is not None:
+            rows = [r for r in rows if r[0] in channels]
+        return {
+            "day": day_arg.isoformat(),
+            "messages_count": len(rows),
+            "chains_count": 0,
+            "spans_count": 0,
+            "claims_count": 0,
+            "claims": [],
+            "_observed_channels": [r[0] for r in rows],
+        }
+
+    with patch.object(_sched, "build_daily_artifact", side_effect=fake_build):
+        _sched._run_daily_understanding(day, "br")
+        _sched._run_daily_understanding(day, "lk")
+
+    # 1. Every call to build_daily_artifact MUST receive a non-None channels list.
+    #    A None here means we regressed — daily understanding fell back to
+    #    "all channels" (the BUG #2 behaviour).
+    assert all(c is not None for c in captured["calls"]), (
+        "build_daily_artifact called without channel scope — BUG #2 regressed"
+    )
+
+    # 2. The br call must include the br URL handle and NOT the lk chat_id.
+    br_channels = captured["calls"][0]
+    assert "Brazil_ChatForum" in br_channels
+    assert "-1001605996131" not in br_channels
+
+    # 3. The lk call must include the lk chat_id and NOT the br URL handle.
+    lk_channels = captured["calls"][1]
+    assert "-1001605996131" in lk_channels
+    assert "Brazil_ChatForum" not in lk_channels
+
+
+def test_daily_understanding_skips_country_with_no_sources(realdb_app_config):
+    """If a country has no rows in `sources`, daily understanding logs a warning
+    and returns 0 — no fallback to all-messages."""
+    from teledigest import scheduler as _sched
+    day = real_dt.date(2026, 4, 28)
+
+    with patch.object(_sched, "build_daily_artifact") as build_mock:
+        loaded = _sched._run_daily_understanding(day, "xx")  # not in sources
+
+    assert loaded == 0
+    build_mock.assert_not_called()

@@ -392,9 +392,9 @@ async def brain_message_handler(event):
     country = chat_id_to_country.get(chat_id)
 
     if not country:
-        # DM with bot or unmapped chat — use first configured country as default
-        cfg = get_config()
-        countries = cfg.sources.countries()
+        # DM with bot or unmapped chat — use first active country as default.
+        # Pulled from sources DB so dynamically-added countries are visible.
+        countries = get_active_countries()
         if countries:
             country = countries[0]
         else:
@@ -419,11 +419,10 @@ async def backfill_command(event):
         return
 
     country = parts[1].strip().lower()
-    cfg = get_config()
-    country_channels = cfg.sources.channels_for_country(country)
+    country_channels = get_active_sources(country)
 
     if not country_channels:
-        available = ", ".join(cfg.sources.countries()) or "none"
+        available = ", ".join(get_active_countries()) or "none"
         await event.reply(
             f"{cross_mark} No channels configured for country '{country}'.\n"
             f"Available: {available}",
@@ -445,20 +444,20 @@ async def backfill_command(event):
 
     total = 0
     for ch in country_channels:
-        peer_id = _find_peer_id_for_url(ch.url)
+        peer_id = _find_peer_id_for_url(ch["url"])
         if peer_id is None:
-            await event.reply(f"Channel {ch.url} not resolved, skipping.")
+            await event.reply(f"Channel {ch['url']} not resolved, skipping.")
             continue
 
         try:
             count = await deep_backfill(
                 user_client, peer_id, chat_id_to_name[peer_id],
-                country, ch.language,
+                country, ch.get("language") or "ru",
             )
             total += count
-            await event.reply(f"{ok_mark} {ch.name}: {count} messages")
+            await event.reply(f"{ok_mark} {ch['name']}: {count} messages")
         except Exception as e:
-            await event.reply(f"{cross_mark} {ch.name}: {e}")
+            await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
     _backfill_running.discard(country)
     await event.reply(f"Backfill for <b>{country}</b> complete: {total} messages total.", parse_mode="html")
@@ -477,8 +476,7 @@ async def extract_command(event):
         return
 
     country = parts[1].strip().lower()
-    cfg = get_config()
-    country_channels = cfg.sources.channels_for_country(country)
+    country_channels = get_active_sources(country)
 
     if not country_channels:
         await event.reply(f"{cross_mark} No channels for country '{country}'.")
@@ -490,7 +488,7 @@ async def extract_command(event):
 
     total = 0
     for ch in country_channels:
-        peer_id = _find_peer_id_for_url(ch.url)
+        peer_id = _find_peer_id_for_url(ch["url"])
         if peer_id is None:
             continue
 
@@ -499,9 +497,9 @@ async def extract_command(event):
                 user_client, peer_id, chat_id_to_name[peer_id], country,
             )
             total += count
-            await event.reply(f"{ok_mark} {ch.name}: {count} Q&A pairs extracted")
+            await event.reply(f"{ok_mark} {ch['name']}: {count} Q&A pairs extracted")
         except Exception as e:
-            await event.reply(f"{cross_mark} {ch.name}: {e}")
+            await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
     await event.reply(f"Extraction for <b>{country}</b> complete: {total} Q&A pairs total.", parse_mode="html")
 
@@ -519,8 +517,7 @@ async def relink_command(event):
         return
 
     country = parts[1].strip().lower()
-    cfg = get_config()
-    country_channels = cfg.sources.channels_for_country(country)
+    country_channels = get_active_sources(country)
 
     if not country_channels:
         await event.reply(f"{cross_mark} No channels for country '{country}'.")
@@ -532,9 +529,9 @@ async def relink_command(event):
 
     total = 0
     for ch in country_channels:
-        peer_id = _find_peer_id_for_url(ch.url)
+        peer_id = _find_peer_id_for_url(ch["url"])
         if peer_id is None:
-            await event.reply(f"Channel {ch.url} not resolved, skipping.")
+            await event.reply(f"Channel {ch['url']} not resolved, skipping.")
             continue
 
         try:
@@ -542,9 +539,9 @@ async def relink_command(event):
                 user_client, peer_id, chat_id_to_name[peer_id],
             )
             total += updated
-            await event.reply(f"{ok_mark} {ch.name}: {updated} reply links updated")
+            await event.reply(f"{ok_mark} {ch['name']}: {updated} reply links updated")
         except Exception as e:
-            await event.reply(f"{cross_mark} {ch.name}: {e}")
+            await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
     await event.reply(f"Relink for <b>{country}</b> complete: {total} links total.", parse_mode="html")
 
