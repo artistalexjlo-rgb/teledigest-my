@@ -178,6 +178,15 @@ async def summary_scheduler():
                 messages = get_relevant_messages_last_24h(max_docs=cfg.llm.max_messages)
                 await _post_digest(bot_client, cfg.bot.summary_target, today, messages)
 
+            # --- STEP 3: Daily samples dump (raw chat by country/channel) ---
+            # Writes plain-text files alongside the DB for human/LLM review.
+            # Same `yesterday` window as STEP 1 so artifact and sample agree.
+            try:
+                from .daily_samples import dump_all_targets
+                dump_all_targets(yesterday)
+            except Exception as e:
+                log.error("Daily samples dump failed (non-fatal): %s", e)
+
             last_run_for = today
             await asyncio.sleep(65)
         else:

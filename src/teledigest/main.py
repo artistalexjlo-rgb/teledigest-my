@@ -75,6 +75,7 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
             log.error("Country backfill failed (non-fatal): %s", e)
 
 
+
     await create_clients()
     await start_clients(auth_only=auth_only)
 
