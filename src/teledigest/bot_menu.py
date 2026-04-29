@@ -384,7 +384,7 @@ async def handle_text_in_conversation(event) -> bool:
 
         # Try to add and subscribe
         from .telegram_client import subscribe_channel
-        channel_name = await subscribe_channel(url)
+        channel_name = await subscribe_channel(url, country=conv.country_code)
         if not channel_name:
             await event.reply(
                 f"❌ Не удалось подключиться к {url}. Проверь ссылку.",

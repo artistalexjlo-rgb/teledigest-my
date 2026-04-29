@@ -178,3 +178,79 @@ def get_active_countries() -> list[str]:
         cur = conn.cursor()
         cur.execute("SELECT DISTINCT country FROM sources WHERE active = 1 ORDER BY country")
         return [row[0] for row in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Channel → country resolution
+# ---------------------------------------------------------------------------
+
+def _normalize_url_handle(url: str) -> str | None:
+    """
+    Extract a comparable handle from a sources.url value.
+
+    Examples:
+        '@Brazil_ChatForum'           -> 'Brazil_ChatForum'
+        'https://t.me/balichat'       -> 'balichat'
+        'https://t.me/+invite_hash'   -> '+invite_hash' (invite links — won't match a channel name)
+        'http://t.me/foo/bar'         -> 'foo'
+    """
+    if not url:
+        return None
+    s = url.strip()
+    if s.startswith("@"):
+        return s[1:] or None
+    for prefix in ("https://t.me/", "http://t.me/", "tg://resolve?domain="):
+        if s.startswith(prefix):
+            tail = s[len(prefix):]
+            return tail.split("/")[0] or None
+    return None
+
+
+def resolve_country_for_channel(channel: str) -> str | None:
+    """
+    Resolve a `messages.channel` value to a country code via the `sources` table.
+
+    Matching rules (first hit wins):
+        1. sources.name == channel  (covers numeric chat_ids stored in name)
+        2. handle extracted from sources.url == channel
+           ('@Brazil_ChatForum' -> 'Brazil_ChatForum'; 'https://t.me/balichat' -> 'balichat')
+
+    Args:
+        channel: Value as stored in messages.channel — channel username or numeric chat_id.
+
+    Returns:
+        Country code (e.g. 'br') or None if no source matches.
+    """
+    if not channel:
+        return None
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT country, url, name FROM sources WHERE active = 1")
+        rows = cur.fetchall()
+    for country, url, name in rows:
+        if name and name == channel:
+            return country
+        handle = _normalize_url_handle(url or "")
+        if handle and handle == channel:
+            return country
+    return None
+
+
+def build_channel_country_map() -> dict[str, str]:
+    """
+    Build a {channel_value -> country_code} map from all active sources.
+
+    Used at startup to populate an in-memory cache. Includes both the `name`
+    field and the URL-extracted handle as separate keys for the same country.
+    """
+    mapping: dict[str, str] = {}
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT country, url, name FROM sources WHERE active = 1")
+        for country, url, name in cur.fetchall():
+            if name:
+                mapping[name] = country
+            handle = _normalize_url_handle(url or "")
+            if handle:
+                mapping[handle] = country
+    return mapping

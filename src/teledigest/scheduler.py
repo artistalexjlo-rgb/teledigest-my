@@ -6,7 +6,10 @@ from telethon.errors import RPCError
 
 from .config import get_config, log
 from .daily_artifact import build_daily_artifact, artifact_claims_as_dicts
-from .db import get_relevant_messages_last_24h
+from .db import (
+    get_relevant_messages_for_country_last_24h,
+    get_relevant_messages_last_24h,
+)
 from .knowledge_db import get_knowledge_for_country, mark_outdated
 from .knowledge_loader import load_daily_claims
 from .llm import llm_summarize, llm_summarize_brief
@@ -144,20 +147,27 @@ async def summary_scheduler():
                 except Exception as e:
                     log.error("Daily understanding failed: %s", e)
 
-            # --- STEP 2: Digest (LLM call via DeepSeek) ---
-            messages = get_relevant_messages_last_24h(
-                max_docs=cfg.llm.max_messages
-            )
-
+            # --- STEP 2: Digest (LLM call via DeepSeek), one per country ---
             if countries:
+                # Resolve digest targets from sources DB (dynamic) with fallback
+                # to config (legacy). DB is the source of truth.
+                from .sources_db import get_digest_target
+
                 for country in countries:
-                    target = cfg.sources.digest_targets.get(country)
+                    target = get_digest_target(country) or cfg.sources.digest_targets.get(country)
                     if not target:
                         log.warning("No digest_target for country '%s', skipping.", country)
                         continue
+                    messages = get_relevant_messages_for_country_last_24h(
+                        country, max_docs=cfg.llm.max_messages,
+                    )
+                    log.info(
+                        "Digest country=%s: %d messages retrieved", country, len(messages),
+                    )
                     await _post_digest(bot_client, target, today, messages, country=country)
             else:
-                # Legacy mode: single digest to summary_target
+                # Legacy mode: single digest to summary_target, no country split
+                messages = get_relevant_messages_last_24h(max_docs=cfg.llm.max_messages)
                 await _post_digest(bot_client, cfg.bot.summary_target, today, messages)
 
             last_run_for = today

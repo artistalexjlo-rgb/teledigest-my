@@ -23,6 +23,13 @@ class Message(NamedTuple):
     text: str
 
 
+# Cutoff for retroactive country backfill.
+# Before this date, multi-country routing was not reliable (ISO codes added
+# in commit 130855a on 2026-04-24). Older rows stay country=NULL — they are
+# not used by per-country digest/extraction.
+COUNTRY_BACKFILL_CUTOFF = "2026-04-24"
+
+
 @contextmanager
 def get_db_connection() -> Iterator[sqlite3.Connection]:
     """
@@ -85,6 +92,7 @@ def init_db() -> None:
             ("reply_to_msg_id", "TEXT DEFAULT NULL"),
             ("sender_id", "INTEGER DEFAULT NULL"),
             ("is_bot", "INTEGER DEFAULT 0"),
+            ("country", "TEXT DEFAULT NULL"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE messages ADD COLUMN {col} {coldef}")
@@ -96,6 +104,9 @@ def init_db() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date)")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_country_date ON messages(country, date)"
         )
 
         # FTS virtual table for full-text search
@@ -128,6 +139,7 @@ def save_message(
     reply_to_msg_id: str | None = None,
     sender_id: int | None = None,
     is_bot: bool = False,
+    country: str | None = None,
 ) -> None:
     """
     Save a message to the database.
@@ -140,6 +152,7 @@ def save_message(
         reply_to_msg_id: ID of the message this is replying to (if any)
         sender_id: Telegram user/bot ID of the sender
         is_bot: Whether the sender is a bot
+        country: ISO country code resolved from `sources` (None if unknown)
 
     Raises:
         DatabaseError: If save operation fails
@@ -157,10 +170,11 @@ def save_message(
             # Insert into main table
             cur.execute(
                 """
-                INSERT OR IGNORE INTO messages (id, channel, date, text, reply_to_msg_id, sender_id, is_bot)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO messages
+                    (id, channel, date, text, reply_to_msg_id, sender_id, is_bot, country)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (msg_id, channel, iso, text, reply_to_msg_id, sender_id, int(is_bot)),
+                (msg_id, channel, iso, text, reply_to_msg_id, sender_id, int(is_bot), country),
             )
 
             # Only mirror to FTS when the row was actually inserted.
@@ -392,3 +406,163 @@ def get_relevant_messages_last_24h(max_docs: int = 1000) -> list[Message]:
     """
     start, end = _rolling_window()
     return get_relevant_messages_for_range(start, end, max_docs)
+
+
+# ---------------------------------------------------------------------------
+# Country-scoped retrieval
+# ---------------------------------------------------------------------------
+
+def get_messages_for_country_range(
+    country: str,
+    start: dt.datetime,
+    end: dt.datetime,
+    limit: int | None = None,
+) -> list[Message]:
+    """All messages for a country in a date range."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            sql = """
+                SELECT channel, text FROM messages
+                WHERE country = ? AND date BETWEEN ? AND ?
+                ORDER BY date ASC
+            """
+            params: list[_SqlParam] = [country, start.isoformat(), end.isoformat()]
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
+            cur.execute(sql, params)
+            return [Message(*row) for row in cur.fetchall()]
+    except sqlite3.Error as e:
+        log.error("Failed to query messages for country %s: %s", country, e)
+        raise DatabaseError(f"Failed to query messages: {e}") from e
+
+
+def get_relevant_messages_for_country_range(
+    country: str,
+    start: dt.datetime,
+    end: dt.datetime,
+    max_docs: int = 1000,
+) -> list[Message]:
+    """
+    RAG-style retrieval scoped to a single country.
+
+    Uses FTS for keyword filtering, then JOINs with main `messages` table to
+    apply the country filter. Falls back to plain country-scoped scan if FTS
+    is unavailable or no keywords are configured.
+    """
+    query = build_fts_query()
+    if query is None:
+        log.warning("No RAG keywords configured — using full scan for country=%s.", country)
+        return get_messages_for_country_range(country, start, end, limit=max_docs)
+
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            sql = """
+                SELECT m.channel, m.text
+                FROM messages_fts f
+                JOIN messages m ON m.id = f.id
+                WHERE f.messages_fts MATCH ?
+                  AND m.country = ?
+                  AND m.date BETWEEN ? AND ?
+                ORDER BY m.date ASC
+                LIMIT ?
+            """
+            cur.execute(sql, (query, country, start.isoformat(), end.isoformat(), max_docs))
+            rows = [Message(*row) for row in cur.fetchall()]
+            if rows:
+                log.info(
+                    "FTS retrieval for country=%s %s..%s returned %d messages (max %d)",
+                    country, start.isoformat(), end.isoformat(), len(rows), max_docs,
+                )
+                return rows
+            log.info("FTS country retrieval returned 0 rows — falling back to plain scan")
+    except sqlite3.OperationalError as e:
+        log.warning("FTS country retrieval failed (%s). Falling back to plain scan.", e)
+
+    return get_messages_for_country_range(country, start, end, limit=max_docs)
+
+
+def get_relevant_messages_for_country_last_24h(
+    country: str, max_docs: int = 1000
+) -> list[Message]:
+    """RAG retrieval for a country over the last 24h (rolling, UTC)."""
+    start, end = _rolling_window()
+    return get_relevant_messages_for_country_range(country, start, end, max_docs)
+
+
+# ---------------------------------------------------------------------------
+# One-time backfill of messages.country
+# ---------------------------------------------------------------------------
+
+def backfill_message_countries(
+    cutoff: str = COUNTRY_BACKFILL_CUTOFF,
+) -> tuple[int, int]:
+    """
+    Populate messages.country for rows added on or after `cutoff` that still
+    have country=NULL. Resolves country via the in-memory channel→country map
+    built from active sources.
+
+    Pre-cutoff rows are intentionally left as NULL — see COUNTRY_BACKFILL_CUTOFF.
+
+    Returns:
+        (matched, unmatched) — number of rows updated and number of post-cutoff
+        rows that could not be resolved.
+    """
+    # Local import to avoid a circular import at module load time.
+    from .sources_db import build_channel_country_map
+
+    mapping = build_channel_country_map()
+    if not mapping:
+        log.warning("backfill_message_countries: empty channel→country map; skipping.")
+        return (0, 0)
+
+    matched = 0
+    unmatched_channels: dict[str, int] = {}
+
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT DISTINCT channel
+                FROM messages
+                WHERE country IS NULL AND date >= ?
+                """,
+                (cutoff,),
+            )
+            channels = [row[0] for row in cur.fetchall()]
+
+            for ch in channels:
+                country = mapping.get(ch)
+                if not country:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM messages WHERE channel = ? AND country IS NULL AND date >= ?",
+                        (ch, cutoff),
+                    )
+                    unmatched_channels[ch] = cur.fetchone()[0]
+                    continue
+                cur.execute(
+                    """
+                    UPDATE messages
+                    SET country = ?
+                    WHERE channel = ? AND country IS NULL AND date >= ?
+                    """,
+                    (country, ch, cutoff),
+                )
+                matched += cur.rowcount
+
+        unmatched_total = sum(unmatched_channels.values())
+        if matched or unmatched_total:
+            log.info(
+                "backfill_message_countries: matched=%d unmatched=%d cutoff=%s",
+                matched, unmatched_total, cutoff,
+            )
+            for ch, n in unmatched_channels.items():
+                log.warning("Unmatched channel for backfill: %r (%d rows)", ch, n)
+        return matched, unmatched_total
+
+    except sqlite3.Error as e:
+        log.error("backfill_message_countries failed: %s", e)
+        raise DatabaseError(f"backfill failed: {e}") from e

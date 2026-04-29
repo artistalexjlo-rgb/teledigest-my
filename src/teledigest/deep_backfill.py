@@ -101,7 +101,8 @@ async def deep_backfill(
                         reply_to = f"{chat_name}_{msg.reply_to.reply_to_msg_id}"
                     sid = getattr(msg, "sender_id", None)
                     save_message(f"{chat_name}_{msg.id}", chat_name, msg.date, text,
-                                 reply_to_msg_id=reply_to, sender_id=sid, is_bot=False)
+                                 reply_to_msg_id=reply_to, sender_id=sid, is_bot=False,
+                                 country=country)
                 # Check cutoff
                 if msg.date and msg.date < cutoff:
                     reached_cutoff = True

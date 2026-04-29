@@ -35,8 +35,11 @@ bot_client: TelegramClient | None = None
 # We'll store numeric chat IDs of channels we care about
 scraped_chat_ids: set[int] = set()
 chat_id_to_name: dict[int, str] = {}
-# Mapping: chat peer_id -> country code (for МОЗГ and per-country features)
+# Mapping: chat peer_id -> country code (for МОЗГ — covers digest target + linked chats)
 chat_id_to_country: dict[int, str] = {}
+# Mapping: source channel peer_id -> country code (used by the scraper to tag
+# incoming messages with country at write time). Populated alongside scraped_chat_ids.
+source_chat_id_to_country: dict[int, str] = {}
 
 ok_mark = "\u2705"
 cross_mark = "\u274c"
@@ -149,9 +152,17 @@ async def channel_message_handler(event):
     sid = event.sender_id
     s_bot = bool(sender and getattr(sender, "bot", False))
 
-    log.info("Got message from %s (id=%s, reply_to=%s, sender=%s)", chat_name, msg.id, reply_to, sid)
+    country = source_chat_id_to_country.get(chat_id)
+    if country is None:
+        log.warning(
+            "save_message: no country mapping for chat_id=%s name=%s — saving with country=NULL",
+            chat_id, chat_name,
+        )
+
+    log.info("Got message from %s (id=%s, reply_to=%s, sender=%s, country=%s)",
+             chat_name, msg.id, reply_to, sid, country)
     save_message(msg_id, chat_name, date, text, reply_to_msg_id=reply_to,
-                 sender_id=sid, is_bot=s_bot)
+                 sender_id=sid, is_bot=s_bot, country=country)
 
 
 async def is_user_allowed(event) -> bool:
@@ -615,23 +626,31 @@ async def ensure_joined_and_resolve_channels():
     - build chat_id_to_country mapping (МОЗГ works in OUR chats, not source chats)
     """
     global scraped_chat_ids, chat_id_to_name, chat_id_to_country, _url_to_peer_id
+    global source_chat_id_to_country
     scraped_chat_ids = set()
     chat_id_to_name = {}
     chat_id_to_country = {}
+    source_chat_id_to_country = {}
     _url_to_peer_id = {}
 
     cfg = get_config()
 
     # --- 1. Resolve SOURCE channels via user_client (for scraping) ---
-    # Merge channels from config + sources DB (dynamic)
+    # Merge channels from config + sources DB (dynamic). We track url→country
+    # alongside the URL list so we can tag scraped chat_ids with country.
+    url_to_country: dict[str, str] = {}
     all_channels: list[str] = list(cfg.bot.channels)
     for src_ch in cfg.sources.channels:
         if src_ch.url not in all_channels:
             all_channels.append(src_ch.url)
+        if src_ch.country:
+            url_to_country[src_ch.url] = src_ch.country
     # Add channels from DB (added via /menu → add country)
     for src in get_active_sources():
         if src["url"] not in all_channels:
             all_channels.append(src["url"])
+        if src.get("country"):
+            url_to_country[src["url"]] = src["country"]
 
     for ch in all_channels:
         try:
@@ -652,7 +671,12 @@ async def ensure_joined_and_resolve_channels():
 
             scraped_chat_ids.add(peer_id)
             _url_to_peer_id[ch] = peer_id
-            log.info("Will scrape chat %s (peer_id=%s)", name, peer_id)
+            country = url_to_country.get(ch)
+            if country:
+                source_chat_id_to_country[peer_id] = country
+            else:
+                log.warning("No country mapping for source channel %s", ch)
+            log.info("Will scrape chat %s (peer_id=%s, country=%s)", name, peer_id, country)
 
         except Exception as e:
             log.warning("User account cannot resolve %s: %s", ch, e)
@@ -727,6 +751,7 @@ async def backfill_history(limit: int = 1000):
     total = 0
     for chat_id in scraped_chat_ids:
         chat_name = chat_id_to_name.get(chat_id, str(chat_id))
+        country = source_chat_id_to_country.get(chat_id)
         count = 0
         try:
             async for msg in user_client.iter_messages(chat_id, limit=limit):
@@ -744,7 +769,7 @@ async def backfill_history(limit: int = 1000):
                 sid = getattr(msg, "sender_id", None)
                 s_bot = bool(sender and getattr(sender, "bot", False))
                 save_message(msg_id, chat_name, msg.date, text, reply_to_msg_id=reply_to,
-                             sender_id=sid, is_bot=s_bot)
+                             sender_id=sid, is_bot=s_bot, country=country)
                 count += 1
                 if count % 100 == 0:
                     await asyncio.sleep(2)
@@ -775,10 +800,16 @@ def _session_paths(cfg: AppConfig) -> tuple[Path, Path]:
 # Dynamic channel subscription (called from bot_menu on add)
 # ---------------------------------------------------------------------------
 
-async def subscribe_channel(url: str) -> str | None:
+async def subscribe_channel(url: str, country: str | None = None) -> str | None:
     """
     Subscribe user_client to a channel at runtime.
     Returns channel name on success, None on failure.
+
+    Args:
+        url: Channel URL/handle.
+        country: ISO country code; when provided, the resolved peer_id is
+            registered in `source_chat_id_to_country` so newly arrived messages
+            are tagged with country at write time.
     """
     global scraped_chat_ids
     try:
@@ -797,6 +828,8 @@ async def subscribe_channel(url: str) -> str | None:
 
         scraped_chat_ids.add(peer_id)
         _url_to_peer_id[url] = peer_id
+        if country:
+            source_chat_id_to_country[peer_id] = country
         return name
     except Exception as e:
         log.warning("Cannot resolve channel %s: %s", url, e)
