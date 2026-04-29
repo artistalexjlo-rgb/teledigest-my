@@ -453,3 +453,155 @@ def test_get_relevant_messages_for_range_falls_back_on_fts_error(
     assert len(rows) == 2
     channels = {ch for ch, _ in rows}
     assert channels == {"@c1"}
+
+
+# ---------------------------------------------------------------------------
+# Country-scoped retrieval & backfill
+# ---------------------------------------------------------------------------
+
+
+def _seed_sources(db_path: Path) -> None:
+    """Initialize the sources table directly for tests that don't go through sources_db.init."""
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            country TEXT NOT NULL,
+            url TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            language TEXT NOT NULL DEFAULT 'ru',
+            digest_target TEXT DEFAULT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            added_at TEXT NOT NULL,
+            UNIQUE(country, url)
+        )
+        """
+    )
+    rows = [
+        ("br", "@Brazil_ChatForum", "Brazil Chat Forum", "ru"),
+        ("id", "https://t.me/balichat", "balichat", "ru"),
+        ("mu", "https://t.me/+iVaiJserqqNkNTc6", "-1001646838441", "ru"),
+    ]
+    for country, url, name, lang in rows:
+        cur.execute(
+            "INSERT OR IGNORE INTO sources (country, url, name, language, added_at) "
+            "VALUES (?, ?, ?, ?, '2026-04-24T00:00:00')",
+            (country, url, name, lang),
+        )
+    conn.commit()
+    conn.close()
+
+
+def test_save_message_persists_country(app_config: cfg.AppConfig) -> None:
+    db.init_db()
+    base = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)
+    db.save_message("1", "Brazil_ChatForum", base, "olá", country="br")
+    db.save_message("2", "balichat", base, "halo", country="id")
+
+    conn = sqlite3.connect(app_config.storage.db_path)
+    rows = conn.execute(
+        "SELECT id, country FROM messages ORDER BY id"
+    ).fetchall()
+    conn.close()
+    assert rows == [("1", "br"), ("2", "id")]
+
+
+def test_save_message_country_defaults_to_null(app_config: cfg.AppConfig) -> None:
+    db.init_db()
+    base = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)
+    db.save_message("1", "ch", base, "no country here")
+    conn = sqlite3.connect(app_config.storage.db_path)
+    row = conn.execute("SELECT country FROM messages WHERE id='1'").fetchone()
+    conn.close()
+    assert row == (None,)
+
+
+def test_get_messages_for_country_range_filters(app_config: cfg.AppConfig) -> None:
+    db.init_db()
+    base = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)
+    db.save_message("1", "ch_br", base, "br msg", country="br")
+    db.save_message("2", "ch_id", base, "id msg", country="id")
+    db.save_message("3", "ch_legacy", base, "no country", country=None)
+
+    start = base - dt.timedelta(minutes=1)
+    end = base + dt.timedelta(minutes=1)
+
+    rows = db.get_messages_for_country_range("br", start, end)
+    assert [(r.channel, r.text) for r in rows] == [("ch_br", "br msg")]
+
+    rows = db.get_messages_for_country_range("id", start, end)
+    assert [(r.channel, r.text) for r in rows] == [("ch_id", "id msg")]
+
+    # Country with no rows
+    assert db.get_messages_for_country_range("xx", start, end) == []
+
+
+@pytest.mark.skipif(not supports_fts5(), reason="sqlite3 FTS5 is not available")
+def test_get_relevant_messages_for_country_uses_fts(
+    app_config: cfg.AppConfig,
+) -> None:
+    db.init_db()
+    base = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)
+    app_config.storage.rag_keywords = ["war"]
+
+    db.save_message("1", "ch_br", base, "breaking war news", country="br")
+    db.save_message("2", "ch_br", base, "weather small talk", country="br")
+    db.save_message("3", "ch_id", base, "war report from elsewhere", country="id")
+
+    start = base - dt.timedelta(minutes=1)
+    end = base + dt.timedelta(minutes=1)
+
+    rows = db.get_relevant_messages_for_country_range("br", start, end, max_docs=10)
+    assert len(rows) == 1
+    assert rows[0].channel == "ch_br"
+    assert "war" in rows[0].text
+
+
+def test_backfill_message_countries_matches_post_cutoff(
+    app_config: cfg.AppConfig,
+) -> None:
+    db.init_db()
+    _seed_sources(app_config.storage.db_path)
+
+    pre = dt.datetime(2026, 4, 20, 12, 0, 0, tzinfo=dt.timezone.utc)   # before cutoff
+    post = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)  # after cutoff
+
+    # All saved without country (legacy path)
+    db.save_message("p1", "Brazil_ChatForum", pre, "old br msg")
+    db.save_message("n1", "Brazil_ChatForum", post, "new br msg")
+    db.save_message("n2", "balichat", post, "new id msg")
+    db.save_message("n3", "-1001646838441", post, "new mu msg")
+    db.save_message("n4", "unknown_channel", post, "orphan")
+
+    matched, unmatched = db.backfill_message_countries()
+
+    # Three post-cutoff matched, one unmatched (unknown_channel), pre-cutoff untouched
+    assert matched == 3
+    assert unmatched == 1
+
+    conn = sqlite3.connect(app_config.storage.db_path)
+    rows = dict(conn.execute("SELECT id, country FROM messages").fetchall())
+    conn.close()
+
+    assert rows["p1"] is None  # legacy untouched
+    assert rows["n1"] == "br"
+    assert rows["n2"] == "id"
+    assert rows["n3"] == "mu"
+    assert rows["n4"] is None  # unmatched stays NULL
+
+
+def test_backfill_message_countries_idempotent(app_config: cfg.AppConfig) -> None:
+    db.init_db()
+    _seed_sources(app_config.storage.db_path)
+
+    post = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)
+    db.save_message("n1", "Brazil_ChatForum", post, "msg")
+
+    first = db.backfill_message_countries()
+    assert first == (1, 0)
+
+    # Second run: nothing left to update
+    second = db.backfill_message_countries()
+    assert second == (0, 0)

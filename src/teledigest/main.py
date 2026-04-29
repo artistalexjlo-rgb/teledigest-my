@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 
 from .config import init_config, get_config, log
-from .db import init_db
+from .db import backfill_message_countries, init_db
 from .sources_db import init_sources_table, migrate_from_config
 from .scheduler import summary_scheduler
 from .telegram_client import (
@@ -61,6 +61,18 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
             ]
             digest_targets = cfg.sources.digest_targets if cfg.sources.digest_targets else {}
             migrate_from_config(channels, digest_targets)
+
+        # One-time backfill of messages.country for post-cutoff rows.
+        # Idempotent: only touches rows with country IS NULL.
+        try:
+            matched, unmatched = backfill_message_countries()
+            if matched or unmatched:
+                log.info(
+                    "Country backfill complete: matched=%d unmatched=%d",
+                    matched, unmatched,
+                )
+        except Exception as e:
+            log.error("Country backfill failed (non-fatal): %s", e)
 
 
     await create_clients()
