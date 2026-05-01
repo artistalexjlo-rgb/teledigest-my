@@ -2,12 +2,16 @@
 daily_samples.py — Plain-text daily chat samples for human/LLM review.
 
 After the daily digest pipeline finishes, dump the previous day's raw
-messages (sanitized text only — see text_sanitize) for a small set of
-country/channel pairs into files alongside the SQLite DB. No bot
-commands, no LLM, just `SELECT ... ORDER BY date`.
+messages (sanitized text only — see text_sanitize) for every active source
+in the `sources` DB. One file per (source, day). Files are written
+alongside the SQLite DB so they can be uploaded to external processing
+(Google Drive, GCS, etc.) by a separate step.
 
 File layout:
-    {db_dir}/samples/{country}/{YYYY-MM-DD}.txt
+    {db_dir}/samples/{country}/{YYYY-MM-DD}_{country}_{channel_slug}.txt
+
+The country prefix in the filename keeps files self-identifying when they
+are moved out of their parent directory (e.g. uploaded to a flat bucket).
 
 One line per message:
     [HH:MM] u/<sender_id>: text
@@ -20,7 +24,7 @@ display names) — same impersonal contract as the rest of the pipeline.
 from __future__ import annotations
 
 import datetime as dt
-import sqlite3
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +33,7 @@ from .db import get_db_connection
 
 
 # ---------------------------------------------------------------------------
-# Configuration: which (country, channel) pairs to dump
+# Configuration
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -43,13 +47,60 @@ class SampleTarget:
     channel: str
 
 
-# Picked one source per country to keep the sample stream readable
-# (avoids mixing two channels of the same country in one file).
-DEFAULT_SAMPLE_TARGETS: tuple[SampleTarget, ...] = (
-    SampleTarget(country="br", channel="Brazil_ChatForum"),
-    SampleTarget(country="id", channel="balichat"),
-    SampleTarget(country="lk", channel="-1001605996131"),
-)
+# Filename slug: strip leading dash, replace anything non-alphanumeric/underscore.
+# Examples:
+#   'Brazil_ChatForum' -> 'Brazil_ChatForum'
+#   '-1001631614451'   -> '1001631614451'
+#   'balichat'         -> 'balichat'
+_SLUG_NON_SAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _channel_slug(channel: str) -> str:
+    s = channel.lstrip("-")
+    s = _SLUG_NON_SAFE_RE.sub("_", s)
+    return s or "unknown"
+
+
+def get_sample_targets() -> list[SampleTarget]:
+    """All (country, channel) pairs to dump — read fresh from the sources DB.
+
+    Picks the first active source-side channel value the bot actually saves
+    under. We try, in order:
+        1. sources.chat_id (as string) — invite-link channels save messages
+           with this as `messages.channel`.
+        2. URL handle (`@foo` -> `foo`) — public channels do.
+        3. sources.name fallback — only when both above are unavailable.
+    Sources without any usable identifier are skipped with a warning.
+    """
+    from .sources_db import get_active_sources, _normalize_url_handle
+
+    targets: list[SampleTarget] = []
+    for src in get_active_sources():
+        country = src.get("country") or ""
+        chat_id = src.get("chat_id")
+        url = src.get("url") or ""
+        handle = _normalize_url_handle(url)
+        # Mirror how telegram_client tags messages: invite-link sources
+        # produce numeric chat_id channel values; public channels produce
+        # the handle. So prefer chat_id when it's a numeric channel.
+        # In practice both work because get_active_sources doesn't tell us
+        # which one will appear in messages.channel — we pick the most
+        # likely one based on URL shape.
+        is_invite = url.startswith("https://t.me/+") or url.startswith("http://t.me/+")
+        if is_invite and chat_id is not None:
+            channel = str(chat_id)
+        elif handle:
+            channel = handle
+        elif chat_id is not None:
+            channel = str(chat_id)
+        else:
+            log.warning(
+                "Sample target skipped — no usable channel id for source id=%s url=%s",
+                src.get("id"), url,
+            )
+            continue
+        targets.append(SampleTarget(country=country, channel=channel))
+    return targets
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +177,12 @@ def dump_country_samples(
     target: SampleTarget, day: dt.date, samples_dir: Path | None = None,
 ) -> tuple[Path, int]:
     """
-    Write one country's daily sample file. Returns (path, message_count).
+    Write one source's daily sample file. Returns (path, message_count).
 
-    The file is overwritten every run for the same (country, day) — safe to
+    Output path:
+        {samples_dir}/{country}/{date}_{country}_{channel-slug}.txt
+
+    The file is overwritten every run for the same (target, day) — safe to
     re-run; no append/dedup logic needed.
     """
     if samples_dir is None:
@@ -138,7 +192,8 @@ def dump_country_samples(
 
     country_dir = samples_dir / target.country
     country_dir.mkdir(parents=True, exist_ok=True)
-    out_path = country_dir / f"{day.isoformat()}.txt"
+    slug = _channel_slug(target.channel)
+    out_path = country_dir / f"{day.isoformat()}_{target.country}_{slug}.txt"
 
     header = (
         f"# country={target.country} channel={target.channel} "
@@ -155,9 +210,16 @@ def dump_country_samples(
 
 
 def dump_all_targets(
-    day: dt.date, targets: tuple[SampleTarget, ...] = DEFAULT_SAMPLE_TARGETS,
+    day: dt.date, targets: list[SampleTarget] | None = None,
 ) -> list[tuple[SampleTarget, Path, int]]:
-    """Dump samples for all configured targets for a given day."""
+    """
+    Dump samples for every active source in `sources` DB for a given day.
+
+    By default reads targets fresh from DB so newly-added sources are picked
+    up without redeploy.
+    """
+    if targets is None:
+        targets = get_sample_targets()
     samples_dir = get_samples_dir()
     results = []
     for target in targets:
