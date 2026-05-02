@@ -15,6 +15,9 @@ dependencies = [
     "tzdata (>=2025.3,<2026.0)",
     "pymorphy3 (>=2.0.0,<3.0.0)",
     "python-socks[asyncio] (>=2.0.0,<3.0.0)",
+    "google-api-python-client (>=2.140.0,<3.0.0)",
+    "google-auth (>=2.34.0,<3.0.0)",
+    "google-auth-oauthlib (>=1.2.0,<2.0.0)",
 ]
 
 [tool.poetry]
