@@ -53,9 +53,33 @@ def main() -> int:
         )
         return 1
 
+    use_console = "--console" in sys.argv
+
     flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-    # port=0 picks a free port automatically; opens default browser.
-    creds = flow.run_local_server(port=0)
+    if use_console:
+        # Manual flow: print URL, user opens in any browser, pastes code back.
+        # No local server, no redirect — bullet-proof against firewall/port issues.
+        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        print("\nOpen this URL in any browser, sign in, click Allow:\n")
+        print(auth_url)
+        print("\nAfter Allow you'll see a code on the page. Paste it below.")
+        code = input("\nAuthorization code: ").strip()
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+    else:
+        # Local-server flow (default): opens browser automatically and listens
+        # on a random port for the OAuth redirect. If your firewall blocks it
+        # or the browser hangs, re-run with --console flag for manual paste.
+        try:
+            creds = flow.run_local_server(port=0, timeout_seconds=180, open_browser=True)
+        except Exception as e:
+            print(
+                f"\nLocal server flow failed ({e}).\n"
+                "Re-run with --console flag for manual copy-paste flow.",
+                file=sys.stderr,
+            )
+            return 1
     token_path.write_text(creds.to_json(), encoding="utf-8")
     print(f"OK: token saved to {token_path}")
     print(
