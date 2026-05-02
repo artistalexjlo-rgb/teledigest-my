@@ -187,6 +187,16 @@ async def summary_scheduler():
             except Exception as e:
                 log.error("Daily samples dump failed (non-fatal): %s", e)
 
+            # --- STEP 4: Push samples directory to Google Drive (optional) ---
+            # If [google] is configured, every .txt under samples/ is uploaded
+            # (idempotent — same name overwrites). Never fatal: a Drive outage
+            # leaves the bot pipeline intact, files stay locally for retry.
+            try:
+                from .drive_uploader import upload_samples_dir
+                upload_samples_dir()
+            except Exception as e:
+                log.error("Drive upload failed (non-fatal): %s", e)
+
             last_run_for = today
             await asyncio.sleep(65)
         else:

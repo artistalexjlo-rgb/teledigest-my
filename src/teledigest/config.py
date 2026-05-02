@@ -132,6 +132,15 @@ class StorageConfig:
 
 
 @dataclass
+class GoogleConfig:
+    """Google Drive upload settings (OAuth user creds, no service account)."""
+    drive_folder_id: str = ""
+    credentials_path: Path = Path("google-credentials.json")
+    token_path: Path = Path("google-token.json")
+    enabled: bool = False
+
+
+@dataclass
 class LoggingConfig:
     level: str = "INFO"
 
@@ -145,6 +154,7 @@ class AppConfig:
     logging: LoggingConfig = field(default_factory=lambda: LoggingConfig())
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
     sources: SourcesConfig = field(default_factory=SourcesConfig)
+    google: GoogleConfig = field(default_factory=GoogleConfig)
 
 
 _CONFIG: Optional[AppConfig] = None
@@ -325,6 +335,17 @@ def _parse_sources(raw: Dict[str, Any]) -> SourcesConfig:
     return SourcesConfig(channels=channels, digest_targets=digest_targets)
 
 
+def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
+    g_raw = raw.get("google") or {}
+    folder_id = str(g_raw.get("drive_folder_id", "")).strip()
+    return GoogleConfig(
+        drive_folder_id=folder_id,
+        credentials_path=Path(g_raw.get("credentials_path", "google-credentials.json")),
+        token_path=Path(g_raw.get("token_path", "google-token.json")),
+        enabled=bool(folder_id) and bool(g_raw.get("enabled", True)),
+    )
+
+
 def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
     """
     Convert the raw TOML dict into typed AppConfig.
@@ -340,6 +361,7 @@ def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
         logging=_parse_logging(raw),
         telegraph=_parse_telegraph(raw),
         sources=sources,
+        google=_parse_google(raw),
     )
 
 
