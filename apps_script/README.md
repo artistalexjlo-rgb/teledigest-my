@@ -108,9 +108,43 @@ clasp push
 
 Дубликатов не будет — deterministic doc IDs.
 
-## TODO (зафиксировано в коде)
+## Схема `telegram_queue` документа
 
-- `is_published: bool` поле в `telegram_queue` — временный плейсхолдер.
-  Когда дойдём до multi-channel постинга (Telegram RU, Telegram EN, VK,
-  Discord, …) — заменим на `postedTo` map с per-channel статусом и
-  `scheduled_at`. См. комментарий `TODO(PR #6)` в `saveToFirestore_`.
+```js
+{
+  title: "Bank card for non-residents",
+  country: "br",
+  tag: "Finance",
+  createdAt: <timestamp>,
+  sourceFileId: "...",  sourceIdx: 3,
+  content: "Если вы всё ещё мучаетесь...",       // канонический RU
+  target_languages: ["ru", "en", "es", "pt"],     // на каких имеет смысл
+  postedTo: {}                                     // бот заполнит per-channel
+}
+```
+
+`postedTo` остаётся пустым на стороне Apps Script. Бот при первой обработке
+pattern'а у себя в коде enрichит:
+```js
+postedTo: {
+  telegram_ru_br: { posted: false, scheduled_at: <now>, posted_at: null,
+                    language: "ru", text: null },
+  vk_main:        { posted: false, scheduled_at: <now>, posted_at: null,
+                    language: "ru", text: null },
+  telegram_en_br: { posted: false, scheduled_at: <now>, posted_at: null,
+                    language: "en", text: null }
+  // ...только для каналов где channel.language ∈ target_languages
+}
+```
+
+При постинге бот:
+1. Спрашивает Gemini «адаптируй для канала X на языке L», передавая
+   контекст уже отпощенного (если есть в других `postedTo.*.text`).
+2. Постит в реальную платформу.
+3. Обновляет `postedTo.<channel> = {posted: true, posted_at: now, text: ...}`.
+
+## TODO
+
+- Бот-постер (PR #6) — реализует enrichment `postedTo` и per-channel
+  адаптацию через Gemini. Сейчас Apps Script производит только канонические
+  pattern'ы; постинг ещё не сделан.

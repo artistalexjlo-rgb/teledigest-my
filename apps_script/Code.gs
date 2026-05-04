@@ -101,10 +101,18 @@ function runMining_(file, cfg) {
       "br, id, lk, mu, at, ar, be. Если страна вне списка — пропусти этот pattern.\n" +
       "- routing: одна из строк — \"both\", \"assistant_only\", \"channel_only\".\n" +
       "- tag: на английском (Finance, Safety, Bureaucracy, Travel и т.п.).\n" +
-      "- human_story: ИСТОРИЯ ДЛЯ КАНАЛА на РУССКОМ. Сочно, живо, с лёгкой иронией. " +
+      "- target_languages: массив ISO 639-1 кодов языков на которые история " +
+      "имеет смысл переводиться. По умолчанию [\"ru\"] для русско-локальных " +
+      "историй (российские лайфхаки, нюансы для русскоязычной диаспоры). " +
+      "Универсальные истории (карнавал, погода, кухня, общая туристика) — " +
+      "перечисли все уместные: например [\"ru\",\"en\",\"es\",\"pt\"]. " +
       "Только если routing == \"both\" или \"channel_only\".\n" +
-      "- ai_lesson: ИНСТРУКЦИЯ ДЛЯ ИИ-ПОМОЩНИКА на АНГЛИЙСКОМ. Сухие точные факты и цифры. " +
-      "Только если routing == \"both\" или \"assistant_only\".\n\n" +
+      "- human_story: ИСТОРИИ И ХАКИ ДЛЯ КАНАЛА. СТРОГО НА РУССКОМ ЯЗЫКЕ. " +
+      "Пиши сочно, живо, с лёгкой иронией. Сделай это интересной историей для " +
+      "канала. Только если routing == \"both\" или \"channel_only\".\n" +
+      "- ai_lesson: ИНСТРУКЦИЯ ДЛЯ ИИ-ПОМОЩНИКА. СТРОГО НА АНГЛИЙСКОМ ЯЗЫКЕ. " +
+      "Сухие, точные факты и цифры без эмоций. Только если routing == \"both\" " +
+      "или \"assistant_only\".\n\n" +
       "ФИЛЬТРАЦИЯ:\n" +
       "- Игнорируй слухи, пустой трёп, спам и сообщения про спамеров.\n" +
       "- Игнорируй pattern если в логе нет конкретики — не выдумывай.\n";
@@ -201,13 +209,22 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg) {
 
   if (isPost) {
     fields["content"] = { "stringValue": item.human_story || "" };
-    // TODO(PR #6): replace flat is_published with full postedTo map for
-    // multi-channel posting:
-    //   postedTo: {
-    //     telegram_ru: { posted: false, scheduled_at: now, posted_at: null },
-    //     ...
+    // Languages this story is meaningful in. Default to russian if Gemini
+    // didn't provide. Bot matches against channel.language at post time.
+    var langs = Array.isArray(item.target_languages) && item.target_languages.length
+      ? item.target_languages : ["ru"];
+    fields["target_languages"] = {
+      "arrayValue": {
+        "values": langs.map(function(l) { return { "stringValue": String(l).toLowerCase() }; })
+      }
+    };
+    // postedTo starts empty. Bot enriches per-channel as it processes:
+    //   postedTo.<channel>: {
+    //     posted: bool, scheduled_at: ts, posted_at: ts|null,
+    //     language: str, text: str (actual posted version after translation)
     //   }
-    fields["is_published"] = { "booleanValue": false };
+    // Kept empty here so Apps Script doesn't need to know channel inventory.
+    fields["postedTo"] = { "mapValue": { "fields": {} } };
   } else {
     fields["instruction"] = { "stringValue": item.ai_lesson || "" };
   }
