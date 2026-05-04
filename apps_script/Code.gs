@@ -74,8 +74,8 @@ function processNewLogs() {
           console.log("<<< Done: " + file.getName());
         } else {
           console.warn(
-            "Skipped marker — " + file.getName() +
-            " had save failures, will retry on next run."
+            file.getName() + ": Gemini call failed (HTTP/parse error). " +
+            "Not marking processed — will retry on next run."
           );
         }
       }
@@ -97,8 +97,8 @@ function runMining_(file, cfg) {
       "Преврати лог в JSON: {\"patterns\": [...]}.\n\n" +
       "ОБЯЗАТЕЛЬНЫЕ ПОЛЯ КАЖДОГО ЭЛЕМЕНТА:\n" +
       "- title: на английском (универсальный ключ).\n" +
-      "- country: ISO 3166-1 alpha-2 в нижнем регистре. Допустимые значения: " +
-      "br, id, lk, mu, at, ar, be. Если страна вне списка — пропусти этот pattern.\n" +
+      "- country: ISO 3166-1 alpha-2 в нижнем регистре (br, id, lk, vn, tr, и т.д. " +
+      "по стандарту). Если в логе нет привязки к стране — пропусти pattern.\n" +
       "- routing: одна из строк — \"both\", \"assistant_only\", \"channel_only\".\n" +
       "- tag: на английском (Finance, Safety, Bureaucracy, Travel и т.п.).\n" +
       "- target_languages: массив ISO 639-1 кодов языков на которые история " +
@@ -169,10 +169,23 @@ function runMining_(file, cfg) {
       }
     });
 
-    console.log("Saved " + saved + " of " + attempted + " patterns from " + file.getName());
-    // Mark file processed only if every attempted save succeeded (counting
-    // ALREADY_EXISTS as success — handled inside saveToFirestore_).
-    return attempted > 0 && saved === attempted;
+    if (attempted === 0) {
+      console.log("No patterns to save from " + file.getName() +
+                  " (" + patterns.length + " raw patterns, all filtered out).");
+    } else {
+      console.log("Saved " + saved + " of " + attempted + " patterns from " + file.getName());
+    }
+
+    // File is "processed" if Gemini gave us a valid response, even if patterns
+    // are empty (nothing in the chat worth saving) or all filtered. Don't
+    // retry forever on legitimately-uninteresting files.
+    // Real save failures (saved < attempted) are logged but still mark the
+    // file processed — re-process via FORCE_REPROCESS=true if needed.
+    if (saved < attempted) {
+      console.warn(file.getName() + ": " + (attempted - saved) +
+                   " of " + attempted + " saves failed (see Firestore errors above).");
+    }
+    return true;
 
   } catch (e) {
     console.error("runMining_ error: " + e.toString());
@@ -195,7 +208,7 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg) {
   var hex = sha1Hex_(seed).slice(0, 24);
 
   var url = "https://firestore.googleapis.com/v1/projects/" + cfg.projectId +
-            "/databases/(default)/documents/" + collectionName +
+            "/databases/default/documents/" + collectionName +
             "?documentId=" + hex;
 
   var fields = {
