@@ -22,7 +22,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",   # Drive uploads (PR #5)
+    "https://www.googleapis.com/auth/datastore",    # Firestore for bot-poster (PR #7)
+]
 
 
 def main() -> int:
