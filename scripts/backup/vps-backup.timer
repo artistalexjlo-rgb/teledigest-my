@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule daily VPS backup at 04:00
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=vps-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily VPS backup to Telegram
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vps-backup.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30min
+# Don't restart on failure — timer triggers next run anyway.
+
+[Install]
+WantedBy=multi-user.target
