@@ -150,7 +150,7 @@ class GoogleConfig:
 class GeminiConfig:
     """Gemini API settings for МОЗГ chat assistant."""
     api_key: str = ""
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-3.1-flash-lite-preview"
     enabled: bool = False
 
 
@@ -386,7 +386,7 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
 def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
-    model = str(g_raw.get("model", "gemini-2.0-flash")).strip() or "gemini-2.0-flash"
+    model = str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip() or "gemini-3.1-flash-lite-preview"
     return GeminiConfig(
         api_key=api_key,
         model=model,
