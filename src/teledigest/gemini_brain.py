@@ -3,6 +3,7 @@ gemini_brain.py — МОЗГ via Gemini + Firestore wisdom_base.
 
 Flow:
 1. Query Firestore wisdom_base: country-specific docs + universal "any" docs
+   (country-specific first, then universal "any" appended)
 2. Format instruction fields as context (English facts)
 3. Gemini synthesizes a concrete Russian answer
 4. Return to user
