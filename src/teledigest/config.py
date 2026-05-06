@@ -142,6 +142,16 @@ class GoogleConfig:
     firestore_project_id: str = ""
     firestore_database: str = "default"
     firestore_collection: str = "telegram_queue"
+    # Firestore collection for МОЗГ assistant data (wisdom_base)
+    assistant_collection: str = "wisdom_base"
+
+
+@dataclass
+class GeminiConfig:
+    """Gemini API settings for МОЗГ chat assistant."""
+    api_key: str = ""
+    model: str = "gemini-2.0-flash"
+    enabled: bool = False
 
 
 @dataclass
@@ -177,6 +187,7 @@ class AppConfig:
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     google: GoogleConfig = field(default_factory=GoogleConfig)
     channel: ChannelConfig = field(default_factory=ChannelConfig)
+    gemini: GeminiConfig = field(default_factory=GeminiConfig)
 
 
 _CONFIG: Optional[AppConfig] = None
@@ -368,6 +379,18 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
         firestore_project_id=str(g_raw.get("firestore_project_id", "")).strip(),
         firestore_database=str(g_raw.get("firestore_database", "default")).strip() or "default",
         firestore_collection=str(g_raw.get("firestore_collection", "telegram_queue")).strip() or "telegram_queue",
+        assistant_collection=str(g_raw.get("assistant_collection", "wisdom_base")).strip() or "wisdom_base",
+    )
+
+
+def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
+    g_raw = raw.get("gemini") or {}
+    api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
+    model = str(g_raw.get("model", "gemini-2.0-flash")).strip() or "gemini-2.0-flash"
+    return GeminiConfig(
+        api_key=api_key,
+        model=model,
+        enabled=bool(api_key),
     )
 
 
@@ -402,6 +425,7 @@ def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
         sources=sources,
         google=_parse_google(raw),
         channel=_parse_channel(raw),
+        gemini=_parse_gemini(raw),
     )
 
 

@@ -126,10 +126,22 @@ def search_and_format(country: str, query: str) -> str:
     """
     Search knowledge base, synthesize answer via LLM.
 
-    1. Search for up to 10 relevant entries (wide net for context)
-    2. If entries found — synthesize via DeepSeek
-    3. If nothing found — return "не знаю"
+    Priority:
+    1. Gemini + Firestore wisdom_base (if GEMINI_API_KEY configured)
+    2. DeepSeek + SQLite knowledge table (legacy fallback)
     """
+    # --- Gemini path (Firestore wisdom_base) ---
+    try:
+        from . import gemini_brain
+        if gemini_brain.is_enabled():
+            answer = gemini_brain.search_and_format(country, query)
+            if answer:
+                return answer
+            log.warning("МОЗГ: Gemini returned empty — falling back to DeepSeek+SQLite")
+    except Exception as e:
+        log.error("МОЗГ: Gemini path failed (%s) — falling back to DeepSeek+SQLite", e)
+
+    # --- DeepSeek + SQLite fallback ---
     results = search_knowledge(country, query, limit=20)
 
     if not results:
