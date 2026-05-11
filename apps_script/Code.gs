@@ -117,6 +117,7 @@ function processNewLogs() {
 function runMining_(file, cfg) {
   try {
     var content = file.getBlob().getDataAsString();
+    var sourceDateISO = parseFileNameDate_(file.getName());
     var url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL +
               ":generateContent?key=" + cfg.apiKey;
 
@@ -194,14 +195,14 @@ function runMining_(file, cfg) {
 
       if (routing === "both" || routing === "assistant_only") {
         attempted++;
-        if (saveToFirestore_(p, COLLECTION_AI, false, file.getId(), idx, cfg)) {
+        if (saveToFirestore_(p, COLLECTION_AI, false, file.getId(), idx, cfg, sourceDateISO)) {
           saved++;
           wisdomLines.push(formatSummaryLine_(p, "wisdom", file.getName()));
         }
       }
       if ((routing === "both" || routing === "channel_only") && p.human_story) {
         attempted++;
-        if (saveToFirestore_(p, COLLECTION_TG, true, file.getId(), idx, cfg)) {
+        if (saveToFirestore_(p, COLLECTION_TG, true, file.getId(), idx, cfg, sourceDateISO)) {
           saved++;
           storyLines.push(formatSummaryLine_(p, "story", file.getName()));
         }
@@ -247,7 +248,7 @@ function runMining_(file, cfg) {
  *
  * Returns true on 200 OK or 409 ALREADY_EXISTS, false on real failure.
  */
-function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg) {
+function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, sourceDateISO) {
   var seed = fileId + ":" + idx + ":" + collectionName;
   var hex = sha1Hex_(seed).slice(0, 24);
 
@@ -263,6 +264,12 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg) {
     "sourceFileId": { "stringValue": fileId },
     "sourceIdx":    { "integerValue": idx }
   };
+  // sourceDate = day the source chat log is from (parsed from filename).
+  // Lets bot show "last confirmed: YYYY-MM-DD" and flag stale facts.
+  // Omitted if filename doesn't match YYYY-MM-DD_*.txt pattern.
+  if (sourceDateISO) {
+    fields["sourceDate"] = { "timestampValue": sourceDateISO };
+  }
 
   if (isPost) {
     fields["content"] = { "stringValue": item.human_story || "" };
@@ -343,6 +350,21 @@ function fetchGeminiWithRetry_(url, payload, fileName) {
     return null;
   }
   return null;
+}
+
+
+/**
+ * Extract source-log date from filename like "2026-05-07_br_chatforum.txt".
+ *
+ * Returns ISO 8601 timestamp at noon UTC of that date, or null if the
+ * filename doesn't match the expected YYYY-MM-DD_ prefix. Noon UTC chosen
+ * to avoid timezone-edge-flip when bot renders the date locally.
+ */
+function parseFileNameDate_(fileName) {
+  var m = fileName.match(/^(\d{4})-(\d{2})-(\d{2})_/);
+  if (!m) return null;
+  // Build ISO directly — Date parsing varies, this is safer.
+  return m[1] + "-" + m[2] + "-" + m[3] + "T12:00:00.000Z";
 }
 
 
