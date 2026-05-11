@@ -150,7 +150,14 @@ class GoogleConfig:
 class GeminiConfig:
     """Gemini API settings for МОЗГ chat assistant."""
     api_key: str = ""
+    # Legacy synchronous model (used by Apps Script extraction-style flows
+    # and as fallback if Live API errors). Shares 500 RPD on free tier.
     model: str = "gemini-3.1-flash-lite-preview"
+    # Gemini Live API model — bidirectional streaming session. Free tier
+    # quota is "unlimited" RPD on Live, so МОЗГ answers don't compete
+    # with extraction for the per-day request budget. Override in config
+    # if a newer Live-capable model is available (e.g. Gemini 3 Flash Live).
+    live_model: str = "gemini-2.5-flash-live-preview"
     enabled: bool = False
 
 
@@ -387,9 +394,11 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
     model = str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip() or "gemini-3.1-flash-lite-preview"
+    live_model = str(g_raw.get("live_model", "gemini-2.5-flash-live-preview")).strip() or "gemini-2.5-flash-live-preview"
     return GeminiConfig(
         api_key=api_key,
         model=model,
+        live_model=live_model,
         enabled=bool(api_key),
     )
 

@@ -122,19 +122,24 @@ def is_brain_query(text: str) -> str | None:
     return None
 
 
-def search_and_format(country: str, query: str) -> str:
+async def search_and_format(country: str, query: str) -> str:
     """
     Search knowledge base, synthesize answer via LLM.
 
     Priority:
-    1. Gemini + Firestore wisdom_base (if GEMINI_API_KEY configured)
+    1. Gemini Live API + Firestore wisdom_base (if GEMINI_API_KEY configured)
     2. DeepSeek + SQLite knowledge table (legacy fallback)
+
+    Async because Gemini Live API is async-only (session-based streaming).
+    DeepSeek path stays sync internally; we just call it from the async
+    function — single Q&A latency dominated by network, blocking inside
+    one handler doesn't hurt the bot.
     """
-    # --- Gemini path (Firestore wisdom_base) ---
+    # --- Gemini path (Firestore wisdom_base, Live API) ---
     try:
         from . import gemini_brain
         if gemini_brain.is_enabled():
-            answer = gemini_brain.search_and_format(country, query)
+            answer = await gemini_brain.search_and_format(country, query)
             if answer:
                 return answer
             log.warning("МОЗГ: Gemini returned empty — falling back to DeepSeek+SQLite")
