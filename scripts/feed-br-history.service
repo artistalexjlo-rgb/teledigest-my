@@ -1,0 +1,26 @@
+[Unit]
+Description=Teledigest — feed historical BR messages to mining pipeline
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Container name is volatile (Dokploy rebuilds change suffix). Find it by
+# the image command at exec time so this works across redeploys.
+ExecStart=/bin/bash -c '\
+  CID=$(docker ps --filter "ancestor=$(docker ps --format "{{.Image}}" \
+    | grep -E "teledigest|user-app" | head -1)" --format "{{.ID}}" | head -1); \
+  if [ -z "$CID" ]; then \
+    CID=$(docker ps --format "{{.ID}} {{.Names}}" | grep -iE "teledigest" \
+      | awk "{print \\$1}" | head -1); \
+  fi; \
+  if [ -z "$CID" ]; then \
+    echo "feed-br-history: no teledigest container found" >&2; exit 1; \
+  fi; \
+  echo "feed-br-history: using container $CID"; \
+  docker exec "$CID" python -m scripts.feed_br_history --country br --batch 15'
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
