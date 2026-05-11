@@ -1,0 +1,15 @@
+[Unit]
+Description=Teledigest — daily timer to feed historical BR archive
+Requires=feed-br-history.service
+
+[Timer]
+# 03:17 UTC — off-peak window, away from Apps Script trigger top-of-the-hour
+# bursts. Fixed minute ensures predictable scheduling.
+OnCalendar=*-*-* 03:17:00 UTC
+# Catch up if the VPS was off during the scheduled moment.
+Persistent=true
+# Slight randomization so multiple VPS deploys don't all fire simultaneously.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
