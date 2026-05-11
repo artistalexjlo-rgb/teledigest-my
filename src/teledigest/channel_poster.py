@@ -127,24 +127,29 @@ def _channel_field_safe(target: str) -> str:
 
 def select_next_candidate(
     db, collection: str, channel_target: str,
-    last_country: str | None = None,
+    recent_countries: list[str] | None = None,
     excluded_countries: set[str] | None = None,
 ) -> PostCandidate | None:
     """
-    Pick the oldest unposted doc, preferring a country different from
-    `last_country` to keep the feed varied.
+    Pick the oldest unposted doc, preferring a country NOT in the recent
+    rotation window. Falls back gracefully if the queue is starved of
+    variety.
 
     Strategy:
-        1. Read up to 50 oldest unposted docs (by createdAt asc).
-        2. Filter out excluded countries.
-        3. If `last_country` is set and any candidate has a different
-           country — return the oldest of those.
-        4. Otherwise return the oldest overall (allow repeat).
+        1. Read up to 100 oldest unposted docs (by createdAt asc).
+        2. Filter out excluded countries (operator-configured exclude list)
+           and entries without content.
+        3. Try widest variety first: candidates whose country is NOT in
+           recent_countries (last N posted). If any — return oldest of those.
+        4. If queue is dominated by a country that's in recent_countries
+           (the typical situation after a historical-feed dump), shorten
+           the rotation window step by step: try excluding only the
+           last-2, then last-1, then nothing. This guarantees we don't
+           starve when the feed is skewed.
     """
     from google.cloud import firestore as fs
 
     channel_key = _channel_field_safe(channel_target)
-    posted_field = f"postedTo.{channel_key}.posted"
 
     # Firestore can't query "field doesn't exist" easily, so we use a where
     # clause that excludes only `posted == true`. New docs without postedTo
@@ -183,12 +188,59 @@ def select_next_candidate(
     if not candidates:
         return None
 
-    # Country rotation: prefer different country than last
-    if last_country:
-        diff = [c for c in candidates if c.country != last_country]
-        if diff:
-            return diff[0]
+    # Country rotation: try to avoid recent_countries entirely. If that
+    # starves the pool, shrink the rotation window step by step.
+    if recent_countries:
+        for window_size in range(len(recent_countries), 0, -1):
+            recent_set = set(recent_countries[-window_size:])
+            diff = [c for c in candidates if c.country not in recent_set]
+            if diff:
+                return diff[0]
     return candidates[0]
+
+
+def _load_recent_posted_countries(db, collection: str, channel_target: str,
+                                  n: int = 3) -> list[str]:
+    """
+    Read the most recent N posted docs for this channel and return their
+    countries (oldest of the N first). Survives bot restarts: rotation
+    state lives in Firestore, not in process memory.
+
+    Why this exists: Dokploy redeploys reset the in-process `last_country`
+    to None. Without persistence, every restart picks the oldest unposted
+    overall — which after a historical-BR-feed run is always BR. Three
+    redeploys in a row → three BR posts in a row.
+    """
+    from google.cloud import firestore as fs
+
+    channel_key = _channel_field_safe(channel_target)
+    try:
+        docs = list(
+            db.collection(collection)
+            .where(f"postedTo.{channel_key}.posted", "==", True)
+            .order_by(f"postedTo.{channel_key}.posted_at",
+                      direction=fs.Query.DESCENDING)
+            .limit(n)
+            .stream()
+        )
+    except Exception as e:
+        log.warning(
+            "Channel poster: could not load recent posted history "
+            "(%s). Rotation will start fresh. May need a Firestore composite "
+            "index for postedTo.%s.posted + postedTo.%s.posted_at.",
+            e, channel_key, channel_key,
+        )
+        return []
+
+    # Server returns newest first; we want oldest-first so the most-recent
+    # is at the END of the list — matches how recent_countries grows.
+    countries = []
+    for d in reversed(docs):
+        data = d.to_dict() or {}
+        c = (data.get("country") or "").lower()
+        if c:
+            countries.append(c)
+    return countries
 
 
 # --- Message formatting -------------------------------------------------------
@@ -222,12 +274,14 @@ def mark_posted(db, collection: str, doc_id: str, channel_target: str, posted_te
     })
 
 
-async def post_one(bot_client, last_country: str | None = None) -> str | None:
+async def post_one(bot_client,
+                   recent_countries: list[str] | None = None) -> str | None:
     """
     Pick + post one story to the configured channel.
 
-    Returns the country code that was posted (so caller can pass it as
-    `last_country` next time for rotation), or None if nothing to post / skip.
+    Returns the country code that was posted (so caller can append it to
+    its `recent_countries` deque for the next slot), or None if nothing
+    to post / skip.
     """
     cfg = get_config()
     if not cfg.channel.enabled:
@@ -250,7 +304,7 @@ async def post_one(bot_client, last_country: str | None = None) -> str | None:
 
     candidate = select_next_candidate(
         db, cfg.google.firestore_collection, cfg.channel.target,
-        last_country=last_country, excluded_countries=excluded,
+        recent_countries=recent_countries, excluded_countries=excluded,
     )
     if candidate is None:
         log.info("Channel poster: no unposted stories found.")
@@ -354,7 +408,28 @@ async def channel_poster_loop():
         ", ".join(t.strftime("%H:%M") for t in slots),
     )
 
-    last_country: str | None = None
+    # Rotation memory persists across restarts via Firestore — without this
+    # every Dokploy redeploy reset the in-memory last_country, and on a BR-
+    # skewed queue every first-post-after-restart was BR. Three deploys in
+    # a day → three BR posts in a row. _load_recent_posted_countries reads
+    # the most recent N posted docs to this channel and seeds the rotation.
+    from collections import deque
+    ROTATION_WINDOW = 3  # avoid repeating any of last 3 posted countries
+    try:
+        db_for_history = _build_firestore_client()
+        seed = _load_recent_posted_countries(
+            db_for_history, cfg.google.firestore_collection,
+            cfg.channel.target, n=ROTATION_WINDOW,
+        )
+    except Exception as e:
+        log.warning("Channel poster: rotation seed from Firestore failed (%s); "
+                    "starting with empty rotation.", e)
+        seed = []
+    recent_countries: deque[str] = deque(seed, maxlen=ROTATION_WINDOW)
+    if seed:
+        log.info("Channel poster: rotation seeded from Firestore history: %s",
+                 list(recent_countries))
+
     last_slot: dt.datetime | None = None
 
     while True:
@@ -371,15 +446,17 @@ async def channel_poster_loop():
         jitter = random.randint(-cfg.channel.jitter_minutes, cfg.channel.jitter_minutes)
         next_at = next_slot + dt.timedelta(minutes=jitter)
         sleep_seconds = max(1, int((next_at - now).total_seconds()))
-        log.info("Channel poster: next post at %s (sleep %ds)",
-                 next_at.isoformat(timespec="minutes"), sleep_seconds)
+        log.info("Channel poster: next post at %s (sleep %ds, recent=%s)",
+                 next_at.isoformat(timespec="minutes"), sleep_seconds,
+                 list(recent_countries))
         await asyncio.sleep(sleep_seconds)
 
         last_slot = next_slot
         try:
-            posted_country = await post_one(bot_client, last_country=last_country)
+            posted_country = await post_one(bot_client,
+                                            recent_countries=list(recent_countries))
             if posted_country:
-                last_country = posted_country
+                recent_countries.append(posted_country)
         except Exception as e:
             log.exception("Channel poster: unhandled error in slot: %s", e)
             # Continue loop — don't die on one bad slot
