@@ -117,7 +117,8 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
     assert "🧠" in result
     assert "Vivo" in result
     assert "записей из базы знаний" in result
-    mock_fetch.assert_called_once_with("br")
+    # _fetch_wisdom now takes no country argument — broad retrieval.
+    mock_fetch.assert_called_once_with()
 
 
 @pytest.mark.asyncio

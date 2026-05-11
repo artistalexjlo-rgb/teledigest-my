@@ -2,18 +2,23 @@
 gemini_brain.py — МОЗГ via Gemini Live API + Firestore wisdom_base.
 
 Flow:
-1. Query Firestore wisdom_base: country-specific docs + universal "any" docs.
-2. Format instruction fields as numbered context (English facts).
+1. Query Firestore wisdom_base: pull the top-N most recent docs across
+   ALL countries. No country filter on the database side — Gemini sees
+   broad context and picks the relevant facts itself from the query.
+2. Format instruction fields as numbered context (each entry shows its
+   country/tag so the model can ground references).
 3. Open Gemini Live API session, send system prompt + context + question.
 4. Receive streamed text, concatenate, return as Russian answer to user.
-5. On any Live API failure → return empty so caller can fall back to legacy
-   sync model / DeepSeek+SQLite path.
+5. On any Live API failure → fallback to sync Gemini → return empty so
+   caller can fall back to DeepSeek+SQLite path.
 
-Why Live API:
-- Free tier "Unlimited RPD" — МОЗГ answers don't compete with Apps Script
-  extraction for the per-day 500-request budget on flash-lite-preview.
-- TPM is 65K but per-question that's plenty: even a 30-doc context fits well
-  under that with the answer.
+Why no country filter:
+- Earlier version filtered Firestore by country derived from chat tag.
+  Real chats (e.g. luky_channel) are not always 1-1 with a country.
+  Asking "как получить CPF" in an AR-tagged chat hid all BR facts.
+- Gemini is perfectly capable of reading "CPF" or "пикс" and answering
+  from the right-country facts in the context. We just need to give it
+  enough context — that's what the limit bump is for.
 
 Auth: GEMINI_API_KEY from env or [gemini] api_key in config.
 """
@@ -26,15 +31,21 @@ from .config import get_config, log
 
 _BRAIN_SYSTEM = """\
 You are an assistant bot for an expat community chat called "МОЗГ".
-Answer the user's question using ONLY the facts provided in the knowledge base below.
+Answer the user's question using ONLY the facts in the knowledge base below.
 
-Rules:
+The knowledge base mixes facts from many countries. Each fact has a
+[country/tag] header so you can tell where it applies.
+
+Behavior:
 - Answer in Russian, conversational and informal.
 - Be specific: include exact prices, addresses, timelines, service names, steps.
 - KEEP IT SHORT: 2-4 sentences MAX. The user is on a phone — no walls of text.
 - If the user needs depth, finish with: "хочешь подробнее — спроси конкретнее".
-- If there are conflicting opinions — mention both briefly.
-- If the knowledge base has nothing useful — reply exactly:
+- If the question is ambiguous (could apply to multiple countries / multiple
+  scenarios in the knowledge base): list the most likely interpretations
+  in 1-2 sentences each and append: "уточни, что из этого тебе нужно".
+  Do NOT pick one arbitrarily.
+- If the knowledge base really has nothing — reply exactly:
   "в базе пока нет информации по этому вопросу"
 - Plain text only — no Markdown, no bullet symbols, no formatting.
 - Do NOT invent or guess information.
@@ -74,10 +85,16 @@ def _build_firestore_client():
     )
 
 
-def _fetch_wisdom(country: str, limit_country: int = 30, limit_any: int = 20) -> list[dict]:
+def _fetch_wisdom(limit: int = 200) -> list[dict]:
     """
-    Fetch wisdom_base docs for the given country + universal "any" entries.
-    Two separate Firestore queries — Firestore can't OR on different field values.
+    Fetch the most recent `limit` wisdom_base docs across ALL countries.
+    No country filter — Gemini reads the headers and picks relevant facts.
+
+    Why 200: at ~200 chars per instruction, that's ~40K chars / ~12K tokens
+    of context. Well under Live API's 65K TPM budget per request, with
+    headroom for the actual answer. Bumping further hits diminishing
+    returns (older facts more likely stale, and Gemini's attention spreads
+    thinner over too much context).
     """
     from google.cloud import firestore as fs
 
@@ -93,35 +110,17 @@ def _fetch_wisdom(country: str, limit_country: int = 30, limit_any: int = 20) ->
         return []
 
     collection = cfg.google.assistant_collection
-    results: list[dict] = []
-
-    # Country-specific knowledge
     try:
         docs = (
             db.collection(collection)
-            .where("country", "==", country.lower())
             .order_by("createdAt", direction=fs.Query.DESCENDING)
-            .limit(limit_country)
+            .limit(limit)
             .stream()
         )
-        results.extend(d.to_dict() for d in docs if d.to_dict())
+        return [d.to_dict() for d in docs if d.to_dict()]
     except Exception as e:
-        log.error("Gemini МОЗГ: Firestore query failed (country=%s): %s", country, e)
-
-    # Universal "any" knowledge (travel hacks, cross-country advice)
-    try:
-        docs = (
-            db.collection(collection)
-            .where("country", "==", "any")
-            .order_by("createdAt", direction=fs.Query.DESCENDING)
-            .limit(limit_any)
-            .stream()
-        )
-        results.extend(d.to_dict() for d in docs if d.to_dict())
-    except Exception as e:
-        log.error("Gemini МОЗГ: Firestore query failed (any): %s", e)
-
-    return results
+        log.error("Gemini МОЗГ: Firestore query failed: %s", e)
+        return []
 
 
 def _format_context(docs: list[dict]) -> str:
@@ -213,18 +212,13 @@ async def search_and_format(country: str, query: str) -> str:
     Query Firestore wisdom_base and synthesize answer via Gemini Live API.
     Returns empty string on failure (caller should fallback to DeepSeek).
 
-    Country resolution: starts with the chat-derived country, but if the
-    query contains a country-specific term (CPF, PIX, Bali, куит, ...) we
-    override with the inferred country. This handles the general-chat
-    case where users ask cross-country questions in a single-country chat.
+    The `country` argument is currently ignored — Gemini sees broad context
+    and infers the country from the question itself. Kept in the signature
+    so the public API for knowledge_search.search_and_format doesn't break.
     """
-    from .country_inference import infer_country_with_log
-
     cfg = get_config()
 
-    country, _overridden = infer_country_with_log(query, country)
-
-    docs = _fetch_wisdom(country)
+    docs = _fetch_wisdom()
     if not docs:
         return (
             "🧠 Не нашёл ничего по этому запросу. "
@@ -235,8 +229,8 @@ async def search_and_format(country: str, query: str) -> str:
     context = _format_context(docs)
     useful_count = context.count("\n\n") + 1 if context else 0
     log.info(
-        "Gemini МОЗГ: %d docs fetched (%d with instructions) for country=%s, query=%r",
-        len(docs), useful_count, country, query[:60],
+        "Gemini МОЗГ: %d docs fetched (%d with instructions), query=%r",
+        len(docs), useful_count, query[:60],
     )
 
     if not context:
