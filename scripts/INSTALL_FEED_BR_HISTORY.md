@@ -54,13 +54,13 @@ journalctl -u feed-br-history.service --since "10 minutes ago"
 
 ```bash
 CID=$(docker ps --format '{{.ID}} {{.Names}}' | grep teledigest | awk '{print $1}' | head -1)
-docker exec "$CID" python -m scripts.feed_br_history --batch 15
+docker exec "$CID" python -m teledigest.scripts.feed_br_history --batch 15
 
 # Посмотреть что бы дампнулось без записи:
-docker exec "$CID" python -m scripts.feed_br_history --batch 15 --dry-run
+docker exec "$CID" python -m teledigest.scripts.feed_br_history --batch 15 --dry-run
 
 # Больший батч (если хочется быстрее, всё равно упрётся в Gemini RPD):
-docker exec "$CID" python -m scripts.feed_br_history --batch 30
+docker exec "$CID" python -m teledigest.scripts.feed_br_history --batch 30
 ```
 
 ## Остановить когда архив прокачается

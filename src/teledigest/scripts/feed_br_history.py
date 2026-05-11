@@ -27,11 +27,11 @@ Designed for unattended daily systemd runs: 15 pairs/day means a 365-day
 archive drains in ~24 days while leaving daily-scraped files from active
 countries plenty of headroom in the 500 RPD Gemini free-tier budget.
 
-Usage:
-    python -m scripts.feed_br_history                       # 15 pairs
-    python -m scripts.feed_br_history --batch 20            # 20 pairs
-    python -m scripts.feed_br_history --country br --batch 10
-    python -m scripts.feed_br_history --dry-run             # show, no write
+Usage (inside container or anywhere teledigest is installed):
+    python -m teledigest.scripts.feed_br_history                   # 15 pairs
+    python -m teledigest.scripts.feed_br_history --batch 20        # 20 pairs
+    python -m teledigest.scripts.feed_br_history --country br --batch 10
+    python -m teledigest.scripts.feed_br_history --dry-run         # show, no write
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from teledigest.config import log
+from teledigest.config import init_config, log
 from teledigest.daily_samples import (
     SampleTarget,
     _channel_slug,
@@ -155,7 +155,15 @@ def main() -> int:
                              "(default: 15, sized to fit Gemini free-tier RPD)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be dumped, write nothing")
+    parser.add_argument("--config", default="/config/teledigest.conf",
+                        help="Path to teledigest.conf "
+                             "(default: /config/teledigest.conf inside container)")
     args = parser.parse_args()
+
+    # Bot's entrypoint normally calls init_config(); this script is a
+    # standalone process invoked via `docker exec`, so we must init the
+    # global config ourselves before touching daily_samples helpers.
+    init_config(Path(args.config))
 
     samples_dir = get_samples_dir()
     pending = find_pending_pairs(args.country, samples_dir)
