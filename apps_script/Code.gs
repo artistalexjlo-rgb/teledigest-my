@@ -33,6 +33,18 @@ var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 var FORCE_REPROCESS = false;
 
+// --- Runtime tuning ---
+// Apps Script consumer hard limit = 6 min per execution. We exit at 5 min to
+// give the in-flight Gemini call time to wrap. Unprocessed files survive
+// (not marked) and get picked up by the next 15-min trigger.
+var MAX_RUNTIME_MS = 5 * 60 * 1000;
+// Free tier Gemini 3.1-flash-lite-preview = 15 RPM. 4.5s gap → ~13 RPM,
+// safely under cap, leaves headroom for retries.
+var INTER_FILE_PAUSE_MS = 4500;
+// Retry schedule for transient Gemini failures (503/429/UNAVAILABLE).
+// 5s → 20s → 60s. Total worst case ~85s of waits per file.
+var GEMINI_RETRY_DELAYS_MS = [5000, 20000, 60000];
+
 
 function getConfig_() {
   var props = PropertiesService.getScriptProperties();
@@ -59,14 +71,27 @@ function processNewLogs() {
     var cfg = getConfig_();
     var folder = DriveApp.getFolderById(cfg.folderId);
     var files = folder.getFiles();
+    var startedAt = Date.now();
+    var processedThisRun = 0;
 
     while (files.hasNext()) {
+      if (Date.now() - startedAt > MAX_RUNTIME_MS) {
+        console.log("Runtime budget reached after " + processedThisRun +
+                    " files. Remaining unprocessed files will be picked up " +
+                    "by the next trigger.");
+        break;
+      }
+
       var file = files.next();
       var desc = file.getDescription() || "";
 
       var isText = file.getMimeType() === "text/plain";
       var notProcessed = desc.indexOf("processed") === -1;
       if (isText && (FORCE_REPROCESS || notProcessed)) {
+        if (processedThisRun > 0) {
+          // Spread requests across time to stay under Gemini RPM cap.
+          Utilities.sleep(INTER_FILE_PAUSE_MS);
+        }
         console.log(">>> Processing: " + file.getName());
         var ok = runMining_(file, cfg);
         if (ok) {
@@ -74,10 +99,11 @@ function processNewLogs() {
           console.log("<<< Done: " + file.getName());
         } else {
           console.warn(
-            file.getName() + ": Gemini call failed (HTTP/parse error). " +
+            file.getName() + ": Gemini call failed after retries. " +
             "Not marking processed — will retry on next run."
           );
         }
+        processedThisRun++;
       }
     }
   } catch (e) {
@@ -101,7 +127,18 @@ function runMining_(file, cfg) {
       "по стандарту). Если pattern универсальный и не привязан к одной стране " +
       "(общий лайфхак для путешественников, советы по технике, и т.п.) — " +
       "укажи \"any\".\n" +
-      "- routing: одна из строк — \"both\", \"assistant_only\", \"channel_only\".\n" +
+      "- routing: одна из строк. ВЫБИРАЙ ПО ПРАВИЛАМ:\n" +
+      "    * \"both\" — есть И живая история/байка/контекст, И полезный сухой " +
+      "факт (цифры, цены, инструкция, ссылка). ЭТО ДЕФОЛТ — большинство " +
+      "интересных кейсов сюда. Если сомневаешься — ставь \"both\".\n" +
+      "    * \"assistant_only\" — голый сухой факт без живой истории. Например: " +
+      "контакт чиновника, точная цена, шаг бюрократической процедуры, " +
+      "название документа. ИИ-помощнику пригодится, но публиковать в канал " +
+      "скучно.\n" +
+      "    * \"channel_only\" — живая байка/мем/локальный колорит без " +
+      "извлекаемого факта. Например: смешная история без конкретики, " +
+      "наблюдение про менталитет, культурный анекдот. В канал интересно, " +
+      "ассистенту нечего из этого вытащить.\n" +
       "- tag: на английском (Finance, Safety, Bureaucracy, Travel и т.п.).\n" +
       "- target_languages: массив ISO 639-1 кодов языков на которые история " +
       "имеет смысл переводиться. По умолчанию [\"ru\"] для русско-локальных " +
@@ -125,18 +162,8 @@ function runMining_(file, cfg) {
       "generationConfig": { "responseMimeType": "application/json" }
     };
 
-    var response = UrlFetchApp.fetch(url, {
-      "method": "post",
-      "contentType": "application/json",
-      "payload": JSON.stringify(payload),
-      "muteHttpExceptions": true
-    });
-
-    var code = response.getResponseCode();
-    if (code !== 200) {
-      console.error("Gemini HTTP " + code + ": " + response.getContentText().slice(0, 500));
-      return false;
-    }
+    var response = fetchGeminiWithRetry_(url, payload, file.getName());
+    if (!response) return false;
 
     var result = JSON.parse(response.getContentText());
     if (!result.candidates || !result.candidates[0] || !result.candidates[0].content) {
@@ -261,6 +288,46 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg) {
   console.error("Firestore " + collectionName + " HTTP " + code + ": " +
                 response.getContentText().slice(0, 500));
   return false;
+}
+
+
+/**
+ * Gemini POST with retry on transient failures (503/429).
+ *
+ * Returns response object on HTTP 200, or null after exhausting retries.
+ * 503 ("model overloaded") and 429 ("rate limit") are very common on the
+ * free tier — backoff lets capacity recover. Other HTTP errors (4xx, 5xx)
+ * are not retried, just logged.
+ */
+function fetchGeminiWithRetry_(url, payload, fileName) {
+  var maxAttempts = GEMINI_RETRY_DELAYS_MS.length + 1;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    var response = UrlFetchApp.fetch(url, {
+      "method": "post",
+      "contentType": "application/json",
+      "payload": JSON.stringify(payload),
+      "muteHttpExceptions": true
+    });
+    var code = response.getResponseCode();
+
+    if (code === 200) return response;
+
+    var body = response.getContentText().slice(0, 500);
+    var transient = (code === 503 || code === 429 || code === 500);
+    if (transient && attempt < maxAttempts) {
+      var waitMs = GEMINI_RETRY_DELAYS_MS[attempt - 1];
+      console.warn(fileName + ": Gemini HTTP " + code +
+                   ", retrying in " + (waitMs / 1000) + "s " +
+                   "(attempt " + attempt + "/" + maxAttempts + "). " + body);
+      Utilities.sleep(waitMs);
+      continue;
+    }
+
+    console.error(fileName + ": Gemini HTTP " + code +
+                  " (attempt " + attempt + "/" + maxAttempts + "): " + body);
+    return null;
+  }
+  return null;
 }
 
 
