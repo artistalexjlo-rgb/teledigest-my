@@ -428,11 +428,14 @@ def main() -> int:
     total_written = 0
     total_skipped = 0
     total_patterns = 0
+    failed_pages: list[str] = []
+    skipped_empty: list[str] = []
     for i, title in enumerate(pages, start=1):
         try:
             wt = fetch_wikitext(session, title)
             if not wt:
                 log.warning("[%d/%d] %s: no wikitext, skipping", i, len(pages), title)
+                skipped_empty.append(title)
                 continue
             patterns = parse_page(wt, country, title)
             written, skipped = write_patterns(db, country, title, patterns)
@@ -444,10 +447,20 @@ def main() -> int:
         except Exception as e:
             log.exception("[%d/%d] %s: parse/write failed: %s",
                           i, len(pages), title, e)
+            failed_pages.append(title)
 
-    log.info("Import complete: country=%s pages=%d patterns_total=%d "
-             "wrote=%d skipped_existing=%d",
-             country, len(pages), total_patterns, total_written, total_skipped)
+    log.info(
+        "Import complete: country=%s pages_in_tree=%d "
+        "pages_parsed_ok=%d pages_failed=%d pages_no_wikitext=%d "
+        "patterns_total=%d wrote_new=%d skipped_existing=%d",
+        country, len(pages),
+        len(pages) - len(failed_pages) - len(skipped_empty),
+        len(failed_pages), len(skipped_empty),
+        total_patterns, total_written, total_skipped,
+    )
+    if failed_pages:
+        log.warning("Failed pages (re-run will retry these): %s",
+                    ", ".join(failed_pages))
     return 0
 
 
