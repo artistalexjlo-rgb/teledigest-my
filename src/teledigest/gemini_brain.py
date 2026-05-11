@@ -183,18 +183,26 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
 
 async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str) -> str:
     """
-    Fallback to legacy synchronous Gemini API if Live API fails / unavailable.
-    Same model family, just request/response instead of streaming session.
-    Runs the blocking SDK in a thread to keep the bot's asyncio loop unblocked.
+    Fallback to non-streaming Gemini request when Live API errors.
+    Same `google-genai` SDK, just `generate_content` instead of a Live session.
+    Runs the blocking call in a thread to keep the bot's asyncio loop unblocked.
+
+    (We deliberately do NOT import the legacy google-generativeai SDK —
+    https://github.com/google-gemini/deprecated-generative-ai-python — Google
+    has deprecated it; new SDK `google-genai` covers both paths.)
     """
+    from google import genai
+    from google.genai import types
+
     def _blocking() -> str:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction=_BRAIN_SYSTEM,
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=_BRAIN_SYSTEM,
+            ),
         )
-        response = model.generate_content(prompt)
         return (response.text or "").strip()
 
     return await asyncio.to_thread(_blocking)
