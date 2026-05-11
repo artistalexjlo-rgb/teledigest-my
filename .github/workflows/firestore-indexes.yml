@@ -1,0 +1,67 @@
+name: Deploy Firestore Indexes
+
+# Auto-deploy composite indexes from firestore.indexes.json whenever it
+# changes on main. No local firebase-tools install needed — CI does it.
+#
+# Triggers:
+# - push to main touching firestore.indexes.json / firebase.json / this file
+# - workflow_dispatch (manual run from GitHub Actions tab)
+#
+# Required secrets / variables (one-time setup, see README):
+# - secrets.FIREBASE_SERVICE_ACCOUNT  — full JSON of a GCP service account
+#   key with "Cloud Datastore Index Admin" role (or "Firebase Admin SDK
+#   Administrator Service Agent" for a wider blanket)
+# - vars.FIREBASE_PROJECT_ID          — e.g. project-56cb62a9-8914-4ae3-b44
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.indexes.json"
+      - "firebase.json"
+      - ".github/workflows/firestore-indexes.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@13
+
+      - name: Write service account JSON
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::Secret FIREBASE_SERVICE_ACCOUNT is empty. See README → Firestore composite indexes."
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/firebase-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/firebase-sa.json" >> "$GITHUB_ENV"
+
+      - name: Resolve project id
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$PROJECT_ID" ]; then
+            echo "::error::Repo variable FIREBASE_PROJECT_ID is not set. See README → Firestore composite indexes."
+            exit 1
+          fi
+          echo "FIREBASE_PROJECT=$PROJECT_ID" >> "$GITHUB_ENV"
+
+      - name: Deploy Firestore indexes
+        run: |
+          firebase deploy \
+            --only firestore:indexes \
+            --project "$FIREBASE_PROJECT" \
+            --non-interactive

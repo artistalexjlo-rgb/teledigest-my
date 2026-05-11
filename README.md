@@ -647,25 +647,10 @@ This project is licensed under the **MIT License**.
 ## Firestore composite indexes
 
 Запросы бота к Firestore с `where(...)` + `order_by(...)` требуют
-composite indexes. Чтобы не ловить `400 The query requires an index`
-в продакшене, индексы хранятся декларативно в `firestore.indexes.json`
-и деплоятся через Firebase CLI.
-
-### Развёртывание индексов (раз в проект)
-
-```bash
-# Один раз — установить Firebase CLI
-npm install -g firebase-tools
-firebase login
-
-# Деплой всех индексов из firestore.indexes.json
-firebase deploy --only firestore:indexes --project project-56cb62a9-8914-4ae3-b44
-```
-
-Команду нужно прогнать **после первой настройки проекта** и каждый раз
-когда добавляется новый индекс в `firestore.indexes.json`. Создание
-одного индекса занимает 2-5 минут (Firestore Console показывает статус
-`Building` → `Enabled`).
+composite indexes. Индексы хранятся декларативно в
+`firestore.indexes.json` и **деплоятся автоматически** через GitHub
+Actions при push'е в `main` (workflow `.github/workflows/firestore-indexes.yml`).
+Локально firebase-tools ставить не надо.
 
 ### Когда добавлять новый индекс
 
@@ -673,14 +658,49 @@ firebase deploy --only firestore:indexes --project project-56cb62a9-8914-4ae3-b4
 - Есть ли `.where(...)` + `.order_by(...)` на разные поля?
 - Есть ли `.where(...)` на nested map field (`postedTo.<channel>.posted`)?
 
-Если да — нужен composite index. Добавь его в `firestore.indexes.json`
-в этом же PR (не "потом, по ошибке в проде"). Подкатить можно либо
-запустив `firebase deploy --only firestore:indexes` локально, либо
-прогнав запрос на проде и пройдя по ссылке которую вернёт Firestore
-ошибка (она автоматически открывает Firebase Console с pre-filled
-формой индекса).
+Если да — добавь индекс в `firestore.indexes.json` **в этом же PR**.
+После merge'a workflow подхватит изменение и задеплоит новый индекс
+в Firestore (2-5 минут на сборку). Никаких ручных команд.
+
+Можно также прогнать workflow руками: GitHub → Actions → "Deploy
+Firestore Indexes" → Run workflow.
 
 Текущие индексы:
 - `wisdom_base (country ASC, createdAt DESC)` — МОЗГ retrieval по стране
 - `wikivoyage_base (country ASC, importedAt DESC)` — wiki cold-start retrieval
 - `telegram_queue (postedTo.luky_channel.posted, postedTo.luky_channel.posted_at DESC)` — channel poster rotation seed
+
+### One-time setup CI (только один раз на проект)
+
+Workflow требует доступа к Firebase под именем service account'a.
+Один раз:
+
+1. **Создать service account в Google Cloud:**
+   - https://console.cloud.google.com/iam-admin/serviceaccounts → твой
+     project `project-56cb62a9-8914-4ae3-b44` → CREATE SERVICE ACCOUNT
+   - Имя: `github-actions-firestore-indexes`
+   - Role: **`Cloud Datastore Index Admin`** (минимально достаточно)
+     или **`Firebase Admin SDK Administrator Service Agent`** (если
+     хочется одну роль для будущих firebase-фич)
+   - Done
+
+2. **Сгенерировать JSON-ключ:**
+   - На созданном service account: **KEYS → ADD KEY → JSON** → скачается
+     JSON-файл. **Открой его в текстовом редакторе** — нужен весь
+     контент.
+
+3. **Положить в GitHub:**
+   - https://github.com/artistalexjlo-rgb/teledigest-my/settings/secrets/actions
+   - **New repository secret:**
+     - Name: `FIREBASE_SERVICE_ACCOUNT`
+     - Secret: вставить весь JSON-файл (от `{` до `}`)
+   - Перейти на вкладку **Variables → New repository variable:**
+     - Name: `FIREBASE_PROJECT_ID`
+     - Value: `project-56cb62a9-8914-4ae3-b44`
+
+4. **Проверить:**
+   - GitHub → Actions → Deploy Firestore Indexes → Run workflow → main
+   - Лог должен закончиться "Deploy complete!". Через 2-5 минут все
+     индексы будут Enabled в Firebase Console.
+
+После этого никаких ручных действий — push в main = индексы задеплоены.
