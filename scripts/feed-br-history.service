@@ -8,14 +8,17 @@ Type=oneshot
 # Container name is volatile (Dokploy rebuilds change suffix). Find it by
 # the image command at exec time so this works across redeploys.
 ExecStart=/bin/bash -c '\
-  CID=$(docker ps --filter "ancestor=$(docker ps --format "{{.Image}}" \
-    | grep -E "teledigest|user-app" | head -1)" --format "{{.ID}}" | head -1); \
+  # Dokploy / Docker Swarm gives containers names like:
+  #   bots-grab-rlcj1h.1.h816na530nwfpt1q9r6nc34d2
+  # Image names also have the project prefix. Adjust the grep below if your
+  # deployment uses a different project name.
+  CID=$(docker ps --format "{{.ID}} {{.Names}} {{.Image}}" \
+    | grep -iE "bots-grab|teledigest" | awk "{print \\$1}" | head -1); \
   if [ -z "$CID" ]; then \
-    CID=$(docker ps --format "{{.ID}} {{.Names}}" | grep -iE "teledigest" \
-      | awk "{print \\$1}" | head -1); \
-  fi; \
-  if [ -z "$CID" ]; then \
-    echo "feed-br-history: no teledigest container found" >&2; exit 1; \
+    echo "feed-br-history: no teledigest container found" >&2; \
+    echo "feed-br-history: docker ps shows:" >&2; \
+    docker ps --format "  {{.ID}} {{.Names}} {{.Image}}" >&2; \
+    exit 1; \
   fi; \
   echo "feed-br-history: using container $CID"; \
   docker exec "$CID" python -m scripts.feed_br_history --country br --batch 15'
