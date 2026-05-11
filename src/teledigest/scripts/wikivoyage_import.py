@@ -213,12 +213,14 @@ def _norm_section(name: str) -> str:
 
 def _normalize_text(s: str) -> str:
     """Strip wiki-markup leftovers, collapse whitespace."""
-    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)  # [[Link|Label]] -> Label
-    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)            # [[Plain]] -> Plain
-    s = re.sub(r"\{\{[^}]+\}\}", "", s)                   # leftover templates
-    s = re.sub(r"'''([^']+)'''", r"\1", s)                # bold
-    s = re.sub(r"''([^']+)''", r"\1", s)                  # italic
-    s = re.sub(r"<[^>]+>", "", s)                         # html tags
+    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)        # [[Link|Label]] -> Label
+    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)                  # [[Plain]] -> Plain
+    s = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", s)        # [url label] -> label
+    s = re.sub(r"\[https?://\S+\]", "", s)                     # bare [url] -> drop
+    s = re.sub(r"\{\{[^}]+\}\}", "", s)                        # leftover templates
+    s = re.sub(r"'''([^']+)'''", r"\1", s)                     # bold
+    s = re.sub(r"''([^']+)''", r"\1", s)                       # italic
+    s = re.sub(r"<[^>]+>", "", s)                              # html tags
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -244,6 +246,16 @@ def _build_listing_pattern(
     hours = _template_field(template, "hours")
     price = _template_field(template, "price")
     content = _template_field(template, "content")
+    phone = _template_field(template, "phone")
+
+    # Quality gate: require either substantive prose OR multiple
+    # structured fields. Filters out skeletons like
+    # "Jomtien Bowl :: 8 lanes. Hours: Daily, 10:00-02:00."
+    # while keeping useful budget-hostel listings with address+price+context.
+    has_substantive_content = content and len(content) >= 30
+    structured_field_count = sum(bool(x) for x in (address, hours, price, phone))
+    if not has_substantive_content and structured_field_count < 2:
+        return None
 
     # Build a single instruction sentence/paragraph.
     parts = [content] if content else []
@@ -253,9 +265,10 @@ def _build_listing_pattern(
         parts.append(f"Hours: {hours}.")
     if price:
         parts.append(f"Price: {price}.")
+    if phone:
+        parts.append(f"Phone: {phone}.")
     instruction = " ".join(parts).strip()
     if not instruction:
-        # Listing with only name and no other info — too thin to be useful.
         return None
 
     return {
@@ -317,14 +330,11 @@ def parse_page(
         if not heading_nodes:
             continue
         section_name = str(heading_nodes[0].title).strip()
-        body = section
-        # Strip templates that we already captured as listings — what
-        # remains is the prose between them.
-        for tpl in body.filter_templates():
-            if str(tpl.name).strip().lower() in LISTING_TAG_MAP:
-                body.remove(tpl)
-        # Split remaining text by blank-line paragraphs.
-        text = str(body)
+        # Take section as raw text. _normalize_text below strips templates
+        # ({{...}}) via regex, so we don't need to mutate the parse tree
+        # (which was fragile — Wikicode.remove can ValueError on nested
+        # templates whose reference is in a different slice).
+        text = str(section)
         # Remove the heading line itself from body text
         text = re.sub(r"^==[^=]+==\s*", "", text, count=1)
         paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
@@ -431,11 +441,14 @@ def main() -> int:
     total_written = 0
     total_skipped = 0
     total_patterns = 0
+    failed_pages: list[str] = []
+    skipped_empty: list[str] = []
     for i, title in enumerate(pages, start=1):
         try:
             wt = fetch_wikitext(session, title)
             if not wt:
                 log.warning("[%d/%d] %s: no wikitext, skipping", i, len(pages), title)
+                skipped_empty.append(title)
                 continue
             patterns = parse_page(wt, country, title)
             written, skipped = write_patterns(db, country, title, patterns)
@@ -447,10 +460,20 @@ def main() -> int:
         except Exception as e:
             log.exception("[%d/%d] %s: parse/write failed: %s",
                           i, len(pages), title, e)
+            failed_pages.append(title)
 
-    log.info("Import complete: country=%s pages=%d patterns_total=%d "
-             "wrote=%d skipped_existing=%d",
-             country, len(pages), total_patterns, total_written, total_skipped)
+    log.info(
+        "Import complete: country=%s pages_in_tree=%d "
+        "pages_parsed_ok=%d pages_failed=%d pages_no_wikitext=%d "
+        "patterns_total=%d wrote_new=%d skipped_existing=%d",
+        country, len(pages),
+        len(pages) - len(failed_pages) - len(skipped_empty),
+        len(failed_pages), len(skipped_empty),
+        total_patterns, total_written, total_skipped,
+    )
+    if failed_pages:
+        log.warning("Failed pages (re-run will retry these): %s",
+                    ", ".join(failed_pages))
     return 0
 
 
