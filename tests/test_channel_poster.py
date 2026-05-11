@@ -142,7 +142,7 @@ def test_select_skips_already_posted():
 
 
 def test_select_country_rotation_prefers_different():
-    """If last_country='br', selection prefers a non-br doc even if br is older."""
+    """If last post was 'br', selection prefers a non-br doc even if br is older."""
     docs = [
         _fake_doc("d1", "br", "old br"),
         _fake_doc("d2", "br", "newer br"),
@@ -150,23 +150,58 @@ def test_select_country_rotation_prefers_different():
     ]
     db = _fake_db(docs)
     pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    last_country="br")
+                                    recent_countries=["br"])
     assert pick is not None
     assert pick.doc_id == "d3"
     assert pick.country == "id"
 
 
 def test_select_country_rotation_falls_back_when_only_repeat_left():
-    """If queue has only 'br' docs and last_country='br' — accept br anyway."""
+    """If queue has only 'br' docs and last was 'br' — accept br anyway."""
     docs = [
         _fake_doc("d1", "br", "br1"),
         _fake_doc("d2", "br", "br2"),
     ]
     db = _fake_db(docs)
     pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    last_country="br")
+                                    recent_countries=["br"])
     assert pick is not None
     assert pick.doc_id == "d1"
+
+
+def test_select_country_rotation_window_shrinks_on_starvation():
+    """
+    recent=[br,vn,id], queue is br+vn+id only — window 3 has nothing,
+    window 2 (last vn,id) still empty, window 1 (only id) excludes id but
+    allows br/vn → returns oldest of br/vn (br).
+    Verifies the graceful shrinking degradation.
+    """
+    docs = [
+        _fake_doc("d1", "br", "br1"),
+        _fake_doc("d2", "vn", "vn1"),
+        _fake_doc("d3", "id", "id1"),
+    ]
+    db = _fake_db(docs)
+    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
+                                    recent_countries=["br", "vn", "id"])
+    assert pick is not None
+    # Window 3 → empty. Window 2 (vn,id) → only br left → returns d1.
+    assert pick.country == "br"
+
+
+def test_select_rotation_window_3_avoids_recent_three():
+    """recent=[br,vn,id] + queue has [br,vn,id,mu] — picks mu (not in window)."""
+    docs = [
+        _fake_doc("d1", "br", "br1"),
+        _fake_doc("d2", "vn", "vn1"),
+        _fake_doc("d3", "id", "id1"),
+        _fake_doc("d4", "mu", "mu1"),
+    ]
+    db = _fake_db(docs)
+    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
+                                    recent_countries=["br", "vn", "id"])
+    assert pick is not None
+    assert pick.country == "mu"
 
 
 def test_select_excludes_countries():
@@ -248,7 +283,7 @@ async def test_post_one_end_to_end(app_config):
 
     with patch.object(cp, "_build_firestore_client", return_value=fake_db), \
          patch.object(cp, "mark_posted") as mark_mock:
-        result = await cp.post_one(bot_client, last_country=None)
+        result = await cp.post_one(bot_client, recent_countries=None)
 
     assert result == "br"
     bot_client.send_message.assert_awaited_once()
