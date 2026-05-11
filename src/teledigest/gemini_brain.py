@@ -212,8 +212,17 @@ async def search_and_format(country: str, query: str) -> str:
     """
     Query Firestore wisdom_base and synthesize answer via Gemini Live API.
     Returns empty string on failure (caller should fallback to DeepSeek).
+
+    Country resolution: starts with the chat-derived country, but if the
+    query contains a country-specific term (CPF, PIX, Bali, куит, ...) we
+    override with the inferred country. This handles the general-chat
+    case where users ask cross-country questions in a single-country chat.
     """
+    from .country_inference import infer_country_with_log
+
     cfg = get_config()
+
+    country, _overridden = infer_country_with_log(query, country)
 
     docs = _fetch_wisdom(country)
     if not docs:
