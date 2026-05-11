@@ -60,7 +60,12 @@ clasp push
    - **Save**
 3. Опционально, тоже как Script properties:
    - `FIREBASE_PROJECT_ID` = полный project id (если default в коде обрезан)
-   - `FOLDER_ID` = id папки Drive (если хочешь переопределить)
+   - `FOLDER_ID` = id папки Drive с input-файлами (если хочешь переопределить)
+   - `SUMMARY_FOLDER_ID` = id отдельной папки Drive для дневных summary-TXT
+     (см. ниже). Если не задано — summary не пишется, пайплайн работает.
+   - `SUMMARY_TZ` = timezone для даты в имени summary-файла. Дефолт
+     `Europe/Moscow`. Менять только если хочешь привязать дату к другому
+     поясу.
 4. Сверху выбери из dropdown функцию `processNewLogs` → жми **▶ Run**.
    Гугл попросит авторизовать scopes (Drive, Firestore, External requests).
    Жми **Review permissions** → выбери аккаунт → **Advanced → Go to
@@ -84,6 +89,38 @@ clasp push
 Если триггеров несколько (старый hourly + новый 15-min) — удали старый,
 иначе будут параллельные запуски на одни и те же файлы. Idempotent, но
 бессмысленно жрёт квоту.
+
+## Daily mining summary в Drive
+
+Каждый раз когда Apps Script успешно записывает pattern в Firestore — он
+ещё дописывает строку в дневной TXT файл на Drive. Это даёт быстрый
+человекочитаемый отчёт "что налили в БД сегодня" без необходимости
+ползать в Firestore Console.
+
+### Один раз — создать папку
+
+1. В Google Drive создай папку, например `mining_summaries`.
+2. Скопируй её ID из URL: `https://drive.google.com/drive/folders/<это_id>`.
+3. В Apps Script: **Project settings → Script properties → Add property**:
+   - `SUMMARY_FOLDER_ID` = `<тот ID>`
+   - **Save**.
+
+С этого момента в этой папке появятся два файла в сутки:
+
+- `YYYY-MM-DD_wisdom.txt` — мухи (assistant data, ai_lesson)
+- `YYYY-MM-DD_stories.txt` — котлеты (channel stories, human_story)
+
+Формат одной строки:
+```
+[br/Finance] Bank card for non-residents :: Use Caixa branch in SP with passport + tax ID  (src: 2026-05-07_br_chatforum.txt)
+```
+
+Дата = дата запуска, не дата исходного лога. FORCE_REPROCESS-прогон
+архива за неделю → всё в сегодняшний summary. Удобно для оценки качества
+очередного апдейта промпта.
+
+Если `SUMMARY_FOLDER_ID` не задан — summary не пишется, остальной
+пайплайн работает как обычно.
 
 ## Что изменилось в v3.2 vs v3.1
 
