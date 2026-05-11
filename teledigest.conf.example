@@ -61,3 +61,13 @@ language = "ru"
 
 [sources.digest_targets]
 br = "@Digest_Br"
+
+# --- Gemini МОЗГ (optional override) ---
+# API key читается из env GEMINI_API_KEY (см. Dokploy → Environment).
+# Эта секция нужна ТОЛЬКО если хочешь переопределить имя модели.
+# Имена preview-моделей у Google меняются ~раз в месяц — точный ID см.
+# в https://aistudio.google.com (выпадашка моделей в playground).
+#
+# [gemini]
+# live_model = "gemini-3.1-flash-live-preview"  # для МОЗГ-ответов через Live API
+# model = "gemini-3.1-flash-lite-preview"       # sync fallback модель

@@ -82,23 +82,6 @@ def _make_mock_config(gemini_key: str = "fake-key", firestore_project: str = "pr
     return cfg
 
 
-def _make_mock_genai_module(answer_text: str):
-    """Inject a fake google.generativeai module into sys.modules."""
-    import sys
-    import types as _types
-
-    mock_genai = MagicMock()
-    mock_response = MagicMock()
-    mock_response.text = answer_text
-    mock_genai.GenerativeModel.return_value.generate_content.return_value = mock_response
-
-    # Preserve real google package if present; only override generativeai submodule
-    if "google" not in sys.modules:
-        sys.modules["google"] = _types.ModuleType("google")
-    sys.modules["google.generativeai"] = mock_genai
-    return mock_genai
-
-
 _SAMPLE_DOCS = [
     {"title": "SIM Brazil", "tag": "Telecom", "country": "br",
      "instruction": "Vivo is best, R$20 SIM, ID required."},
@@ -107,47 +90,94 @@ _SAMPLE_DOCS = [
 ]
 
 
+@pytest.mark.asyncio
 @patch("teledigest.gemini_brain.get_config")
-@patch("teledigest.gemini_brain._fetch_wisdom")     # mock Firestore fetch
-def test_search_and_format_gemini_path(mock_fetch, mock_get_cfg):
+@patch("teledigest.gemini_brain._fetch_wisdom")
+@patch("teledigest.gemini_brain._ask_live_api")
+async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg):
     """
-    Mini-pipeline: _fetch_wisdom returns 2 docs → Gemini synthesizes → answer returned.
+    Mini-pipeline: _fetch_wisdom returns 2 docs → Live API synthesizes →
+    answer returned.
     User scenario: asks 'где сделать SIM-карту', country=br.
     """
     cfg = _make_mock_config()
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
-    mock_genai = _make_mock_genai_module("Лучший оператор — Vivo. SIM стоит R$20, нужен паспорт.")
+    async def _fake_live(prompt, model_name, api_key):
+        assert "Vivo" in prompt          # context made it into the prompt
+        assert model_name == "gemini-3.1-flash-live-preview"
+        return "Лучший оператор — Vivo. SIM стоит R$20, нужен паспорт."
+    mock_live.side_effect = _fake_live
 
     from teledigest.gemini_brain import search_and_format
-    result = search_and_format("br", "где сделать SIM-карту")
+    result = await search_and_format("br", "где сделать SIM-карту")
 
     assert "🧠" in result
     assert "Vivo" in result
     assert "записей из базы знаний" in result
-    mock_genai.configure.assert_called_once_with(api_key="fake-key")
     mock_fetch.assert_called_once_with("br")
 
 
+@pytest.mark.asyncio
 @patch("teledigest.gemini_brain.get_config")
 @patch("teledigest.gemini_brain._fetch_wisdom")
-def test_search_and_format_gemini_empty_returns_empty(mock_fetch, mock_get_cfg):
-    """Gemini returns empty text → search_and_format returns '' so caller fallbacks to DeepSeek."""
+@patch("teledigest.gemini_brain._ask_live_api")
+@patch("teledigest.gemini_brain._ask_sync_fallback")
+async def test_search_and_format_falls_back_to_sync_when_live_fails(
+    mock_sync, mock_live, mock_fetch, mock_get_cfg,
+):
+    """Live API raises → sync fallback runs → answer returned."""
     cfg = _make_mock_config()
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
-    _make_mock_genai_module("")  # empty answer from Gemini
+    async def _fake_live_raises(*a, **kw):
+        raise RuntimeError("simulated Live API outage")
+    mock_live.side_effect = _fake_live_raises
+
+    async def _fake_sync(prompt, model_name, api_key):
+        return "Ответ из синхронного API."
+    mock_sync.side_effect = _fake_sync
 
     from teledigest.gemini_brain import search_and_format
-    result = search_and_format("br", "some question")
-    assert result == ""  # empty → caller should fallback
+    result = await search_and_format("br", "anything")
+
+    assert "🧠" in result
+    assert "синхронного" in result
+    mock_sync.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("teledigest.gemini_brain.get_config")
+@patch("teledigest.gemini_brain._fetch_wisdom")
+@patch("teledigest.gemini_brain._ask_live_api")
+@patch("teledigest.gemini_brain._ask_sync_fallback")
+async def test_search_and_format_both_paths_empty_returns_empty(
+    mock_sync, mock_live, mock_fetch, mock_get_cfg,
+):
+    """Both Live and sync return empty → '' so caller hits DeepSeek."""
+    cfg = _make_mock_config()
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
+    mock_get_cfg.return_value = cfg
+    mock_fetch.return_value = _SAMPLE_DOCS
+
+    async def _empty(*a, **kw):
+        return ""
+    mock_live.side_effect = _empty
+    mock_sync.side_effect = _empty
+
+    from teledigest.gemini_brain import search_and_format
+    result = await search_and_format("br", "anything")
+    assert result == ""
 
 
 # --- Integration: knowledge_search falls back when Gemini disabled -----------
 
-def test_knowledge_search_fallback_when_gemini_disabled(monkeypatch):
+@pytest.mark.asyncio
+async def test_knowledge_search_fallback_when_gemini_disabled(monkeypatch):
     """
     When Gemini is not enabled, search_and_format in knowledge_search.py
     should skip gemini_brain and go straight to DeepSeek+SQLite path.
@@ -155,10 +185,9 @@ def test_knowledge_search_fallback_when_gemini_disabled(monkeypatch):
     import teledigest.gemini_brain as gb
     monkeypatch.setattr(gb, "is_enabled", lambda: False)
 
-    # Patch the SQLite search to return empty (simulates no results)
     import teledigest.knowledge_search as ks
     monkeypatch.setattr(ks, "search_knowledge", lambda country, query, limit=20: [])
 
-    result = ks.search_and_format("br", "anything")
+    result = await ks.search_and_format("br", "anything")
     assert "Не нашёл ничего" in result
     assert "🧠" in result

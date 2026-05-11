@@ -402,7 +402,7 @@ async def brain_message_handler(event):
 
     log.info("МОЗГ query in %s (country=%s): %s", chat_id_to_name.get(chat_id, chat_id), country, query[:80])
 
-    response = search_and_format(country, query)
+    response = await search_and_format(country, query)
     await event.reply(response, parse_mode="html")
 
 

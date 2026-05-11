@@ -1,18 +1,26 @@
 """
-gemini_brain.py — МОЗГ via Gemini + Firestore wisdom_base.
+gemini_brain.py — МОЗГ via Gemini Live API + Firestore wisdom_base.
 
 Flow:
-1. Query Firestore wisdom_base: country-specific docs + universal "any" docs
-   (country-specific first, then universal "any" appended)
-2. Format instruction fields as context (English facts)
-3. Gemini synthesizes a concrete Russian answer
-4. Return to user
+1. Query Firestore wisdom_base: country-specific docs + universal "any" docs.
+2. Format instruction fields as numbered context (English facts).
+3. Open Gemini Live API session, send system prompt + context + question.
+4. Receive streamed text, concatenate, return as Russian answer to user.
+5. On any Live API failure → return empty so caller can fall back to legacy
+   sync model / DeepSeek+SQLite path.
 
-Auth: same OAuth token.json as channel_poster (datastore scope).
-Config: GEMINI_API_KEY env var (or [gemini] api_key in config).
+Why Live API:
+- Free tier "Unlimited RPD" — МОЗГ answers don't compete with Apps Script
+  extraction for the per-day 500-request budget on flash-lite-preview.
+- TPM is 65K but per-question that's plenty: even a 30-doc context fits well
+  under that with the answer.
+
+Auth: GEMINI_API_KEY from env or [gemini] api_key in config.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from .config import get_config, log
 
@@ -21,13 +29,15 @@ You are an assistant bot for an expat community chat called "МОЗГ".
 Answer the user's question using ONLY the facts provided in the knowledge base below.
 
 Rules:
-- Answer in Russian, conversational and informal
-- Be specific: include exact prices, addresses, timelines, service names, steps
-- 3-7 sentences maximum
-- If there are conflicting opinions — mention both
-- If the knowledge base has nothing useful — reply exactly: "в базе пока нет информации по этому вопросу"
-- Plain text only — no Markdown, no bullet symbols, no formatting
-- Do NOT invent or guess information
+- Answer in Russian, conversational and informal.
+- Be specific: include exact prices, addresses, timelines, service names, steps.
+- KEEP IT SHORT: 2-4 sentences MAX. The user is on a phone — no walls of text.
+- If the user needs depth, finish with: "хочешь подробнее — спроси конкретнее".
+- If there are conflicting opinions — mention both briefly.
+- If the knowledge base has nothing useful — reply exactly:
+  "в базе пока нет информации по этому вопросу"
+- Plain text only — no Markdown, no bullet symbols, no formatting.
+- Do NOT invent or guess information.
 """
 
 
@@ -67,7 +77,7 @@ def _build_firestore_client():
 def _fetch_wisdom(country: str, limit_country: int = 30, limit_any: int = 20) -> list[dict]:
     """
     Fetch wisdom_base docs for the given country + universal "any" entries.
-    Two separate Firestore queries (Firestore can't OR on different field values easily).
+    Two separate Firestore queries — Firestore can't OR on different field values.
     """
     from google.cloud import firestore as fs
 
@@ -131,9 +141,76 @@ def _format_context(docs: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def search_and_format(country: str, query: str) -> str:
+async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
     """
-    Query Firestore wisdom_base and synthesize answer via Gemini.
+    Single-shot Q&A via Gemini Live API.
+
+    Opens a session, sends the prompt as a complete turn, receives the model's
+    response chunks, returns the concatenated text. Closes the session.
+
+    Why bother with Live for a single-shot exchange:
+    - Live API's free-tier quota is "Unlimited RPD" (vs 500/day on
+      flash-lite-preview shared between МОЗГ and Apps Script extraction).
+      Each МОЗГ question = one Live session, doesn't burn the per-day cap.
+    """
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    config = types.LiveConnectConfig(
+        response_modalities=["TEXT"],
+        system_instruction=_BRAIN_SYSTEM,
+    )
+
+    chunks: list[str] = []
+    async with client.aio.live.connect(model=model_name, config=config) as session:
+        await session.send_client_content(
+            turns=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            turn_complete=True,
+        )
+        async for response in session.receive():
+            # Live API streams server_content; pick up text deltas as they arrive.
+            if response.server_content and response.server_content.model_turn:
+                for part in response.server_content.model_turn.parts or []:
+                    if part.text:
+                        chunks.append(part.text)
+            # Turn-complete signal from the server — model has finished speaking.
+            if response.server_content and response.server_content.turn_complete:
+                break
+
+    return "".join(chunks).strip()
+
+
+async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str) -> str:
+    """
+    Fallback to non-streaming Gemini request when Live API errors.
+    Same `google-genai` SDK, just `generate_content` instead of a Live session.
+    Runs the blocking call in a thread to keep the bot's asyncio loop unblocked.
+
+    (We deliberately do NOT import the legacy google-generativeai SDK —
+    https://github.com/google-gemini/deprecated-generative-ai-python — Google
+    has deprecated it; new SDK `google-genai` covers both paths.)
+    """
+    from google import genai
+    from google.genai import types
+
+    def _blocking() -> str:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=_BRAIN_SYSTEM,
+            ),
+        )
+        return (response.text or "").strip()
+
+    return await asyncio.to_thread(_blocking)
+
+
+async def search_and_format(country: str, query: str) -> str:
+    """
+    Query Firestore wisdom_base and synthesize answer via Gemini Live API.
     Returns empty string on failure (caller should fallback to DeepSeek).
     """
     cfg = get_config()
@@ -159,26 +236,34 @@ def search_and_format(country: str, query: str) -> str:
             "Попробуй переформулировать или спроси в чате!"
         )
 
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=cfg.gemini.api_key)
-        model = genai.GenerativeModel(
-            model_name=cfg.gemini.model,
-            system_instruction=_BRAIN_SYSTEM,
-        )
-        prompt = (
-            f"Вопрос пользователя: {query}\n\n"
-            f"База знаний ({useful_count} записей):\n\n{context}"
-        )
-        response = model.generate_content(prompt)
-        answer = (response.text or "").strip()
-        if not answer:
-            raise ValueError("Empty response from Gemini")
-        return f"🧠 {answer}\n\n<i>На основе {useful_count} записей из базы знаний</i>"
+    prompt = (
+        f"Вопрос пользователя: {query}\n\n"
+        f"База знаний ({useful_count} записей):\n\n{context}"
+    )
 
-    except Exception as e:
-        log.error("Gemini МОЗГ synthesis failed: %s", e)
-        return ""  # Caller fallbacks to DeepSeek
+    # Primary path: Live API (Unlimited RPD on free tier).
+    answer = ""
+    if cfg.gemini.live_model:
+        try:
+            answer = await _ask_live_api(prompt, cfg.gemini.live_model, cfg.gemini.api_key)
+        except Exception as e:
+            log.warning(
+                "Gemini Live API failed (%s) — falling back to sync %s",
+                e, cfg.gemini.model,
+            )
+
+    # Fallback: legacy synchronous Gemini (shares 500 RPD cap).
+    if not answer:
+        try:
+            answer = await _ask_sync_fallback(prompt, cfg.gemini.model, cfg.gemini.api_key)
+        except Exception as e:
+            log.error("Gemini sync fallback also failed: %s", e)
+            return ""  # Caller now falls back to DeepSeek
+
+    if not answer:
+        return ""
+
+    return f"🧠 {answer}\n\n<i>На основе {useful_count} записей из базы знаний</i>"
 
 
 def is_enabled() -> bool:
