@@ -156,8 +156,28 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
+    # Format mirrored from a known-working production setup (Node.js
+    # @google/genai) for the same model. Key insights vs earlier attempts:
+    #
+    # - gemini-3.1-flash-live-preview is an AUDIO-output model. Asking for
+    #   ["TEXT"] modality gets the WebSocket closed with 1011 at setup.
+    #   We request AUDIO and read the text via output_audio_transcription
+    #   — Gemini emits the spoken text alongside the audio bytes, and
+    #   that's what we keep (audio is discarded — МОЗГ posts to Telegram
+    #   as text).
+    #
+    # - thinking_level="minimal" is mandatory for 3.1 Live to avoid
+    #   long server-side "thinking" that times out the WS.
+    #
+    # - system_instruction can be plain string (SDK wraps it as Content
+    #   internally).
+    #
+    # - send_client_content with turns + turn_complete=True is the
+    #   correct way to push a single user turn for batch Q&A.
     config = types.LiveConnectConfig(
-        response_modalities=["TEXT"],
+        response_modalities=[types.Modality.AUDIO],
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=_BRAIN_SYSTEM,
     )
 
@@ -168,13 +188,15 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
             turn_complete=True,
         )
         async for response in session.receive():
-            # Live API streams server_content; pick up text deltas as they arrive.
-            if response.server_content and response.server_content.model_turn:
-                for part in response.server_content.model_turn.parts or []:
-                    if part.text:
-                        chunks.append(part.text)
-            # Turn-complete signal from the server — model has finished speaking.
-            if response.server_content and response.server_content.turn_complete:
+            sc = response.server_content
+            if not sc:
+                continue
+            # The audio-mode transcription IS our answer. The actual audio
+            # bytes in sc.model_turn.parts[*].inline_data are ignored.
+            ot = getattr(sc, "output_transcription", None)
+            if ot and ot.text:
+                chunks.append(ot.text)
+            if sc.turn_complete:
                 break
 
     return "".join(chunks).strip()
