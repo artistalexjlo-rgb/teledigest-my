@@ -101,13 +101,13 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
     User scenario: asks 'где сделать SIM-карту', country=br.
     """
     cfg = _make_mock_config()
-    cfg.gemini.live_model = "gemini-2.5-flash-live-preview"
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
     async def _fake_live(prompt, model_name, api_key):
         assert "Vivo" in prompt          # context made it into the prompt
-        assert model_name == "gemini-2.5-flash-live-preview"
+        assert model_name == "gemini-3.1-flash-live-preview"
         return "Лучший оператор — Vivo. SIM стоит R$20, нужен паспорт."
     mock_live.side_effect = _fake_live
 
@@ -130,7 +130,7 @@ async def test_search_and_format_falls_back_to_sync_when_live_fails(
 ):
     """Live API raises → sync fallback runs → answer returned."""
     cfg = _make_mock_config()
-    cfg.gemini.live_model = "gemini-2.5-flash-live-preview"
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
@@ -160,7 +160,7 @@ async def test_search_and_format_both_paths_empty_returns_empty(
 ):
     """Both Live and sync return empty → '' so caller hits DeepSeek."""
     cfg = _make_mock_config()
-    cfg.gemini.live_model = "gemini-2.5-flash-live-preview"
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
