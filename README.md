@@ -643,3 +643,44 @@ Development setup, coding standards, testing, and pull request workflow live in
 ## License
 
 This project is licensed under the **MIT License**.
+
+## Firestore composite indexes
+
+Запросы бота к Firestore с `where(...)` + `order_by(...)` требуют
+composite indexes. Чтобы не ловить `400 The query requires an index`
+в продакшене, индексы хранятся декларативно в `firestore.indexes.json`
+и деплоятся через Firebase CLI.
+
+### Развёртывание индексов (раз в проект)
+
+```bash
+# Один раз — установить Firebase CLI
+npm install -g firebase-tools
+firebase login
+
+# Деплой всех индексов из firestore.indexes.json
+firebase deploy --only firestore:indexes --project project-56cb62a9-8914-4ae3-b44
+```
+
+Команду нужно прогнать **после первой настройки проекта** и каждый раз
+когда добавляется новый индекс в `firestore.indexes.json`. Создание
+одного индекса занимает 2-5 минут (Firestore Console показывает статус
+`Building` → `Enabled`).
+
+### Когда добавлять новый индекс
+
+При написании любого нового кода с Firestore-запросом проверь:
+- Есть ли `.where(...)` + `.order_by(...)` на разные поля?
+- Есть ли `.where(...)` на nested map field (`postedTo.<channel>.posted`)?
+
+Если да — нужен composite index. Добавь его в `firestore.indexes.json`
+в этом же PR (не "потом, по ошибке в проде"). Подкатить можно либо
+запустив `firebase deploy --only firestore:indexes` локально, либо
+прогнав запрос на проде и пройдя по ссылке которую вернёт Firestore
+ошибка (она автоматически открывает Firebase Console с pre-filled
+формой индекса).
+
+Текущие индексы:
+- `wisdom_base (country ASC, createdAt DESC)` — МОЗГ retrieval по стране
+- `wikivoyage_base (country ASC, importedAt DESC)` — wiki cold-start retrieval
+- `telegram_queue (postedTo.luky_channel.posted, postedTo.luky_channel.posted_at DESC)` — channel poster rotation seed

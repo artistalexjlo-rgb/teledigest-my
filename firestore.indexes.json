@@ -1,0 +1,32 @@
+{
+  "indexes": [
+    {
+      "_comment": "wisdom_base: gemini_brain._fetch_wisdom — МОЗГ retrieves country-specific facts ordered by recency. Two query patterns share this index: country=<iso2> AND country='any'.",
+      "collectionGroup": "wisdom_base",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "country",   "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "wikivoyage_base: МОЗГ wiki-fallback (anticipated, after feat/mozg-wiki-fallback merges). Same pattern as wisdom_base but sorted by importedAt (wiki has no createdAt).",
+      "collectionGroup": "wikivoyage_base",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "country",    "order": "ASCENDING"  },
+        { "fieldPath": "importedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "telegram_queue: channel_poster._load_recent_posted_countries — reads the last N posted docs to seed rotation. NOTE: channel field path is hardcoded because Firestore doesn't support wildcards in nested map fields. If a new posting channel is added (e.g. @another_channel), add a parallel index with that channel's _channel_field_safe value.",
+      "collectionGroup": "telegram_queue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "postedTo.luky_channel.posted",    "order": "ASCENDING"  },
+        { "fieldPath": "postedTo.luky_channel.posted_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
