@@ -636,6 +636,10 @@ async def ensure_joined_and_resolve_channels():
     # Merge channels from config + sources DB (dynamic). We track url→country
     # alongside the URL list so we can tag scraped chat_ids with country.
     url_to_country: dict[str, str] = {}
+    # url → cached peer_id from sources_db. Invite-link resolves trigger
+    # CheckChatInvite which is FloodWait-heavy; if we already know the
+    # peer_id from a previous run, use it directly and skip the resolve.
+    url_to_cached_chat_id: dict[str, int] = {}
     all_channels: list[str] = list(cfg.bot.channels)
     for src_ch in cfg.sources.channels:
         if src_ch.url not in all_channels:
@@ -648,23 +652,54 @@ async def ensure_joined_and_resolve_channels():
             all_channels.append(src["url"])
         if src.get("country"):
             url_to_country[src["url"]] = src["country"]
+        if src.get("chat_id") is not None:
+            url_to_cached_chat_id[src["url"]] = src["chat_id"]
 
     for ch in all_channels:
         try:
-            ent = await user_client.get_entity(ch)
-            peer_id = await user_client.get_peer_id(ent)
+            cached_id = url_to_cached_chat_id.get(ch)
+            is_invite = ch.startswith("https://t.me/+") or ch.startswith("http://t.me/+")
+
+            if cached_id is not None:
+                # Fast path: resolve by peer_id. No CheckChatInvite, no flood risk.
+                # User account is already a member from a previous run.
+                try:
+                    ent = await user_client.get_entity(cached_id)
+                    peer_id = cached_id
+                except Exception as e:
+                    if is_invite:
+                        # Fall back to invite resolve only if cached_id is stale.
+                        # This will hit CheckChatInvite — log so it's visible.
+                        log.warning(
+                            "Cached peer_id %s for invite %s failed (%s); "
+                            "falling back to CheckChatInvite (FloodWait risk).",
+                            cached_id, ch, e,
+                        )
+                        ent = await user_client.get_entity(ch)
+                        peer_id = await user_client.get_peer_id(ent)
+                    else:
+                        # Handle channel — get_entity is cheap, just retry by URL.
+                        ent = await user_client.get_entity(ch)
+                        peer_id = await user_client.get_peer_id(ent)
+            else:
+                ent = await user_client.get_entity(ch)
+                peer_id = await user_client.get_peer_id(ent)
 
             username = getattr(ent, "username", None)
             name = username if username else str(peer_id)
             chat_id_to_name[peer_id] = name
 
-            try:
-                await user_client(JoinChannelRequest(ent))
-                log.info("User account joined channel: %s", ch)
-            except Exception as e:
-                log.warning(
-                    "User account could not join %s (maybe already joined): %s", ch, e
-                )
+            # Only attempt join if we don't have a cached chat_id — implies
+            # this is a new source, not yet joined. Re-joining on every
+            # startup costs a Telegram RPC and can also flood-throttle.
+            if cached_id is None:
+                try:
+                    await user_client(JoinChannelRequest(ent))
+                    log.info("User account joined channel: %s", ch)
+                except Exception as e:
+                    log.warning(
+                        "User account could not join %s (maybe already joined): %s", ch, e
+                    )
 
             scraped_chat_ids.add(peer_id)
             _url_to_peer_id[ch] = peer_id
