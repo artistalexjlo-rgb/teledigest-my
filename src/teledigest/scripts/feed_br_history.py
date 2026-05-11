@@ -27,11 +27,11 @@ Designed for unattended daily systemd runs: 15 pairs/day means a 365-day
 archive drains in ~24 days while leaving daily-scraped files from active
 countries plenty of headroom in the 500 RPD Gemini free-tier budget.
 
-Usage:
-    python -m scripts.feed_br_history                       # 15 pairs
-    python -m scripts.feed_br_history --batch 20            # 20 pairs
-    python -m scripts.feed_br_history --country br --batch 10
-    python -m scripts.feed_br_history --dry-run             # show, no write
+Usage (inside container or anywhere teledigest is installed):
+    python -m teledigest.scripts.feed_br_history                   # 15 pairs
+    python -m teledigest.scripts.feed_br_history --batch 20        # 20 pairs
+    python -m teledigest.scripts.feed_br_history --country br --batch 10
+    python -m teledigest.scripts.feed_br_history --dry-run         # show, no write
 """
 
 from __future__ import annotations

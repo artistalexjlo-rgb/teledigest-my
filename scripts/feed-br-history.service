@@ -21,7 +21,7 @@ ExecStart=/bin/bash -c '\
     exit 1; \
   fi; \
   echo "feed-br-history: using container $CID"; \
-  docker exec "$CID" python -m scripts.feed_br_history --country br --batch 15'
+  docker exec "$CID" python -m teledigest.scripts.feed_br_history --country br --batch 15'
 StandardOutput=journal
 StandardError=journal
 
