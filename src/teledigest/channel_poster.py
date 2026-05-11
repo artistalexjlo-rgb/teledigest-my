@@ -355,18 +355,27 @@ async def channel_poster_loop():
     )
 
     last_country: str | None = None
+    last_slot: dt.datetime | None = None
 
     while True:
         now = dt.datetime.now(tz)
-        next_at = _next_slot_at(now, slots)
+        # If the previous iteration fired with negative jitter we may have
+        # posted BEFORE the slot's nominal moment — in that case _next_slot_at
+        # would re-pick the same slot. Advance past it explicitly.
+        search_from = now
+        if last_slot is not None and search_from <= last_slot:
+            search_from = last_slot + dt.timedelta(seconds=1)
+
+        next_slot = _next_slot_at(search_from, slots)
         # Jitter ±N minutes on the slot moment itself
         jitter = random.randint(-cfg.channel.jitter_minutes, cfg.channel.jitter_minutes)
-        next_at = next_at + dt.timedelta(minutes=jitter)
+        next_at = next_slot + dt.timedelta(minutes=jitter)
         sleep_seconds = max(1, int((next_at - now).total_seconds()))
         log.info("Channel poster: next post at %s (sleep %ds)",
                  next_at.isoformat(timespec="minutes"), sleep_seconds)
         await asyncio.sleep(sleep_seconds)
 
+        last_slot = next_slot
         try:
             posted_country = await post_one(bot_client, last_country=last_country)
             if posted_country:
