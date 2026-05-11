@@ -213,12 +213,14 @@ def _norm_section(name: str) -> str:
 
 def _normalize_text(s: str) -> str:
     """Strip wiki-markup leftovers, collapse whitespace."""
-    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)  # [[Link|Label]] -> Label
-    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)            # [[Plain]] -> Plain
-    s = re.sub(r"\{\{[^}]+\}\}", "", s)                   # leftover templates
-    s = re.sub(r"'''([^']+)'''", r"\1", s)                # bold
-    s = re.sub(r"''([^']+)''", r"\1", s)                  # italic
-    s = re.sub(r"<[^>]+>", "", s)                         # html tags
+    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)        # [[Link|Label]] -> Label
+    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)                  # [[Plain]] -> Plain
+    s = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", s)        # [url label] -> label
+    s = re.sub(r"\[https?://\S+\]", "", s)                     # bare [url] -> drop
+    s = re.sub(r"\{\{[^}]+\}\}", "", s)                        # leftover templates
+    s = re.sub(r"'''([^']+)'''", r"\1", s)                     # bold
+    s = re.sub(r"''([^']+)''", r"\1", s)                       # italic
+    s = re.sub(r"<[^>]+>", "", s)                              # html tags
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -244,6 +246,16 @@ def _build_listing_pattern(
     hours = _template_field(template, "hours")
     price = _template_field(template, "price")
     content = _template_field(template, "content")
+    phone = _template_field(template, "phone")
+
+    # Quality gate: require either substantive prose OR multiple
+    # structured fields. Filters out skeletons like
+    # "Jomtien Bowl :: 8 lanes. Hours: Daily, 10:00-02:00."
+    # while keeping useful budget-hostel listings with address+price+context.
+    has_substantive_content = content and len(content) >= 30
+    structured_field_count = sum(bool(x) for x in (address, hours, price, phone))
+    if not has_substantive_content and structured_field_count < 2:
+        return None
 
     # Build a single instruction sentence/paragraph.
     parts = [content] if content else []
@@ -253,9 +265,10 @@ def _build_listing_pattern(
         parts.append(f"Hours: {hours}.")
     if price:
         parts.append(f"Price: {price}.")
+    if phone:
+        parts.append(f"Phone: {phone}.")
     instruction = " ".join(parts).strip()
     if not instruction:
-        # Listing with only name and no other info — too thin to be useful.
         return None
 
     return {
