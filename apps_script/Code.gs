@@ -447,3 +447,72 @@ function sha1Hex_(s) {
   }
   return hex;
 }
+
+
+// --- Manual utilities (not triggered automatically) ---
+
+
+/**
+ * Force re-auth of all OAuth scopes the pipeline needs.
+ *
+ * Run this manually from the editor whenever processNewLogs fails with
+ * "You do not have permission to call ...". Apps Script caches granted
+ * scopes per known function — a new function with explicit calls to every
+ * required scope forces a fresh consent screen.
+ *
+ * Touches:
+ *   - Drive read  (DriveApp.getRootFolder)
+ *   - Drive write (createFile + setDescription + setTrashed)
+ *   - External HTTP (UrlFetchApp.fetch)
+ *   - OAuth token  (ScriptApp.getOAuthToken — datastore / cloud-platform)
+ *
+ * A readonly-only probe like getName() will grant just drive.readonly,
+ * which is NOT enough for setDescription on processed files — hence the
+ * write probe.
+ */
+function forceAuth() {
+  var name = DriveApp.getRootFolder().getName();
+  console.log("Drive read OK, root: " + name);
+
+  var probe = DriveApp.createFile("_auth_probe.txt", "probe", "text/plain");
+  probe.setDescription("test");
+  probe.setTrashed(true);
+  console.log("Drive write OK");
+
+  var resp = UrlFetchApp.fetch("https://www.google.com/generate_204", {
+    "muteHttpExceptions": true
+  });
+  console.log("UrlFetch OK, status: " + resp.getResponseCode());
+
+  var token = ScriptApp.getOAuthToken();
+  console.log("OAuth token OK, len: " + token.length);
+}
+
+
+/**
+ * Strip "processed_at_..." markers from every file in the input folder.
+ *
+ * After a Firestore wipe, files still carry processed-markers from the
+ * previous mining run. With FORCE_REPROCESS=false the pipeline would skip
+ * them entirely (nothing left in DB). With FORCE_REPROCESS=true the
+ * pipeline cycles forever on the first batch (runtime budget exits, next
+ * trigger restarts from file #1, never advances past 5 min worth of files).
+ *
+ * Run this once after a wipe, then leave FORCE_REPROCESS=false. Triggers
+ * will then advance batch-by-batch through the unmarked files exactly
+ * like a fresh upload.
+ */
+function clearAllMarkers() {
+  var cfg = getConfig_();
+  var folder = DriveApp.getFolderById(cfg.folderId);
+  var files = folder.getFiles();
+  var count = 0;
+  while (files.hasNext()) {
+    var f = files.next();
+    if (f.getDescription()) {
+      f.setDescription("");
+      count++;
+    }
+  }
+  console.log("Cleared markers on " + count + " files");
+}

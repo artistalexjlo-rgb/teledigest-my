@@ -173,6 +173,39 @@ clasp push
 5. **Default routing.** Если Gemini не вернул `routing` — дефолтим на
    `"both"` (раньше pattern молча терялся).
 
+## Manual utilities
+
+В Code.gs живут две функции которые НЕ запускаются триггером — вызывать
+руками из редактора когда нужно:
+
+### `forceAuth` — починить permission denied
+
+Если `processNewLogs` падает с `You do not have permission to call ...`
+(Drive / UrlFetch / Firestore) и consent screen не появляется при Run —
+запусти `forceAuth` из dropdown. Эта функция явно дёргает все нужные
+scopes (drive read+write, external HTTP, OAuth token) — Apps Script
+проверит права с нуля и покажет consent screen. После Allow процессинг
+работает.
+
+Типичный триггер этой проблемы: после `clasp push` или ручного апдейта
+кода появились новые scopes, а старый grant о них не знал.
+
+### `clearAllMarkers` — снять метки `processed_at_...` со всех input-файлов
+
+После wipe'а Firestore-коллекций input-файлы в Drive остаются помеченными
+как processed (это маркер Apps Script на самом файле). С
+`FORCE_REPROCESS=false` пайплайн их все пропустит — в БД ничего не
+польётся. С `FORCE_REPROCESS=true` пайплайн зациклится на первых N
+файлах (runtime budget вырубается до того как доедет до конца, на
+следующем триггере опять с начала).
+
+Workflow после wipe:
+1. Run `clearAllMarkers` один раз — все файлы становятся "новыми".
+2. `FORCE_REPROCESS = false` в Code.gs (если был true).
+3. Триггер каждые 15 минут (или Play руками) — обрабатывает партию,
+   метит processed, следующий прогон автоматически продолжает с
+   непомеченных. Через 4-5 прогонов всё в БД, summary-файлы чистые.
+
 ## Re-process архив
 
 Чтобы прогнать заново уже помеченные файлы (например после смены
