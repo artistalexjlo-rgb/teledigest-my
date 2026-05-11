@@ -317,14 +317,11 @@ def parse_page(
         if not heading_nodes:
             continue
         section_name = str(heading_nodes[0].title).strip()
-        body = section
-        # Strip templates that we already captured as listings — what
-        # remains is the prose between them.
-        for tpl in body.filter_templates():
-            if str(tpl.name).strip().lower() in LISTING_TAG_MAP:
-                body.remove(tpl)
-        # Split remaining text by blank-line paragraphs.
-        text = str(body)
+        # Take section as raw text. _normalize_text below strips templates
+        # ({{...}}) via regex, so we don't need to mutate the parse tree
+        # (which was fragile — Wikicode.remove can ValueError on nested
+        # templates whose reference is in a different slice).
+        text = str(section)
         # Remove the heading line itself from body text
         text = re.sub(r"^==[^=]+==\s*", "", text, count=1)
         paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
