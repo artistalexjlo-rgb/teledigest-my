@@ -13,8 +13,14 @@ folder, the existing file's content is replaced (revision update). This makes
 re-runs safe — the same daily sample file overwrites itself instead of
 accumulating duplicates.
 
-Scope: `drive.file` — the bot only sees files it has created/opened, not the
-user's whole Drive. Minimum surface area.
+Scopes:
+- `drive.file` — for create/upload/update of bot-owned files.
+- `drive`     — for files.list() with `q=` query in a folder that wasn't
+                created by this OAuth flow (the target folder is created
+                manually by the user in Drive). `drive.file` alone returns
+                403 insufficientPermissions on the listing call.
+We deliberately list both so credentials.refresh() can carry whatever
+the user actually granted at OAuth time without dropping scopes.
 """
 
 from __future__ import annotations
@@ -24,8 +30,11 @@ from typing import Any, Iterable
 
 from .config import get_config, log
 
-# OAuth scope: per-file access only (no list-everything-in-Drive permission).
-DRIVE_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/drive.file",)
+# OAuth scopes. Token must be minted with both via scripts/drive_oauth_init.py.
+DRIVE_SCOPES: tuple[str, ...] = (
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file",
+)
 
 
 # ---------------------------------------------------------------------------
