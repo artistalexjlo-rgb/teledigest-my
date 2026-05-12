@@ -377,14 +377,100 @@ async def status_command(event):
     await reply_long(event, text, parse_mode="html")
 
 
+async def _extract_brain_reply_history(event) -> tuple[str | None, list[dict] | None]:
+    """
+    If `event` is a Telegram reply directed at this bot's previous answer,
+    return (query, history) where:
+      - query is the full new user message text
+      - history is [{role:user, text:original_q}, {role:model, text:prev_a}]
+
+    Returns (None, None) if this is not a reply-continuation. Caller will
+    then fall back to the normal "МОЗГ ..." prefix detection.
+
+    Why: МОЗГ often answers with "уточни, что конкретно нужно" and the user
+    follows up with a plain reply ("Какое есть такси") — no "МОЗГ" prefix
+    expected from a human in conversation. Detecting reply-to-bot lets us
+    treat that as a continuation.
+    """
+    msg = event.message
+    if not msg or not msg.reply_to:
+        return None, None
+
+    try:
+        bot_me = await event.client.get_me()
+    except Exception:
+        return None, None
+
+    try:
+        prev_bot_msg = await msg.get_reply_message()
+    except Exception:
+        return None, None
+    if not prev_bot_msg or prev_bot_msg.sender_id != bot_me.id:
+        return None, None
+
+    # The user's current message text becomes the new query as-is.
+    new_query = (event.raw_text or "").strip()
+    if not new_query:
+        return None, None
+
+    # Try to fetch the user's ORIGINAL question that the bot was replying to.
+    # In our flow `await event.reply(...)` makes the bot's answer a reply to
+    # the user's "МОЗГ ..." message, so prev_bot_msg.reply_to → original.
+    original_user_text = None
+    if prev_bot_msg.reply_to:
+        try:
+            original = await prev_bot_msg.get_reply_message()
+            if original:
+                raw = original.raw_text or ""
+                # Strip the "МОЗГ " prefix from the original — Gemini doesn't
+                # need it.
+                stripped = is_brain_query(raw)
+                original_user_text = stripped if stripped else raw.strip()
+        except Exception:
+            pass
+
+    # Trim bot's prior answer of decorative 🧠 prefix and HTML italics tail —
+    # what Gemini cares about is the model's natural-language content.
+    prev_bot_text = (prev_bot_msg.raw_text or "").strip()
+    if prev_bot_text.startswith("🧠"):
+        prev_bot_text = prev_bot_text[1:].lstrip()
+    # The "На основе N записей..." tail is informational, drop it.
+    import re as _re
+    prev_bot_text = _re.sub(
+        r"\n+На основе\s+\d+\s+записей.*$", "", prev_bot_text, flags=_re.DOTALL,
+    ).strip()
+
+    history: list[dict] = []
+    if original_user_text:
+        history.append({"role": "user", "text": original_user_text})
+    if prev_bot_text:
+        history.append({"role": "model", "text": prev_bot_text})
+
+    return new_query, history if history else None
+
+
 async def brain_message_handler(event):
     """
     Handle МОЗГ queries.
-    Works in group chats (country from chat mapping) and in DMs (searches all countries
-    or uses the first configured country as default).
+
+    Two trigger paths:
+    1. Message starts with "МОЗГ ..." prefix — the original explicit invocation.
+    2. Message is a Telegram reply to bot's previous answer — treat as
+       continuation of the same conversation. Prior turn is fetched and
+       passed as history so the model has context.
     """
     text = event.raw_text or ""
-    query = is_brain_query(text)
+
+    query: str | None = is_brain_query(text)
+    history: list[dict] | None = None
+
+    if not query:
+        # Try reply-continuation
+        reply_query, reply_history = await _extract_brain_reply_history(event)
+        if reply_query:
+            query = reply_query
+            history = reply_history
+
     if not query:
         return
 
@@ -400,9 +486,14 @@ async def brain_message_handler(event):
         else:
             country = "default"
 
-    log.info("МОЗГ query in %s (country=%s): %s", chat_id_to_name.get(chat_id, chat_id), country, query[:80])
+    trigger = "reply" if history else "prefix"
+    log.info(
+        "МОЗГ query in %s (country=%s, trigger=%s, history=%d): %s",
+        chat_id_to_name.get(chat_id, chat_id), country, trigger,
+        len(history or []), query[:80],
+    )
 
-    response = await search_and_format(country, query)
+    response = await search_and_format(country, query, history=history)
     await event.reply(response, parse_mode="html")
 
 

@@ -33,14 +33,23 @@ _BRAIN_SYSTEM = """\
 You are an assistant bot for an expat community chat called "МОЗГ".
 Answer the user's question using ONLY the facts in the knowledge base below.
 
-The knowledge base mixes facts from many countries. Each fact has a
-[country/tag] header so you can tell where it applies.
+The knowledge base mixes facts from many countries. Each entry has a
+[n. title | tag | country | source] header so you can tell where it applies
+and where it came from. There are two sources:
+- "База данных" — facts collected from real user experience and discussion.
+- "WikiVoyage" — community-curated travel encyclopedia (stable baseline).
+
+When citing a fact, prefer wording like "по WikiVoyage..." for wiki entries
+and neutral language for "База данных" entries. If both sources agree —
+just answer directly without citing.
 
 Behavior:
 - Answer in Russian, conversational and informal.
 - Be specific: include exact prices, addresses, timelines, service names, steps.
 - KEEP IT SHORT: 2-4 sentences MAX. The user is on a phone — no walls of text.
 - If the user needs depth, finish with: "хочешь подробнее — спроси конкретнее".
+- If this is a follow-up turn (the conversation already has prior exchanges)
+  — use that context. Don't ask the user to repeat themselves.
 - If the question is ambiguous (could apply to multiple countries / multiple
   scenarios in the knowledge base): list the most likely interpretations
   in 1-2 sentences each and append: "уточни, что из этого тебе нужно".
@@ -85,16 +94,18 @@ def _build_firestore_client():
     )
 
 
-def _fetch_wisdom(limit: int = 200) -> list[dict]:
+def _fetch_wisdom_and_wiki(wisdom_limit: int = 150, wiki_limit: int = 50) -> list[dict]:
     """
-    Fetch the most recent `limit` wisdom_base docs across ALL countries.
-    No country filter — Gemini reads the headers and picks relevant facts.
+    Fetch top-N most recent docs from BOTH wisdom_base (chat-mined facts)
+    and wikivoyage_base (wiki-imported facts). Each doc is tagged with a
+    `_source` field — "База данных" for wisdom, "WikiVoyage" for wiki — so
+    the formatter can mark its origin in the context Gemini sees.
 
-    Why 200: at ~200 chars per instruction, that's ~40K chars / ~12K tokens
-    of context. Well under Live API's 65K TPM budget per request, with
-    headroom for the actual answer. Bumping further hits diminishing
-    returns (older facts more likely stale, and Gemini's attention spreads
-    thinner over too much context).
+    No country filter on either query. Gemini picks relevance from the
+    [country/tag/source] headers.
+
+    Token math: ~200 wisdom + ~50 wiki = ~250 docs × ~200 chars = ~50K chars
+    ≈ ~15K tokens of context. Fits Live API 65K TPM budget with headroom.
     """
     from google.cloud import firestore as fs
 
@@ -109,22 +120,60 @@ def _fetch_wisdom(limit: int = 200) -> list[dict]:
         log.error("Gemini МОЗГ: Firestore init failed: %s", e)
         return []
 
-    collection = cfg.google.assistant_collection
+    results: list[dict] = []
+
+    # 1. wisdom_base — chat-mined facts, sorted by createdAt
     try:
         docs = (
-            db.collection(collection)
+            db.collection(cfg.google.assistant_collection)
             .order_by("createdAt", direction=fs.Query.DESCENDING)
-            .limit(limit)
+            .limit(wisdom_limit)
             .stream()
         )
-        return [d.to_dict() for d in docs if d.to_dict()]
+        for d in docs:
+            data = d.to_dict()
+            if not data:
+                continue
+            data["_source"] = "База данных"
+            results.append(data)
     except Exception as e:
-        log.error("Gemini МОЗГ: Firestore query failed: %s", e)
-        return []
+        log.error("Gemini МОЗГ: wisdom_base query failed: %s", e)
+
+    # 2. wikivoyage_base — wiki-imported facts, sorted by importedAt
+    # Optional: if collection name is configurable add to GoogleConfig later.
+    try:
+        docs = (
+            db.collection("wikivoyage_base")
+            .order_by("importedAt", direction=fs.Query.DESCENDING)
+            .limit(wiki_limit)
+            .stream()
+        )
+        for d in docs:
+            data = d.to_dict()
+            if not data:
+                continue
+            data["_source"] = "WikiVoyage"
+            results.append(data)
+    except Exception as e:
+        # Wiki collection may not exist yet / index missing. Soft fail —
+        # wisdom_base alone still works.
+        log.warning("Gemini МОЗГ: wikivoyage_base query skipped (%s)", e)
+
+    return results
+
+
+# Back-compat alias for callers that still expect the old name.
+def _fetch_wisdom(limit: int = 200) -> list[dict]:
+    return _fetch_wisdom_and_wiki(wisdom_limit=limit, wiki_limit=0)
 
 
 def _format_context(docs: list[dict]) -> str:
-    """Format wisdom_base instruction fields as numbered context for Gemini."""
+    """Format docs as numbered context for Gemini.
+
+    Header shape: [n. title | tag | country | source]
+    Source is "База данных" or "WikiVoyage" — explicit so the model can
+    attribute citations and weigh recency vs encyclopedic baseline.
+    """
     parts = []
     idx = 1
     for doc in docs:
@@ -134,13 +183,19 @@ def _format_context(docs: list[dict]) -> str:
         title = (doc.get("title") or "").strip()
         tag = (doc.get("tag") or "").strip()
         country = (doc.get("country") or "").strip()
-        header = f"[{idx}. {title} | {tag} | {country}]"
+        source = (doc.get("_source") or "База данных").strip()
+        header = f"[{idx}. {title} | {tag} | {country} | {source}]"
         parts.append(f"{header}\n{instruction}")
         idx += 1
     return "\n\n".join(parts)
 
 
-async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
+async def _ask_live_api(
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    history: list[dict] | None = None,
+) -> str:
     """
     Single-shot Q&A via Gemini Live API.
 
@@ -180,10 +235,23 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
         system_instruction=_BRAIN_SYSTEM,
     )
 
+    # Build multi-turn payload: prior history (if any) + the new user turn.
+    # history is a list of dicts {role: "user"|"model", text: "..."} —
+    # passed in from telegram_client when this is a reply-continuation.
+    turns: list[types.Content] = []
+    if history:
+        for h in history:
+            role = h.get("role")
+            text = (h.get("text") or "").strip()
+            if not text or role not in ("user", "model"):
+                continue
+            turns.append(types.Content(role=role, parts=[types.Part(text=text)]))
+    turns.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+
     chunks: list[str] = []
     async with client.aio.live.connect(model=model_name, config=config) as session:
         await session.send_client_content(
-            turns=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            turns=turns,
             turn_complete=True,
         )
         async for response in session.receive():
@@ -201,7 +269,12 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
     return "".join(chunks).strip()
 
 
-async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str) -> str:
+async def _ask_sync_fallback(
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    history: list[dict] | None = None,
+) -> str:
     """
     Fallback to non-streaming Gemini request when Live API errors.
     Same `google-genai` SDK, just `generate_content` instead of a Live session.
@@ -214,11 +287,21 @@ async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str) -> str:
     from google import genai
     from google.genai import types
 
+    contents: list[types.Content] = []
+    if history:
+        for h in history:
+            role = h.get("role")
+            text = (h.get("text") or "").strip()
+            if not text or role not in ("user", "model"):
+                continue
+            contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
+    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+
     def _blocking() -> str:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
             model=model_name,
-            contents=prompt,
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=_BRAIN_SYSTEM,
             ),
@@ -228,18 +311,29 @@ async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str) -> str:
     return await asyncio.to_thread(_blocking)
 
 
-async def search_and_format(country: str, query: str) -> str:
+async def search_and_format(
+    country: str,
+    query: str,
+    history: list[dict] | None = None,
+) -> str:
     """
-    Query Firestore wisdom_base and synthesize answer via Gemini Live API.
-    Returns empty string on failure (caller should fallback to DeepSeek).
+    Query Firestore (wisdom_base + wikivoyage_base) and synthesize answer
+    via Gemini Live API. Returns "" on failure so the caller can fall back
+    to DeepSeek+SQLite.
 
-    The `country` argument is currently ignored — Gemini sees broad context
-    and infers the country from the question itself. Kept in the signature
-    so the public API for knowledge_search.search_and_format doesn't break.
+    Args:
+        country: ignored — Gemini sees broad context and picks relevance
+            from query text. Kept in signature for caller compat.
+        query: current user turn.
+        history: optional list of {"role": "user"|"model", "text": "..."}
+            entries representing prior exchanges. When the user replies
+            to a previous bot answer in Telegram, telegram_client passes
+            in [{role:user, text:original_q}, {role:model, text:prev_a}]
+            so Gemini understands "Какое есть такси" as a follow-up.
     """
     cfg = get_config()
 
-    docs = _fetch_wisdom()
+    docs = _fetch_wisdom_and_wiki()
     if not docs:
         return (
             "🧠 Не нашёл ничего по этому запросу. "
@@ -250,8 +344,8 @@ async def search_and_format(country: str, query: str) -> str:
     context = _format_context(docs)
     useful_count = context.count("\n\n") + 1 if context else 0
     log.info(
-        "Gemini МОЗГ: %d docs fetched (%d with instructions), query=%r",
-        len(docs), useful_count, query[:60],
+        "Gemini МОЗГ: %d docs fetched (%d useful), history=%d turns, query=%r",
+        len(docs), useful_count, len(history or []), query[:60],
     )
 
     if not context:
@@ -269,7 +363,9 @@ async def search_and_format(country: str, query: str) -> str:
     answer = ""
     if cfg.gemini.live_model:
         try:
-            answer = await _ask_live_api(prompt, cfg.gemini.live_model, cfg.gemini.api_key)
+            answer = await _ask_live_api(
+                prompt, cfg.gemini.live_model, cfg.gemini.api_key, history=history,
+            )
         except Exception as e:
             log.warning(
                 "Gemini Live API failed (%s) — falling back to sync %s",
@@ -279,7 +375,9 @@ async def search_and_format(country: str, query: str) -> str:
     # Fallback: legacy synchronous Gemini (shares 500 RPD cap).
     if not answer:
         try:
-            answer = await _ask_sync_fallback(prompt, cfg.gemini.model, cfg.gemini.api_key)
+            answer = await _ask_sync_fallback(
+                prompt, cfg.gemini.model, cfg.gemini.api_key, history=history,
+            )
         except Exception as e:
             log.error("Gemini sync fallback also failed: %s", e)
             return ""  # Caller now falls back to DeepSeek
