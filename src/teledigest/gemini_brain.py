@@ -156,9 +156,15 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
+    # Format per Live API spec (https://ai.google.dev/api/live, BidiGenerateContentSetup):
+    # - response_modalities: list of strings (NOT enum). "TEXT" is correct.
+    # - system_instruction: a Content object with parts. Plain string is rejected
+    #   server-side and the WebSocket closes with 1011 — what we saw before.
     config = types.LiveConnectConfig(
         response_modalities=["TEXT"],
-        system_instruction=_BRAIN_SYSTEM,
+        system_instruction=types.Content(
+            parts=[types.Part(text=_BRAIN_SYSTEM)],
+        ),
     )
 
     chunks: list[str] = []
