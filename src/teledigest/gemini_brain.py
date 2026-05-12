@@ -174,13 +174,15 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
             turn_complete=True,
         )
         async for response in session.receive():
-            # Live API streams server_content; pick up text deltas as they arrive.
-            if response.server_content and response.server_content.model_turn:
-                for part in response.server_content.model_turn.parts or []:
-                    if part.text:
-                        chunks.append(part.text)
-            # Turn-complete signal from the server — model has finished speaking.
-            if response.server_content and response.server_content.turn_complete:
+            sc = response.server_content
+            if not sc:
+                continue
+            # The audio-mode transcription IS our answer. The actual audio
+            # bytes in sc.model_turn.parts[*].inline_data are ignored.
+            ot = getattr(sc, "output_transcription", None)
+            if ot and ot.text:
+                chunks.append(ot.text)
+            if sc.turn_complete:
                 break
 
     return "".join(chunks).strip()
