@@ -156,15 +156,28 @@ async def _ask_live_api(prompt: str, model_name: str, api_key: str) -> str:
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
-    # Format per Live API spec (https://ai.google.dev/api/live, BidiGenerateContentSetup):
-    # - response_modalities: list of strings (NOT enum). "TEXT" is correct.
-    # - system_instruction: a Content object with parts. Plain string is rejected
-    #   server-side and the WebSocket closes with 1011 — what we saw before.
+    # Format mirrored from a known-working production setup (Node.js
+    # @google/genai voice translator) for the same model. Key points:
+    #
+    # - gemini-3.1-flash-live-preview is an AUDIO-output model. Asking for
+    #   [Modality.TEXT] gets the WebSocket closed with 1011 at setup.
+    #   We request AUDIO and read the spoken text via
+    #   output_audio_transcription — Gemini emits the transcription
+    #   alongside the audio bytes, and that's what we keep (audio bytes
+    #   are discarded; МОЗГ posts to Telegram as text).
+    #
+    # - thinking_level="minimal" is mandatory for 3.1 Live to avoid
+    #   long server-side "thinking" that times out the WS.
+    #
+    # - system_instruction can be a plain string here (SDK wraps it).
+    #
+    # - send_client_content with turns + turn_complete=True is the
+    #   correct way to push a single user turn for batch Q&A.
     config = types.LiveConnectConfig(
-        response_modalities=["TEXT"],
-        system_instruction=types.Content(
-            parts=[types.Part(text=_BRAIN_SYSTEM)],
-        ),
+        response_modalities=[types.Modality.AUDIO],
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+        system_instruction=_BRAIN_SYSTEM,
     )
 
     chunks: list[str] = []
