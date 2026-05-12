@@ -92,7 +92,7 @@ _SAMPLE_DOCS = [
 
 @pytest.mark.asyncio
 @patch("teledigest.gemini_brain.get_config")
-@patch("teledigest.gemini_brain._fetch_wisdom")
+@patch("teledigest.gemini_brain._fetch_wisdom_and_wiki")
 @patch("teledigest.gemini_brain._ask_live_api")
 async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg):
     """
@@ -105,7 +105,7 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
     mock_get_cfg.return_value = cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
-    async def _fake_live(prompt, model_name, api_key):
+    async def _fake_live(prompt, model_name, api_key, history=None):
         assert "Vivo" in prompt          # context made it into the prompt
         assert model_name == "gemini-3.1-flash-live-preview"
         return "Лучший оператор — Vivo. SIM стоит R$20, нужен паспорт."
@@ -123,7 +123,7 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
 
 @pytest.mark.asyncio
 @patch("teledigest.gemini_brain.get_config")
-@patch("teledigest.gemini_brain._fetch_wisdom")
+@patch("teledigest.gemini_brain._fetch_wisdom_and_wiki")
 @patch("teledigest.gemini_brain._ask_live_api")
 @patch("teledigest.gemini_brain._ask_sync_fallback")
 async def test_search_and_format_falls_back_to_sync_when_live_fails(
@@ -139,7 +139,7 @@ async def test_search_and_format_falls_back_to_sync_when_live_fails(
         raise RuntimeError("simulated Live API outage")
     mock_live.side_effect = _fake_live_raises
 
-    async def _fake_sync(prompt, model_name, api_key):
+    async def _fake_sync(prompt, model_name, api_key, history=None):
         return "Ответ из синхронного API."
     mock_sync.side_effect = _fake_sync
 
@@ -153,7 +153,36 @@ async def test_search_and_format_falls_back_to_sync_when_live_fails(
 
 @pytest.mark.asyncio
 @patch("teledigest.gemini_brain.get_config")
-@patch("teledigest.gemini_brain._fetch_wisdom")
+@patch("teledigest.gemini_brain._fetch_wisdom_and_wiki")
+@patch("teledigest.gemini_brain._ask_live_api")
+async def test_search_and_format_passes_history_to_live(mock_live, mock_fetch, mock_get_cfg):
+    """history list reaches _ask_live_api as keyword arg."""
+    cfg = _make_mock_config()
+    cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
+    mock_get_cfg.return_value = cfg
+    mock_fetch.return_value = _SAMPLE_DOCS
+
+    received_history = {}
+
+    async def _fake_live(prompt, model_name, api_key, history=None):
+        received_history["value"] = history
+        return "ответ с учётом истории"
+    mock_live.side_effect = _fake_live
+
+    history = [
+        {"role": "user", "text": "что по такси шри-ланка"},
+        {"role": "model", "text": "Автобусы, аренда, такси по приложению..."},
+    ]
+    from teledigest.gemini_brain import search_and_format
+    result = await search_and_format("default", "Какое есть такси", history=history)
+
+    assert "ответ с учётом истории" in result
+    assert received_history["value"] == history
+
+
+@pytest.mark.asyncio
+@patch("teledigest.gemini_brain.get_config")
+@patch("teledigest.gemini_brain._fetch_wisdom_and_wiki")
 @patch("teledigest.gemini_brain._ask_live_api")
 @patch("teledigest.gemini_brain._ask_sync_fallback")
 async def test_search_and_format_both_paths_empty_returns_empty(

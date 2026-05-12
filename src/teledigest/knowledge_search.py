@@ -122,7 +122,11 @@ def is_brain_query(text: str) -> str | None:
     return None
 
 
-async def search_and_format(country: str, query: str) -> str:
+async def search_and_format(
+    country: str,
+    query: str,
+    history: list[dict] | None = None,
+) -> str:
     """
     Search knowledge base, synthesize answer via LLM.
 
@@ -130,16 +134,20 @@ async def search_and_format(country: str, query: str) -> str:
     1. Gemini Live API + Firestore wisdom_base (if GEMINI_API_KEY configured)
     2. DeepSeek + SQLite knowledge table (legacy fallback)
 
+    `history` is an optional list of prior turns (user/model pairs) for
+    reply-thread continuations in Telegram. Only the Gemini path uses it;
+    DeepSeek fallback ignores it (legacy SQLite path is single-shot).
+
     Async because Gemini Live API is async-only (session-based streaming).
     DeepSeek path stays sync internally; we just call it from the async
     function — single Q&A latency dominated by network, blocking inside
     one handler doesn't hurt the bot.
     """
-    # --- Gemini path (Firestore wisdom_base, Live API) ---
+    # --- Gemini path (Firestore wisdom_base + wikivoyage_base, Live API) ---
     try:
         from . import gemini_brain
         if gemini_brain.is_enabled():
-            answer = await gemini_brain.search_and_format(country, query)
+            answer = await gemini_brain.search_and_format(country, query, history=history)
             if answer:
                 return answer
             log.warning("МОЗГ: Gemini returned empty — falling back to DeepSeek+SQLite")
