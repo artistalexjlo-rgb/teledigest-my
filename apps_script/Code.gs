@@ -66,6 +66,41 @@ function getConfig_() {
 
 
 /**
+ * Compute a 768-dim embedding for `text` using gemini-embedding-001.
+ * Returns array of floats, or null on failure (we still save the doc — backfill
+ * can fill missing embeddings later).
+ */
+function computeEmbedding_(text, cfg) {
+  if (!text || !text.trim()) return null;
+  var url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+            "gemini-embedding-001:embedContent?key=" + encodeURIComponent(cfg.apiKey);
+  var payload = {
+    "content": { "parts": [{ "text": String(text) }] },
+    "outputDimensionality": 768
+  };
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      "method": "post",
+      "contentType": "application/json",
+      "payload": JSON.stringify(payload),
+      "muteHttpExceptions": true
+    });
+    var code = resp.getResponseCode();
+    if (code !== 200) {
+      console.warn("embedContent HTTP " + code + ": " + resp.getContentText().slice(0, 300));
+      return null;
+    }
+    var data = JSON.parse(resp.getContentText());
+    var vals = data && data.embedding && data.embedding.values;
+    return Array.isArray(vals) ? vals : null;
+  } catch (e) {
+    console.warn("embedContent failed: " + e);
+    return null;
+  }
+}
+
+
+/**
  * Main trigger entry. Run on a time-driven schedule.
  */
 function processNewLogs() {
@@ -290,7 +325,30 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
     // Kept empty here so Apps Script doesn't need to know channel inventory.
     fields["postedTo"] = { "mapValue": { "fields": {} } };
   } else {
-    fields["instruction"] = { "stringValue": item.ai_lesson || "" };
+    var instruction = item.ai_lesson || "";
+    fields["instruction"] = { "stringValue": instruction };
+    // Compute embedding for wisdom — without this МОЗГ's find_nearest can't
+    // retrieve the entry. Backfill exists as a safety net, but doing it inline
+    // means new wisdom is searchable immediately.
+    var emb = computeEmbedding_(instruction, cfg);
+    if (emb && emb.length) {
+      // Firestore Vector type — required for find_nearest. Plain arrayValue
+      // is stored but is invisible to vector search (same trap we hit with
+      // wikivoyage_base earlier). The {__type__: __vector__, value: [...]}
+      // map is the REST-API equivalent of Python's google.cloud Vector().
+      fields["embedding"] = {
+        "mapValue": {
+          "fields": {
+            "__type__": { "stringValue": "__vector__" },
+            "value": {
+              "arrayValue": {
+                "values": emb.map(function(v) { return { "doubleValue": v }; })
+              }
+            }
+          }
+        }
+      };
+    }
   }
 
   var response = UrlFetchApp.fetch(url, {
