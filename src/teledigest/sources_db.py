@@ -151,7 +151,9 @@ def migrate_from_config(
 # ---------------------------------------------------------------------------
 
 
-def add_source(country: str, url: str, name: str = "", language: str = "ru", account: int = 2) -> int:
+def add_source(
+    country: str, url: str, name: str = "", language: str = "ru", account: int = 2
+) -> int:
     """Add a new source channel. Returns row id or 0 if duplicate."""
     now = dt.datetime.utcnow().isoformat()
     with get_db_connection() as conn:

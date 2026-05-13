@@ -266,7 +266,16 @@ def _parse_telegram(raw: Dict[str, Any]) -> TelegramConfig:
             api_hash=str(os.environ.get("TELEGRAM_API_HASH") or tg_raw["api_hash"]),
             bot_token=str(os.environ.get("TELEGRAM_BOT_TOKEN") or tg_raw["bot_token"]),
             sessions_dir=Path(tg_raw.get("sessions_dir", "data")),
-            user2_session=Path(v) if (v := (os.environ.get("TELEGRAM_USER2_SESSION") or tg_raw.get("user2_session"))) else None,
+            user2_session=(
+                Path(v)
+                if (
+                    v := (
+                        os.environ.get("TELEGRAM_USER2_SESSION")
+                        or tg_raw.get("user2_session")
+                    )
+                )
+                else None
+            ),
         )
     except KeyError as e:
         raise KeyError(f"Missing required [telegram] field in config: {e!s}") from e

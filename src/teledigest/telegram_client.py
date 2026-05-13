@@ -354,7 +354,9 @@ async def auth2_start_command(event):
         return
 
     if user2_client is None:
-        await event.reply(f"{cross_mark} user2_session not configured. Add it to teledigest.conf.")
+        await event.reply(
+            f"{cross_mark} user2_session not configured. Add it to teledigest.conf."
+        )
         return
 
     if user2_auth_state == UserAuthState.OK:
@@ -893,7 +895,9 @@ async def ensure_joined_and_resolve_channels():
     for ch in all_channels:
         # Pick the right grabber client for this source
         acct = url_to_account.get(ch, 1)
-        grabber = user2_client if (acct == 2 and user2_client is not None) else user_client
+        grabber = (
+            user2_client if (acct == 2 and user2_client is not None) else user_client
+        )
         if grabber is None:
             log.warning("No client available for account=%d, skipping %s", acct, ch)
             continue
@@ -1195,8 +1199,12 @@ async def create_clients():
 
     user_session_path, bot_session_path, user2_session_path = _session_paths(cfg)
 
-    log.info("Using session paths: user=%s, bot=%s, user2=%s",
-             user_session_path, bot_session_path, user2_session_path)
+    log.info(
+        "Using session paths: user=%s, bot=%s, user2=%s",
+        user_session_path,
+        bot_session_path,
+        user2_session_path,
+    )
 
     # Optional SOCKS5/HTTP proxy via env (e.g. v2ray: socks5://127.0.0.1:10808)
     proxy = None
@@ -1320,7 +1328,9 @@ async def start_clients(auth_only: bool = False) -> None:
         if await user2_client.is_user_authorized():
             log.info("user2_client authorized.")
         else:
-            log.warning("user2_client not authorized — account 2 sources will be skipped.")
+            log.warning(
+                "user2_client not authorized — account 2 sources will be skipped."
+            )
     await bot_client.start(bot_token=cfg.telegram.bot_token)
     await set_bot_menu_commands(bot_client)
     log.info("Bot client started (logged in as bot).")
