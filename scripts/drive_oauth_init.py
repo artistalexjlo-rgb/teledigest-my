@@ -4,15 +4,11 @@ drive_oauth_init.py — One-shot OAuth flow to mint google-token.json.
 
 Run this **on your local machine** (not on the VPS — needs a browser).
 
-The token grants access to THREE Google APIs that the bot uses with one
-shared OAuth identity:
-  - Drive (upload daily samples, list files in the target folder)
-  - Firestore (read wisdom_base + telegram_queue, write wikivoyage_base)
-  - (datastore scope is the Firestore programmatic name)
+The token grants access to Drive ONLY.
+Firestore uses a Service Account (service-account.json) — separate auth.
 
-If a feature stops working with `403 Insufficient Permission` or
-`insufficientPermissions`, the token is missing one of these scopes —
-re-run this script and replace the file on the VPS.
+This separation means the Drive token never needs to be re-minted when
+adding new Google features. Only re-mint if manually revoked.
 
 Usage:
     python scripts/drive_oauth_init.py path/to/google-credentials.json
@@ -35,20 +31,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Scopes mint EVERYTHING this bot's google-token.json is used for:
-#   drive.file  — drive_uploader uploads/updates daily-sample TXT files
-#   drive       — drive_uploader.files.list() to dedupe uploads. drive.file
-#                 alone is not enough for searching by name in a folder that
-#                 was created outside this app's OAuth context.
-#   datastore   — Firestore access (channel_poster, gemini_brain МОЗГ,
-#                 wikivoyage_import). All three reuse the SAME token.
-#
-# If you change this list, EVERY existing google-token.json must be
-# re-minted by running this script again and copying the new file to VPS.
+# Drive-only scopes. Firestore uses service-account.json — not this token.
+# These scopes are FINAL — adding new Google features won't require re-mint.
+#   drive.file  — create/update daily-sample TXT files
+#   drive       — list files in folder (drive.file alone gives 403 on listing)
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/datastore",
 ]
 
 
@@ -110,8 +99,9 @@ def main() -> int:
     token_path.write_text(creds.to_json(), encoding="utf-8")
     print(f"OK: token saved to {token_path}")
     print(
-        "Next: copy both files to the VPS (Coolify mount, e.g. "
-        "/home/teledigest/data/) and update teledigest.conf [google]."
+        "Next: copy to VPS:\n"
+        "  scp google-token.json root@<vps>:/home/teledigest/data/\n"
+        "Restart container in Dokploy."
     )
     return 0
 

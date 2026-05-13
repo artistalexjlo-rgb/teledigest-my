@@ -1,11 +1,12 @@
 """
 drive_uploader.py — Push local files to a Google Drive folder.
 
-Auth: Service Account (JSON key file). No OAuth dance, no token expiry.
-Key file path: [google] service_account_path in teledigest.conf.
-Default:       /home/teledigest/data/service-account.json
+Auth: OAuth 2.0 user credentials (token_path in config).
+Service accounts cannot create files in personal Drive (no storage quota).
+Token only needs Drive scopes — no datastore. Firestore uses service account.
 
-The Drive folder must be shared with the service account email (Editor role).
+Token is stable: Drive scopes never change, so no re-auth needed unless
+manually revoked. Mint once with scripts/drive_oauth_init.py, copy to VPS.
 
 Idempotency: when uploading a file whose name already exists in the target
 folder, the existing file's content is replaced (revision update). This makes
@@ -26,16 +27,46 @@ DRIVE_SCOPES: tuple[str, ...] = (
 )
 
 
+def _load_drive_credentials(token_path: Path):
+    """Load and refresh OAuth credentials from disk."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from google.auth.exceptions import RefreshError
+
+    if not token_path.exists():
+        raise FileNotFoundError(
+            f"Drive OAuth token not found at {token_path}. "
+            "Run scripts/drive_oauth_init.py locally and copy google-token.json to VPS."
+        )
+
+    creds = Credentials.from_authorized_user_file(str(token_path), list(DRIVE_SCOPES))
+
+    if creds.valid:
+        return creds
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            raise RuntimeError(
+                f"Failed to refresh Drive token at {token_path}: {e}. "
+                "Re-run drive_oauth_init.py and copy token to VPS."
+            ) from e
+        token_path.write_text(creds.to_json(), encoding="utf-8")
+        return creds
+
+    raise RuntimeError(f"Drive credentials at {token_path} are invalid.")
+
+
 def get_drive_service():
-    """Build an authenticated Drive v3 service using service account."""
+    """Build an authenticated Drive v3 service using OAuth user token."""
     from googleapiclient.discovery import build
-    from .google_auth import load_service_account_credentials
 
     cfg = get_config()
     if not cfg.google.enabled:
         raise RuntimeError("Drive upload is disabled (no [google] config).")
 
-    creds = load_service_account_credentials(list(DRIVE_SCOPES))
+    creds = _load_drive_credentials(cfg.google.token_path)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
