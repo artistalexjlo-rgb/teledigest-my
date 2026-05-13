@@ -93,10 +93,13 @@ class AuthDialog:
 
 
 user_auth_state: UserAuthState = UserAuthState.REQUIRED
+user2_auth_state: UserAuthState = UserAuthState.REQUIRED
 auth_dialogs: dict[int, AuthDialog] = {}
+auth2_dialogs: dict[int, AuthDialog] = {}
 
 SUPPORTED_COMMANDS: dict[str, str] = {
     "/auth": "Start two-factor authentication process for the client instance",
+    "/auth2": "Authorize second grabber account (user2_session)",
     "/help": "Show this help message",
     "/start": "Alias for /help",
     "/today": "Generate a digest now from the last 24 hours of messages",
@@ -342,6 +345,81 @@ async def auth_dialog_handler(event):
             await event.reply(
                 f"{cross_mark} Authorization failed: {e}\n"
                 "Send <code>/auth</code> to try again."
+            )
+
+
+async def auth2_start_command(event):
+    if not await is_user_allowed(event):
+        await event.reply(f"{cross_mark} You are not allowed to use this command.")
+        return
+
+    if user2_client is None:
+        await event.reply(f"{cross_mark} user2_session not configured. Add it to teledigest.conf.")
+        return
+
+    if user2_auth_state == UserAuthState.OK:
+        await event.reply(f"{ok_mark} User2 client is already authorized.")
+        return
+
+    auth2_dialogs[event.chat_id] = AuthDialog(step=AuthStep.WAIT_PHONE)
+    await event.reply(
+        "Authorizing <b>second</b> grabber account.\n"
+        "Send phone number in international format: <code>+123456789</code>",
+        parse_mode="html",
+    )
+
+
+async def auth2_dialog_handler(event):
+    if event.raw_text.startswith("/"):
+        return
+
+    chat_id = event.chat_id
+    if chat_id not in auth2_dialogs:
+        return
+
+    if not await is_user_allowed(event):
+        await event.reply(f"{cross_mark} You are not allowed to use this command.")
+        return
+
+    dialog = auth2_dialogs[chat_id]
+    text = event.raw_text.strip()
+
+    if dialog.step == AuthStep.WAIT_PHONE:
+        try:
+            sent = await user2_client.send_code_request(text)
+            dialog.phone = text
+            dialog.phone_code_hash = sent.phone_code_hash
+            dialog.step = AuthStep.WAIT_CODE
+            await event.reply(
+                "Code sent.\n"
+                "Type the code with SPACES between digits (e.g. 1 2 3 4 5)."
+            )
+        except Exception as e:
+            del auth2_dialogs[chat_id]
+            await event.reply(f"{cross_mark} Failed to send code: {e}")
+
+    elif dialog.step == AuthStep.WAIT_CODE:
+        try:
+            await user2_client.sign_in(
+                phone=dialog.phone,
+                code="".join(ch for ch in text if ch.isalnum() or ch == "-"),
+                phone_code_hash=dialog.phone_code_hash,
+            )
+            del auth2_dialogs[chat_id]
+            global user2_auth_state
+            user2_auth_state = UserAuthState.OK
+            await user2_client.get_me()
+            await ensure_joined_and_resolve_channels()
+            await event.reply(f"{ok_mark} User2 authorized! Channels re-resolved.")
+        except SessionPasswordNeededError:
+            del auth2_dialogs[chat_id]
+            await event.reply(f"{cross_mark} Password-based 2FA not supported.")
+        except Exception as e:
+            del auth2_dialogs[chat_id]
+            await event.reply(
+                f"{cross_mark} Authorization failed: {e}\n"
+                "Send <code>/auth2</code> to try again.",
+                parse_mode="html",
             )
 
 
@@ -1168,6 +1246,9 @@ async def create_clients():
     bot_client.add_event_handler(
         auth_start_command, events.NewMessage(pattern=r"^/auth$")
     )
+    bot_client.add_event_handler(
+        auth2_start_command, events.NewMessage(pattern=r"^/auth2$")
+    )
     bot_client.add_event_handler(backfill_command, events.NewMessage(pattern=r"^bf\s"))
     bot_client.add_event_handler(
         extract_command, events.NewMessage(pattern=r"^extract\s")
@@ -1182,6 +1263,7 @@ async def create_clients():
     bot_client.add_event_handler(menu_command, events.NewMessage(pattern=r"^/menu$"))
     bot_client.add_event_handler(menu_callback_handler, events.CallbackQuery())
     bot_client.add_event_handler(auth_dialog_handler, events.NewMessage)
+    bot_client.add_event_handler(auth2_dialog_handler, events.NewMessage)
     # Conversation handler must be before МОЗГ to intercept dialog steps
     bot_client.add_event_handler(conversation_text_handler, events.NewMessage)
     # МОЗГ handler on bot_client — reacts in group chats
