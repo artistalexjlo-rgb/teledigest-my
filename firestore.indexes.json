@@ -35,10 +35,6 @@
       "fieldPath": "embedding",
       "indexes": [
         {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
           "vectorConfig": {
             "dimension": 768,
             "flat": {}
@@ -51,10 +47,6 @@
       "collectionGroup": "wikivoyage_base",
       "fieldPath": "embedding",
       "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
         {
           "vectorConfig": {
             "dimension": 768,
