@@ -17,7 +17,6 @@ def _make_app_config(
     drive_enabled: bool = True,
     folder_id: str = "FOLDER123",
     token_path: Path | None = None,
-    creds_path: Path | None = None,
 ) -> cfg.AppConfig:
     return cfg.AppConfig(
         telegram=cfg.TelegramConfig(
@@ -29,7 +28,6 @@ def _make_app_config(
         logging=cfg.LoggingConfig(level="INFO"),
         google=cfg.GoogleConfig(
             drive_folder_id=folder_id if drive_enabled else "",
-            credentials_path=creds_path or Path("creds.json"),
             token_path=token_path or Path("token.json"),
             enabled=drive_enabled,
         ),
@@ -41,7 +39,6 @@ def app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
     app_cfg = _make_app_config(
         db_path=tmp_path / "messages_fts.db",
         token_path=tmp_path / "token.json",
-        creds_path=tmp_path / "creds.json",
     )
     monkeypatch.setattr(cfg, "_CONFIG", app_cfg, raising=False)
     return app_cfg
@@ -234,4 +231,4 @@ def test_upload_samples_dir_swallows_auth_failure(app_config, tmp_path, monkeypa
 def test_load_credentials_missing_token_raises(app_config, tmp_path):
     missing = tmp_path / "nope.json"
     with pytest.raises(FileNotFoundError):
-        du._load_credentials(missing)
+        du._load_drive_credentials(missing)

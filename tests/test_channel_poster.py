@@ -36,7 +36,7 @@ def _make_app_config(
         storage=cfg.StorageConfig(rag_keywords=[], db_path=db_path),
         logging=cfg.LoggingConfig(level="INFO"),
         google=cfg.GoogleConfig(
-            drive_folder_id="F", credentials_path=Path("c"), token_path=Path("t"),
+            drive_folder_id="F", token_path=Path("t"),
             enabled=True,
             firestore_project_id="proj-1", firestore_database="default",
             firestore_collection="telegram_queue",
