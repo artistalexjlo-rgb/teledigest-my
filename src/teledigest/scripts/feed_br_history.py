@@ -201,7 +201,7 @@ def main() -> int:
 
     if not pending:
         log.info("Country=%s: no pending pairs — archive fully fed.", args.country)
-        _tg_notify(f"✅ BR backfill: архив полностью обработан, новых пар нет.")
+        _tg_notify("✅ BR backfill: архив полностью обработан, новых пар нет.")
         return 0
 
     take = pending[: args.batch]
