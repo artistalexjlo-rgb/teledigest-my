@@ -123,7 +123,7 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
         client = genai.Client(api_key=api_key)
         result = client.models.embed_content(
             model=_EMBEDDING_MODEL,
-            contents=texts,
+            contents=texts,  # type: ignore[arg-type]
             config={"output_dimensionality": _EMBEDDING_DIM},
         )
         embeddings = result.embeddings or []
@@ -426,7 +426,7 @@ async def _ask_sync_fallback(
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
             model=model_name,
-            contents=contents,
+            contents=contents,  # type: ignore[arg-type]
             config=types.GenerateContentConfig(
                 system_instruction=_BRAIN_SYSTEM,
             ),
