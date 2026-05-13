@@ -51,3 +51,6 @@ ignore_missing_imports = true
 show_error_codes = true
 pretty = true
 strict_optional = true
+
+[tool.isort]
+profile = "black"
