@@ -133,9 +133,14 @@ class StorageConfig:
 
 @dataclass
 class GoogleConfig:
-    """Google Drive + Firestore settings (Service Account auth)."""
+    """Google Drive + Firestore settings.
+
+    Drive: OAuth user token (token_path) — SA can't create files in personal Drive.
+    Firestore: Service Account (service_account_path) — no expiry, no scope drift.
+    """
     drive_folder_id: str = ""
-    service_account_path: Path = Path("service-account.json")
+    token_path: Path = Path("google-token.json")          # Drive OAuth
+    service_account_path: Path = Path("service-account.json")  # Firestore SA
     enabled: bool = False
     # Firestore (for channel poster reading telegram_queue collection)
     firestore_project_id: str = ""
@@ -380,6 +385,7 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
     folder_id = str(g_raw.get("drive_folder_id", "")).strip()
     return GoogleConfig(
         drive_folder_id=folder_id,
+        token_path=Path(g_raw.get("token_path", "google-token.json")),
         service_account_path=Path(g_raw.get("service_account_path", "service-account.json")),
         enabled=bool(folder_id) and bool(g_raw.get("enabled", True)),
         firestore_project_id=str(g_raw.get("firestore_project_id", "")).strip(),
