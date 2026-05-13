@@ -103,7 +103,7 @@ def _compute_embedding(text: str) -> list[float] | None:
         embeddings = result.embeddings
         if not embeddings:
             return None
-        return list(embeddings[0].values)
+        return list(embeddings[0].values or [])
     except Exception as e:
         log.warning("МОЗГ: embed_content failed: %s", e)
         return None
@@ -125,7 +125,7 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
             contents=texts,
         )
         embeddings = result.embeddings or []
-        return [list(e.values) for e in embeddings]
+        return [list(e.values or []) for e in embeddings]
     except Exception as e:
         log.warning("МОЗГ: batch embed failed: %s", e)
         return [None] * len(texts)
