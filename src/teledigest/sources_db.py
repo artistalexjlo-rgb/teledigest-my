@@ -55,16 +55,21 @@ def init_sources_table() -> None:
                 active INTEGER NOT NULL DEFAULT 1,
                 added_at TEXT NOT NULL,
                 chat_id INTEGER DEFAULT NULL,
+                account INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(country, url)
             )
         """
         )
-        # Upgrade path: add chat_id column to existing tables.
-        try:
-            cur.execute("ALTER TABLE sources ADD COLUMN chat_id INTEGER DEFAULT NULL")
-            log.info("Added chat_id column to sources table.")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        # Upgrade path: add columns to existing tables.
+        for col_sql in [
+            "ALTER TABLE sources ADD COLUMN chat_id INTEGER DEFAULT NULL",
+            "ALTER TABLE sources ADD COLUMN account INTEGER NOT NULL DEFAULT 1",
+        ]:
+            try:
+                cur.execute(col_sql)
+                log.info("sources: added column via: %s", col_sql)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         cur.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sources_country
@@ -146,16 +151,16 @@ def migrate_from_config(
 # ---------------------------------------------------------------------------
 
 
-def add_source(country: str, url: str, name: str = "", language: str = "ru") -> int:
+def add_source(country: str, url: str, name: str = "", language: str = "ru", account: int = 2) -> int:
     """Add a new source channel. Returns row id or 0 if duplicate."""
     now = dt.datetime.utcnow().isoformat()
     with get_db_connection() as conn:
         cur = conn.cursor()
         try:
             cur.execute(
-                "INSERT INTO sources (country, url, name, language, added_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (country, url, name, language, now),
+                "INSERT INTO sources (country, url, name, language, added_at, account) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (country, url, name, language, now, account),
             )
             return cur.lastrowid or 0
         except sqlite3.IntegrityError:

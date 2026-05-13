@@ -39,6 +39,7 @@ from .bot_menu import (
 )
 
 user_client: TelegramClient | None = None
+user2_client: TelegramClient | None = None
 bot_client: TelegramClient | None = None
 
 # We'll store numeric chat IDs of channels we care about
@@ -806,7 +807,19 @@ async def ensure_joined_and_resolve_channels():
         if src.get("chat_id") is not None:
             url_to_cached_chat_id[src["url"]] = src["chat_id"]
 
+    # account number per url (1 or 2)
+    url_to_account: dict[str, int] = {}
+    for src in get_active_sources():
+        url_to_account[src["url"]] = src.get("account") or 1
+
     for ch in all_channels:
+        # Pick the right grabber client for this source
+        acct = url_to_account.get(ch, 1)
+        grabber = user2_client if (acct == 2 and user2_client is not None) else user_client
+        if grabber is None:
+            log.warning("No client available for account=%d, skipping %s", acct, ch)
+            continue
+
         try:
             cached_id = url_to_cached_chat_id.get(ch)
             is_invite = ch.startswith("https://t.me/+") or ch.startswith(
@@ -817,7 +830,7 @@ async def ensure_joined_and_resolve_channels():
                 # Fast path: resolve by peer_id. No CheckChatInvite, no flood risk.
                 # User account is already a member from a previous run.
                 try:
-                    ent = await user_client.get_entity(cached_id)
+                    ent = await grabber.get_entity(cached_id)
                     peer_id = cached_id
                 except Exception as e:
                     if is_invite:
@@ -830,15 +843,15 @@ async def ensure_joined_and_resolve_channels():
                             ch,
                             e,
                         )
-                        ent = await user_client.get_entity(ch)
-                        peer_id = await user_client.get_peer_id(ent)
+                        ent = await grabber.get_entity(ch)
+                        peer_id = await grabber.get_peer_id(ent)
                     else:
                         # Handle channel — get_entity is cheap, just retry by URL.
-                        ent = await user_client.get_entity(ch)
-                        peer_id = await user_client.get_peer_id(ent)
+                        ent = await grabber.get_entity(ch)
+                        peer_id = await grabber.get_peer_id(ent)
             else:
-                ent = await user_client.get_entity(ch)
-                peer_id = await user_client.get_peer_id(ent)
+                ent = await grabber.get_entity(ch)
+                peer_id = await grabber.get_peer_id(ent)
 
             username = getattr(ent, "username", None)
             name = username if username else str(peer_id)
@@ -849,11 +862,12 @@ async def ensure_joined_and_resolve_channels():
             # startup costs a Telegram RPC and can also flood-throttle.
             if cached_id is None:
                 try:
-                    await user_client(JoinChannelRequest(ent))
-                    log.info("User account joined channel: %s", ch)
+                    await grabber(JoinChannelRequest(ent))
+                    log.info("Account%d joined channel: %s", acct, ch)
                 except Exception as e:
                     log.warning(
-                        "User account could not join %s (maybe already joined): %s",
+                        "Account%d could not join %s (maybe already joined): %s",
+                        acct,
                         ch,
                         e,
                     )
@@ -1010,18 +1024,14 @@ async def backfill_history(limit: int = 1000):
     log.info("Backfill complete: %d messages total.", total)
 
 
-def _session_paths(cfg: AppConfig) -> tuple[Path, Path]:
-    """
-    Return filesystem paths for user & bot session files,
-    retrieved from the config file
-    """
+def _session_paths(cfg: AppConfig) -> tuple[Path, Path, Path | None]:
+    """Return (user_session, bot_session, user2_session) paths."""
     sessions_dir = cfg.telegram.sessions_dir
-
     sessions_dir.mkdir(parents=True, exist_ok=True)
-
     user_session = sessions_dir / "user.session"
     bot_session = sessions_dir / "bot.session"
-    return user_session, bot_session
+    user2_session = cfg.telegram.user2_session
+    return user_session, bot_session, user2_session
 
 
 # ---------------------------------------------------------------------------
@@ -1098,16 +1108,17 @@ async def conversation_text_handler(event):
 
 
 async def create_clients():
-    global user_client, bot_client
+    global user_client, user2_client, bot_client
 
     if user_client is not None and bot_client is not None:
         return
 
     cfg = get_config()
 
-    user_session_path, bot_session_path = _session_paths(cfg)
+    user_session_path, bot_session_path, user2_session_path = _session_paths(cfg)
 
-    log.info(f"Using session paths: user={user_session_path}, bot={bot_session_path}")
+    log.info("Using session paths: user=%s, bot=%s, user2=%s",
+             user_session_path, bot_session_path, user2_session_path)
 
     # Optional SOCKS5/HTTP proxy via env (e.g. v2ray: socks5://127.0.0.1:10808)
     proxy = None
@@ -1135,6 +1146,15 @@ async def create_clients():
         cfg.telegram.api_hash,
         proxy=proxy,
     )
+    if user2_session_path:
+        user2_client = TelegramClient(
+            str(user2_session_path),
+            cfg.telegram.api_id,
+            cfg.telegram.api_hash,
+            proxy=proxy,
+        )
+        user2_client.add_event_handler(channel_message_handler, events.NewMessage)
+        log.info("user2_client created from session: %s", user2_session_path)
 
     bot_client.add_event_handler(
         status_command, events.NewMessage(pattern=r"^/status$")
@@ -1213,6 +1233,12 @@ async def start_clients(auth_only: bool = False) -> None:
 
     # Non-interactive startup
     await user_client.connect()
+    if user2_client is not None:
+        await user2_client.connect()
+        if await user2_client.is_user_authorized():
+            log.info("user2_client authorized.")
+        else:
+            log.warning("user2_client not authorized — account 2 sources will be skipped.")
     await bot_client.start(bot_token=cfg.telegram.bot_token)
     await set_bot_menu_commands(bot_client)
     log.info("Bot client started (logged in as bot).")
@@ -1262,28 +1288,23 @@ async def _reconnect_loop(client, name: str, max_retries: int = 0):
 
 
 async def run_clients():
-    global user_client, bot_client
-
+    loops = [_reconnect_loop(bot_client, "BotClient")]
     if await user_client.is_user_authorized():
-        await asyncio.gather(
-            _reconnect_loop(user_client, "UserClient"),
-            _reconnect_loop(bot_client, "BotClient"),
-        )
-    else:
-        await _reconnect_loop(bot_client, "BotClient")
+        loops.append(_reconnect_loop(user_client, "UserClient"))
+    if user2_client is not None and await user2_client.is_user_authorized():
+        loops.append(_reconnect_loop(user2_client, "User2Client"))
+    await asyncio.gather(*loops)
 
 
 async def disconnect_clients(auth_only: bool = False) -> None:
-    """Disconnect both Telegram clients if they were initialized."""
-    global user_client, bot_client
-
-    # Telethon's disconnect() is async.
+    """Disconnect all Telegram clients if they were initialized."""
     tasks = []
     if user_client:
         tasks.append(user_client.disconnect())
+    if user2_client:
+        tasks.append(user2_client.disconnect())
     if bot_client and not auth_only:
         tasks.append(bot_client.disconnect())
-
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
 
