@@ -81,7 +81,9 @@ def _get_embedding_api_key() -> str:
     import os
 
     cfg = get_config()
-    return getattr(cfg.gemini, "api_key", None) or os.environ.get("GEMINI_API_KEY", "")
+    return str(
+        getattr(cfg.gemini, "api_key", None) or os.environ.get("GEMINI_API_KEY", "")
+    )
 
 
 def _compute_embedding(text: str) -> list[float] | None:
@@ -98,7 +100,10 @@ def _compute_embedding(text: str) -> list[float] | None:
             model=_EMBEDDING_MODEL,
             contents=text,
         )
-        return result.embeddings[0].values
+        embeddings = result.embeddings
+        if not embeddings:
+            return None
+        return list(embeddings[0].values)
     except Exception as e:
         log.warning("МОЗГ: embed_content failed: %s", e)
         return None
@@ -119,7 +124,8 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
             model=_EMBEDDING_MODEL,
             contents=texts,
         )
-        return [e.values for e in result.embeddings]
+        embeddings = result.embeddings or []
+        return [list(e.values) for e in embeddings]
     except Exception as e:
         log.warning("МОЗГ: batch embed failed: %s", e)
         return [None] * len(texts)
