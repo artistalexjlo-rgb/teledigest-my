@@ -375,7 +375,51 @@ async def handle_text_in_conversation(event) -> bool:
     conv = get_conv(user_id)
 
     if not conv.step:
+        # Quick-add: bare URL starts a 2-step flow (url → country)
+        if (
+            text.startswith("@")
+            or text.startswith("https://t.me/")
+            or text.startswith("http://t.me/")
+        ):
+            conv.step = "await_country_for_url"
+            conv.country_code = text  # temporarily store url in country_code
+            await event.reply(
+                f"Ссылка принята: <code>{text}</code>\n"
+                "Напиши страну (например: Бразилия, Таиланд, Сербия):",
+                parse_mode="html",
+                buttons=[[Button.inline("◀️ Отмена", b"menu:sources")]],
+            )
+            return True
         return False
+
+    # Step: quick-add — waiting for country after bare URL
+    if conv.step == "await_country_for_url":
+        url = conv.country_code  # was stored here temporarily
+        result = resolve_country(text)
+        if not result:
+            await event.reply(
+                f'❓ Не знаю страну "{text}".\n'
+                "Попробуй полное название на русском (Турция, Таиланд, Сербия...)",
+                buttons=[[Button.inline("◀️ Отмена", b"menu:sources")]],
+            )
+            return True
+        code, name = result
+        conv.reset()
+        from .telegram_client import subscribe_channel
+
+        channel_name = await subscribe_channel(url, country=code)
+        if not channel_name:
+            await event.reply(f"❌ Не удалось подключиться к {url}. Проверь ссылку.")
+            return True
+        sid = add_source(code, url, name=channel_name)
+        if sid:
+            await event.reply(
+                f"✅ <b>{channel_name}</b> добавлен для {name}, грабим.",
+                parse_mode="html",
+            )
+        else:
+            await event.reply(f"⚠️ {channel_name} уже есть для {name}.")
+        return True
 
     # Step: waiting for country name
     if conv.step == "await_country":
