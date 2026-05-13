@@ -120,7 +120,7 @@ async def _is_bot_sender(event) -> bool:
             return True
         # Check against blocked list from config
         cfg = get_config()
-        blocked = getattr(cfg.bot, "blocked_senders", set())
+        blocked: set = getattr(cfg.bot, "blocked_senders", set())
         if blocked:
             sender_id = str(event.sender_id or "")
             username = (getattr(sender, "username", None) or "").lower()
@@ -966,6 +966,7 @@ async def backfill_history(limit: int = 1000):
         log.info("Backfill: no channels to backfill.")
         return
 
+    assert user_client is not None, "user_client not initialized"
     log.info("Backfill: database is empty, fetching history...")
     total = 0
     for chat_id in scraped_chat_ids:
@@ -1040,6 +1041,7 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
             are tagged with country at write time.
     """
     global scraped_chat_ids
+    assert user_client is not None, "user_client not initialized"
     try:
         ent = await user_client.get_entity(url)
         peer_id = await user_client.get_peer_id(ent)

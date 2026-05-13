@@ -281,7 +281,7 @@ async def backfill_country(
                 ch_name = name
                 break
 
-        if peer_id is None:
+        if peer_id is None or ch_name is None:
             log.warning("Backfill: channel %s not resolved, skipping.", ch.get("url"))
             continue
 

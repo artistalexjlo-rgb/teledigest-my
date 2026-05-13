@@ -163,7 +163,7 @@ def select_next_candidate(
         if not (data.get("content") or "").strip():
             continue
         created = data.get("createdAt")
-        if hasattr(created, "to_pydatetime"):
+        if created is not None and hasattr(created, "to_pydatetime"):
             created = created.to_pydatetime()
         candidates.append(
             PostCandidate(

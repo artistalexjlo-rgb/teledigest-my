@@ -204,7 +204,7 @@ async def _ask_live_api(
     #   correct way to push a single user turn for batch Q&A.
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
-        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),  # type: ignore[arg-type]
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=_BRAIN_SYSTEM,
     )
@@ -225,7 +225,7 @@ async def _ask_live_api(
     chunks: list[str] = []
     async with client.aio.live.connect(model=model_name, config=config) as session:
         await session.send_client_content(
-            turns=turns,
+            turns=turns,  # type: ignore[arg-type]
             turn_complete=True,
         )
         async for response in session.receive():
