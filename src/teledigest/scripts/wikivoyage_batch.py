@@ -205,6 +205,8 @@ def main() -> int:
                         help=f"Countries per run (default {DEFAULT_BATCH_SIZE})")
     parser.add_argument("--status", action="store_true",
                         help="Show import status table and exit")
+    parser.add_argument("--sync", action="store_true",
+                        help="Scan Firestore and mark already-imported countries as done")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be imported, do not write")
     parser.add_argument("--reset", metavar="COUNTRY",
@@ -245,6 +247,26 @@ def main() -> int:
         print_status(state)
         return 0
 
+    if args.sync:
+        from pathlib import Path as _Path
+        from teledigest.config import init_config
+        from teledigest.scripts.wikivoyage_import import _build_firestore_client, COUNTRY_WIKI_NAME
+        from collections import Counter
+        init_config(_Path(args.config))
+        db = _build_firestore_client()
+        print("Scanning Firestore wikivoyage_base...")
+        docs = db.collection("wikivoyage_base").stream()
+        counts = Counter(d.to_dict().get("country") for d in docs)
+        synced = 0
+        for cc, n in counts.items():
+            if cc and state.get(cc, {}).get("status") != "done":
+                mark_done(state, cc, n, state_path)
+                print(f"  {cc}: marked done ({n} docs)")
+                synced += 1
+        print(f"Synced {synced} countries from Firestore.")
+        print_status(state)
+        return 0
+
     # Pick next N pending countries
     from teledigest.scripts.wikivoyage_import import COUNTRY_WIKI_NAME
     queue = [
@@ -275,7 +297,10 @@ def main() -> int:
     session = requests.Session()
     session.headers["User-Agent"] = "teledigest-wikivoyage-bot/1.0 (teledigest project)"
 
-    for cc in batch:
+    for i, cc in enumerate(batch):
+        if i > 0:
+            log.info("Pausing 60s between countries to respect WikiVoyage rate limits...")
+            time.sleep(60)
         try:
             # Check Firestore first — skip if already has data (imported manually)
             existing = count_in_firestore(db, cc)
