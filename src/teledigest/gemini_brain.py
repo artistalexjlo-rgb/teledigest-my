@@ -116,29 +116,43 @@ def compute_embeddings_batch(
 ) -> list[list[float] | None]:
     """Compute embeddings for a batch of texts.
 
-    model_idx is used to alternate between two embedding models
-    so each stays under 100 RPM free-tier quota.
+    Alternates between two embedding models (model_idx % 2).
+    On 429 (quota exhausted) automatically falls back to the other model.
     """
     if not texts:
         return []
-    try:
-        from google import genai
 
-        api_key = _get_embedding_api_key()
-        if not api_key:
-            return [None] * len(texts)
-        model = _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)]
-        client = genai.Client(api_key=api_key)
-        result = client.models.embed_content(
-            model=model,
-            contents=texts,  # type: ignore[arg-type]
-            config={"output_dimensionality": _EMBEDDING_DIM},
-        )
-        embeddings = result.embeddings or []
-        return [list(e.values or []) for e in embeddings]
-    except Exception as e:
-        log.warning("МОЗГ: batch embed failed (model=%s): %s", model, e)
+    from google import genai
+
+    api_key = _get_embedding_api_key()
+    if not api_key:
         return [None] * len(texts)
+    client = genai.Client(api_key=api_key)
+
+    # Try preferred model first, then fall back to the other one on 429.
+    models_to_try = [
+        _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)],
+        _EMBEDDING_MODELS[(model_idx + 1) % len(_EMBEDDING_MODELS)],
+    ]
+    for model in models_to_try:
+        try:
+            result = client.models.embed_content(
+                model=model,
+                contents=texts,  # type: ignore[arg-type]
+                config={"output_dimensionality": _EMBEDDING_DIM},
+            )
+            embeddings = result.embeddings or []
+            return [list(e.values or []) for e in embeddings]
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                log.warning("МОЗГ: model %s quota exhausted — trying next", model)
+                continue
+            log.warning("МОЗГ: batch embed failed (model=%s): %s", model, e)
+            return [None] * len(texts)
+
+    log.warning("МОЗГ: all embedding models exhausted quota")
+    return [None] * len(texts)
 
 
 def _fetch_by_vector(
