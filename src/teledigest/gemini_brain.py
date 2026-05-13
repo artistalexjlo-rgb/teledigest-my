@@ -79,17 +79,14 @@ _EMBEDDING_DIM = 768
 def _compute_embedding(text: str) -> list[float] | None:
     """Compute text-embedding-004 vector for a single text. Returns None on error."""
     try:
+        import os
+
         import google.generativeai as genai
 
         cfg = get_config()
-        api_key = (
-            cfg.google.gemini_api_key if hasattr(cfg.google, "gemini_api_key") else None
+        api_key = getattr(cfg.gemini, "api_key", None) or os.environ.get(
+            "GEMINI_API_KEY", ""
         )
-        if not api_key:
-            # try env
-            import os
-
-            api_key = os.environ.get("GEMINI_API_KEY", "")
         if not api_key:
             log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
             return None
@@ -115,7 +112,7 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
         import google.generativeai as genai
 
         cfg = get_config()
-        api_key = getattr(cfg.google, "gemini_api_key", None) or os.environ.get(
+        api_key = getattr(cfg.gemini, "api_key", None) or os.environ.get(
             "GEMINI_API_KEY", ""
         )
         if not api_key:
