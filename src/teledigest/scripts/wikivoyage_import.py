@@ -63,8 +63,8 @@ WIKI_API = "https://en.wikivoyage.org/w/api.php"
 WIKI_PAGE_BASE = "https://en.wikivoyage.org/wiki/"
 USER_AGENT = "teledigest-bot/0.1 (https://github.com/artistalexjlo-rgb/teledigest-my)"
 
-# Be polite to the wiki API. ~5 req/sec is well within tolerance.
-REQUEST_PAUSE_S = 0.2
+# Be polite to the wiki API. 1.5s pause keeps us well under rate limits.
+REQUEST_PAUSE_S = 1.5
 
 # Country code -> WikiVoyage category name. WikiVoyage uses English country
 # names verbatim as category roots (Category:Thailand, Category:Brazil).
