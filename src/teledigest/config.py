@@ -133,10 +133,9 @@ class StorageConfig:
 
 @dataclass
 class GoogleConfig:
-    """Google Drive upload settings (OAuth user creds, no service account)."""
+    """Google Drive + Firestore settings (Service Account auth)."""
     drive_folder_id: str = ""
-    credentials_path: Path = Path("google-credentials.json")
-    token_path: Path = Path("google-token.json")
+    service_account_path: Path = Path("service-account.json")
     enabled: bool = False
     # Firestore (for channel poster reading telegram_queue collection)
     firestore_project_id: str = ""
@@ -381,8 +380,7 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
     folder_id = str(g_raw.get("drive_folder_id", "")).strip()
     return GoogleConfig(
         drive_folder_id=folder_id,
-        credentials_path=Path(g_raw.get("credentials_path", "google-credentials.json")),
-        token_path=Path(g_raw.get("token_path", "google-token.json")),
+        service_account_path=Path(g_raw.get("service_account_path", "service-account.json")),
         enabled=bool(folder_id) and bool(g_raw.get("enabled", True)),
         firestore_project_id=str(g_raw.get("firestore_project_id", "")).strip(),
         firestore_database=str(g_raw.get("firestore_database", "default")).strip() or "default",

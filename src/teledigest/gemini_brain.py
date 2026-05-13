@@ -62,36 +62,9 @@ Behavior:
 
 
 def _build_firestore_client():
-    """
-    Build a Firestore client using the OAuth token shared with channel_poster.
-    Mirrors channel_poster._build_firestore_client() — same token, same scope.
-    """
-    from google.oauth2.credentials import Credentials
-    from google.cloud import firestore
-
-    cfg = get_config()
-    if not cfg.google.token_path.exists():
-        raise FileNotFoundError(
-            f"OAuth token not found: {cfg.google.token_path}. "
-            "Run scripts/drive_oauth_init.py with datastore scope."
-        )
-    if not cfg.google.firestore_project_id:
-        raise RuntimeError("[google] firestore_project_id is not set in config.")
-
-    creds = Credentials.from_authorized_user_file(
-        str(cfg.google.token_path),
-        scopes=["https://www.googleapis.com/auth/datastore"],
-    )
-    if creds.expired and creds.refresh_token:
-        from google.auth.transport.requests import Request
-        creds.refresh(Request())
-        cfg.google.token_path.write_text(creds.to_json(), encoding="utf-8")
-
-    return firestore.Client(
-        project=cfg.google.firestore_project_id,
-        database=cfg.google.firestore_database,
-        credentials=creds,
-    )
+    """Build a Firestore client using service account."""
+    from .google_auth import build_firestore_client
+    return build_firestore_client()
 
 
 def _fetch_wisdom_and_wiki(wisdom_limit: int = 150, wiki_limit: int = 50) -> list[dict]:

@@ -20,12 +20,14 @@ venv/
 .env
 teledigest.conf
 *.conf
-# Google OAuth (credentials.json from GCP, token.json from oauth init)
+# Google OAuth / Service Account keys — NEVER commit
 google-credentials.json
 google-token.json
 client_secret_*.json
 **/credentials.json
 **/token.json
+service-account*.json
+project-*.json
 
 # Data / runtime
 data/
