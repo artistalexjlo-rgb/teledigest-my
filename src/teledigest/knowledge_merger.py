@@ -12,8 +12,12 @@ import re
 from typing import Any
 
 from .config import log
-from .knowledge_db import (VALID_CATEGORIES, get_all_knowledge_for_category,
-                           insert_knowledge, update_knowledge)
+from .knowledge_db import (
+    VALID_CATEGORIES,
+    get_all_knowledge_for_category,
+    insert_knowledge,
+    update_knowledge,
+)
 
 # Minimum word overlap ratio to consider two questions as duplicates.
 SIMILARITY_THRESHOLD = 0.60

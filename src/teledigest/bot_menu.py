@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from telethon import Button
 
-from .sources_db import (COUNTRY_NAMES, add_source, get_active_countries,
-                         get_active_sources, get_digest_target,
-                         resolve_country, set_digest_target)
+from .sources_db import (
+    COUNTRY_NAMES,
+    add_source,
+    get_active_countries,
+    get_active_sources,
+    get_digest_target,
+    resolve_country,
+    set_digest_target,
+)
 
 # ---------------------------------------------------------------------------
 # Conversation state per user (in-memory, resets on restart — fine for admin)

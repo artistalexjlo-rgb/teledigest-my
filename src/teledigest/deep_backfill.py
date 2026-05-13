@@ -15,8 +15,7 @@ from telethon.errors import FloodWaitError
 
 from .config import log
 from .db import save_message
-from .knowledge_db import (get_source_meta, update_source_meta,
-                           upsert_source_meta)
+from .knowledge_db import get_source_meta, update_source_meta, upsert_source_meta
 
 # Maximum history depth: 1 year
 MAX_HISTORY_DAYS = 365

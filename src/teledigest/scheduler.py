@@ -6,8 +6,10 @@ from telethon.errors import RPCError
 
 from .config import get_config, log
 from .daily_artifact import artifact_claims_as_dicts, build_daily_artifact
-from .db import (get_relevant_messages_for_country_last_24h,
-                 get_relevant_messages_last_24h)
+from .db import (
+    get_relevant_messages_for_country_last_24h,
+    get_relevant_messages_last_24h,
+)
 from .knowledge_db import get_knowledge_for_country, mark_outdated
 from .knowledge_loader import load_daily_claims
 from .llm import llm_summarize, llm_summarize_brief
