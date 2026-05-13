@@ -72,7 +72,7 @@ def _build_firestore_client():
 # Embeddings
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_MODEL = "text-embedding-004"
+_EMBEDDING_MODEL = "gemini-embedding-001"
 _EMBEDDING_DIM = 768
 
 
@@ -99,6 +99,7 @@ def _compute_embedding(text: str) -> list[float] | None:
         result = client.models.embed_content(
             model=_EMBEDDING_MODEL,
             contents=text,
+            config={"output_dimensionality": _EMBEDDING_DIM},
         )
         embeddings = result.embeddings
         if not embeddings:
@@ -123,6 +124,7 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
         result = client.models.embed_content(
             model=_EMBEDDING_MODEL,
             contents=texts,
+            config={"output_dimensionality": _EMBEDDING_DIM},
         )
         embeddings = result.embeddings or []
         return [list(e.values or []) for e in embeddings]
