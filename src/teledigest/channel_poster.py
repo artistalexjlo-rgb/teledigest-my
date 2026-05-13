@@ -28,7 +28,6 @@ import asyncio
 import datetime as dt
 import random
 from dataclasses import dataclass
-from typing import Any
 
 from .config import get_config, log
 

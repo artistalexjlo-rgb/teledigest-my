@@ -10,9 +10,8 @@ Default:       /home/teledigest/data/service-account.json
 
 from __future__ import annotations
 
-from pathlib import Path
 
-from .config import get_config, log
+from .config import get_config
 
 
 def load_service_account_credentials(scopes: list[str]):

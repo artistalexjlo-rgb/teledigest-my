@@ -226,9 +226,9 @@ def update_knowledge(kid: int, **fields: Any) -> None:
         cur.execute(f"UPDATE knowledge SET {sets} WHERE id = ?", vals)
 
 
-import re as _re
+import re as _re  # noqa: E402
 
-from pymorphy3 import MorphAnalyzer as _MorphAnalyzer
+from pymorphy3 import MorphAnalyzer as _MorphAnalyzer  # noqa: E402
 
 _morph = _MorphAnalyzer()
 _WORD_RE = _re.compile(r"[а-яёa-z0-9]+", _re.IGNORECASE)

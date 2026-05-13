@@ -52,7 +52,6 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Iterable
 
 import requests
 
@@ -100,8 +99,8 @@ COUNTRY_WIKI_NAME = {
     "ci": "Ivory Coast", "cm": "Cameroon", "cu": "Cuba", "do": "Dominican Republic",
     "dz": "Algeria", "et": "Ethiopia", "gh": "Ghana", "gt": "Guatemala",
     "hn": "Honduras", "ht": "Haiti", "li": "Liechtenstein", "lu": "Luxembourg",
-    "ly": "Libya", "mg": "Madagascar", "mk": "North Macedonia",
-    "ml": "Mali", "mm": "Myanmar", "mw": "Malawi", "mz": "Mozambique",
+    "ly": "Libya", "mg": "Madagascar",
+    "ml": "Mali", "mw": "Malawi", "mz": "Mozambique",
     "na": "Namibia", "ng": "Nigeria", "ni": "Nicaragua", "om": "Oman",
     "pa": "Panama", "qa": "Qatar", "rw": "Rwanda", "sd": "Sudan",
     "sn": "Senegal", "sv": "El Salvador", "sy": "Syria",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from typing import Any
 
 from openai import OpenAI
@@ -38,7 +37,6 @@ def _format_knowledge_context(knowledge: list[dict[str, Any]]) -> str:
         return ""
     lines = []
     for k in knowledge[:30]:  # top 30 entries max
-        tags = json.loads(k["tags"]) if isinstance(k["tags"], str) else k["tags"]
         lines.append(
             f"[{k['category']}] Q: {k['question']}\n"
             f"A: {k['answer']} (confidence: {k['confidence']})"

@@ -7,10 +7,7 @@ and asks the LLM to extract structured Q&A pairs.
 
 from __future__ import annotations
 
-import datetime as dt
 import json
-import sqlite3
-from typing import Any
 
 from .config import get_config, log
 from .knowledge_db import get_last_processed_msg_id, log_extraction_run
@@ -91,7 +88,6 @@ def _get_extraction_client():
 def _call_extraction_llm(country: str, source_name: str, messages_text: str, msg_count: int) -> list[dict]:
     """Call LLM with extraction prompt and parse JSON response."""
     client, model, temperature = _get_extraction_client()
-    cfg = get_config()
 
     user_prompt = EXTRACTION_USER.format(
         COUNTRY=country,

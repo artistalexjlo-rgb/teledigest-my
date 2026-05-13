@@ -15,11 +15,9 @@ from .sources_db import (
     get_active_countries,
     get_active_sources,
     get_digest_target,
-    remove_source,
     resolve_country,
     set_digest_target,
 )
-from .config import log
 
 
 # ---------------------------------------------------------------------------

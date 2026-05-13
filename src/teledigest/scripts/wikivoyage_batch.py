@@ -125,7 +125,6 @@ def count_in_firestore(db, country: str, collection: str = "wikivoyage_base") ->
 
 def import_country(country: str, db, session) -> int:
     """Import one country. Returns total patterns in Firestore after import."""
-    import requests as _req
     from teledigest.scripts.wikivoyage_import import (
         COUNTRY_WIKI_NAME,
         list_category_members,

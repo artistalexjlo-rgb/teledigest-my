@@ -13,7 +13,7 @@ from typing import Any
 
 from .config import log
 from .db import get_db_connection
-from .country_codes import resolve_country as _resolve, display_name, COUNTRIES
+from .country_codes import resolve_country as _resolve, COUNTRIES
 
 # Display names from country_codes.py
 COUNTRY_NAMES: dict[str, str] = {code: f"{flag} {name}" for code, (name, flag) in COUNTRIES.items()}

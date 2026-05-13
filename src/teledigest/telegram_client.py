@@ -21,12 +21,11 @@ from .message_utils import reply_long
 from .telegraph import post_to_telegraph
 from .knowledge_search import is_brain_query, search_and_format
 from .sources_db import (
-    init_sources_table, migrate_from_config, get_active_sources,
+    get_active_sources,
     get_active_countries, get_digest_target, set_source_chat_id,
 )
 from .bot_menu import (
-    handle_callback, handle_text_in_conversation, get_conv,
-    main_menu_keyboard,
+    handle_callback, handle_text_in_conversation, main_menu_keyboard,
 )
 
 user_client: TelegramClient | None = None

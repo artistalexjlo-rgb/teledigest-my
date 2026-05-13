@@ -11,7 +11,6 @@ Flow:
 
 from __future__ import annotations
 
-import json
 import re
 
 from openai import OpenAI
@@ -54,8 +53,6 @@ def _format_facts_for_llm(results: list[dict]) -> str:
         question = (r.get("question") or "").strip()
         answer = (r.get("answer") or "").strip()
         confidence = r.get("confidence", "medium")
-        tags = json.loads(r["tags"]) if isinstance(r["tags"], str) else r.get("tags", [])
-
         header = f"[Факт {i}, {confidence}]"
         if question:
             parts.append(f"{header}\nВопрос: {question}\nОтвет: {answer}")
