@@ -72,7 +72,7 @@ def _build_firestore_client():
 # Embeddings
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_MODEL = "models/text-embedding-004"
+_EMBEDDING_MODEL = "text-embedding-004"
 _EMBEDDING_DIM = 768
 
 
