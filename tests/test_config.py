@@ -90,7 +90,7 @@ def test_parse_app_config_valid_minimal_defaults() -> None:
 
     # storage defaults
     # default db path and empty keyword list when [storage] is missing
-    assert app_cfg.storage.db_path == Path("data/messages_fts.db")
+    assert app_cfg.storage.db_path == Path("/data/messages_fts.db")
     assert app_cfg.storage.rag_keywords == []
 
     # llm

@@ -118,6 +118,8 @@ async def test_summary_scheduler_sends_digest_at_scheduled_time(app_config):
         patch.object(sched, "llm_summarize", return_value="AI Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -141,6 +143,8 @@ async def test_summary_scheduler_deduplicates_same_day(app_config):
         patch.object(sched, "llm_summarize", return_value="Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         # Both iterations return the same time so today == last_run_for on the second pass.
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
@@ -165,6 +169,8 @@ async def test_summary_scheduler_sends_notice_when_no_messages(app_config):
         patch.object(sched, "llm_summarize") as mock_llm,
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -197,6 +203,8 @@ async def test_summary_scheduler_uses_brief_path_when_configured(monkeypatch):
         patch.object(sched, "llm_summarize_brief", return_value="Brief!"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -227,6 +235,8 @@ async def test_summary_scheduler_handles_rpc_error_without_propagating(app_confi
         patch.object(sched, "llm_summarize", return_value="Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         # sleep(65) still fires after the error — that is what we break on.

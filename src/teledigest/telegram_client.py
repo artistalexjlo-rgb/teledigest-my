@@ -1102,7 +1102,7 @@ async def set_bot_menu_commands(client: TelegramClient) -> None:
             ],
         )
     )
-    log.info("Bot name for knowledge queries: %s", get_config().bot.bot_name)
+    log.info("Bot menu commands registered.")
 
 
 async def start_clients(auth_only: bool = False) -> None:
