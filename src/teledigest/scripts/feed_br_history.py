@@ -51,6 +51,7 @@ from teledigest.daily_samples import (
     get_samples_dir,
 )
 
+
 def _tg_notify(text: str) -> None:
     """Best-effort Telegram notification to summary_target."""
     try:
