@@ -28,7 +28,18 @@
 // --- Defaults (override via Script Properties if needed) ---
 var DEFAULT_FIREBASE_PROJECT_ID = "project-56cb62a9-8914-4ae3-b44";
 var DEFAULT_FOLDER_ID = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf";
-var MODEL = "gemini-3.1-flash-lite-preview";
+// Alternated to spread load — preview tiers throw 503 under burst.
+// Each runMining_ call picks the next model via _modelCallCounter.
+var MODELS = [
+  "gemini-3.1-flash-lite-preview",
+  "gemini-2.5-flash-lite-preview"
+];
+var _modelCallCounter = 0;
+function pickModel_() {
+  var m = MODELS[_modelCallCounter % MODELS.length];
+  _modelCallCounter++;
+  return m;
+}
 var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 var FORCE_REPROCESS = false;
@@ -158,7 +169,9 @@ function runMining_(file, cfg) {
   try {
     var content = file.getBlob().getDataAsString();
     var sourceDateISO = parseFileNameDate_(file.getName());
-    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL +
+    var model = pickModel_();
+    console.log("Mining " + file.getName() + " with " + model);
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
               ":generateContent?key=" + cfg.apiKey;
 
     var systemPrompt =
