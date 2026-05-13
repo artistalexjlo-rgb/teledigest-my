@@ -92,7 +92,12 @@ function computeEmbedding_(text, cfg) {
     }
     var data = JSON.parse(resp.getContentText());
     var vals = data && data.embedding && data.embedding.values;
-    return Array.isArray(vals) ? vals : null;
+    if (Array.isArray(vals) && vals.length) {
+      console.log("embedding ok: dims=" + vals.length + " text_len=" + text.length);
+      return vals;
+    }
+    console.warn("embedContent returned empty vector for text_len=" + text.length);
+    return null;
   } catch (e) {
     console.warn("embedContent failed: " + e);
     return null;
