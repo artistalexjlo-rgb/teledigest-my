@@ -13,24 +13,75 @@ from typing import Any
 
 from .config import log
 from .knowledge_db import (
+    VALID_CATEGORIES,
     get_all_knowledge_for_category,
     insert_knowledge,
     update_knowledge,
-    VALID_CATEGORIES,
 )
 
 # Minimum word overlap ratio to consider two questions as duplicates.
 SIMILARITY_THRESHOLD = 0.60
 
 # Russian stop-words to exclude from comparison.
-_STOP_WORDS = frozenset({
-    "и", "в", "на", "с", "по", "не", "что", "как", "это", "для",
-    "из", "то", "а", "но", "или", "ли", "бы", "же", "от", "до",
-    "за", "при", "об", "его", "её", "их", "мы", "вы", "он", "она",
-    "они", "все", "так", "уже", "ещё", "вот", "да", "нет", "где",
-    "кто", "когда", "можно", "нужно", "надо", "есть", "тоже", "ещё",
-    "очень", "только", "если", "чтобы", "был", "была", "было", "были",
-})
+_STOP_WORDS = frozenset(
+    {
+        "и",
+        "в",
+        "на",
+        "с",
+        "по",
+        "не",
+        "что",
+        "как",
+        "это",
+        "для",
+        "из",
+        "то",
+        "а",
+        "но",
+        "или",
+        "ли",
+        "бы",
+        "же",
+        "от",
+        "до",
+        "за",
+        "при",
+        "об",
+        "его",
+        "её",
+        "их",
+        "мы",
+        "вы",
+        "он",
+        "она",
+        "они",
+        "все",
+        "так",
+        "уже",
+        "ещё",
+        "вот",
+        "да",
+        "нет",
+        "где",
+        "кто",
+        "когда",
+        "можно",
+        "нужно",
+        "надо",
+        "есть",
+        "тоже",
+        "ещё",
+        "очень",
+        "только",
+        "если",
+        "чтобы",
+        "был",
+        "была",
+        "было",
+        "были",
+    }
+)
 
 _WORD_RE = re.compile(r"[а-яёa-z0-9]+", re.IGNORECASE | re.UNICODE)
 
@@ -119,7 +170,9 @@ def merge_qa_pair(
         new_confidence = _compute_confidence(new_count)
 
         # Use newer answer if it's longer / more detailed
-        new_answer = answer if len(answer) > len(best_match["answer"]) else best_match["answer"]
+        new_answer = (
+            answer if len(answer) > len(best_match["answer"]) else best_match["answer"]
+        )
 
         # Merge tags
         existing_tags = json.loads(best_match["tags"])
@@ -136,7 +189,9 @@ def merge_qa_pair(
 
         log.debug(
             "Merged Q&A into #%d (overlap=%.0f%%): %s",
-            kid, best_score * 100, question[:60],
+            kid,
+            best_score * 100,
+            question[:60],
         )
         return kid
     else:

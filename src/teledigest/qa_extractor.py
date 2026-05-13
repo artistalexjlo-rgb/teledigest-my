@@ -7,10 +7,7 @@ and asks the LLM to extract structured Q&A pairs.
 
 from __future__ import annotations
 
-import datetime as dt
 import json
-import sqlite3
-from typing import Any
 
 from .config import get_config, log
 from .knowledge_db import get_last_processed_msg_id, log_extraction_run
@@ -80,18 +77,28 @@ Messages ({MSG_COUNT} messages):
 def _get_extraction_client():
     """Get the LLM client for extraction — uses [llm.extraction] if configured, else main [llm]."""
     from openai import OpenAI
+
     cfg = get_config()
     ext = cfg.llm.extraction
     if ext.api_key:
         log.info("Using extraction LLM: %s @ %s", ext.model, ext.base_url)
-        return OpenAI(api_key=ext.api_key, base_url=ext.base_url), ext.model, ext.temperature
-    return OpenAI(api_key=cfg.llm.api_key, base_url=cfg.llm.base_url), cfg.llm.model, 0.2
+        return (
+            OpenAI(api_key=ext.api_key, base_url=ext.base_url),
+            ext.model,
+            ext.temperature,
+        )
+    return (
+        OpenAI(api_key=cfg.llm.api_key, base_url=cfg.llm.base_url),
+        cfg.llm.model,
+        0.2,
+    )
 
 
-def _call_extraction_llm(country: str, source_name: str, messages_text: str, msg_count: int) -> list[dict]:
+def _call_extraction_llm(
+    country: str, source_name: str, messages_text: str, msg_count: int
+) -> list[dict]:
     """Call LLM with extraction prompt and parse JSON response."""
     client, model, temperature = _get_extraction_client()
-    cfg = get_config()
 
     user_prompt = EXTRACTION_USER.format(
         COUNTRY=country,
@@ -243,7 +250,9 @@ async def extract_from_chat(
 
     log.info(
         "Q&A extraction for %s (country=%s, after msg_id=%d)",
-        chat_name, country, last_id,
+        chat_name,
+        country,
+        last_id,
     )
 
     while True:
@@ -261,12 +270,14 @@ async def extract_from_chat(
                     reply_to = None
                     if msg.reply_to and hasattr(msg.reply_to, "reply_to_msg_id"):
                         reply_to = str(msg.reply_to.reply_to_msg_id)
-                    raw_messages.append({
-                        "id": msg.id,
-                        "date": msg.date,
-                        "text": text.strip(),
-                        "reply_to": reply_to,
-                    })
+                    raw_messages.append(
+                        {
+                            "id": msg.id,
+                            "date": msg.date,
+                            "text": text.strip(),
+                            "reply_to": reply_to,
+                        }
+                    )
                 if msg.id > highest_msg_id:
                     highest_msg_id = msg.id
         except Exception as e:
@@ -290,7 +301,10 @@ async def extract_from_chat(
             msg_ids = [str(m["id"]) for m in thread]
 
             qa_pairs = _call_extraction_llm(
-                country, chat_name, messages_text, len(thread),
+                country,
+                chat_name,
+                messages_text,
+                len(thread),
             )
 
             for qa in qa_pairs:
@@ -322,6 +336,8 @@ async def extract_from_chat(
 
     log.info(
         "Extraction complete for %s: %d messages processed, %d Q&A pairs extracted.",
-        chat_name, total_processed, total_extracted,
+        chat_name,
+        total_processed,
+        total_extracted,
     )
     return total_extracted

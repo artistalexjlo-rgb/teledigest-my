@@ -118,6 +118,8 @@ async def test_summary_scheduler_sends_digest_at_scheduled_time(app_config):
         patch.object(sched, "llm_summarize", return_value="AI Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -141,6 +143,8 @@ async def test_summary_scheduler_deduplicates_same_day(app_config):
         patch.object(sched, "llm_summarize", return_value="Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         # Both iterations return the same time so today == last_run_for on the second pass.
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
@@ -165,6 +169,8 @@ async def test_summary_scheduler_sends_notice_when_no_messages(app_config):
         patch.object(sched, "llm_summarize") as mock_llm,
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -197,6 +203,8 @@ async def test_summary_scheduler_uses_brief_path_when_configured(monkeypatch):
         patch.object(sched, "llm_summarize_brief", return_value="Brief!"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         await _drive(max_sleeps=1)
@@ -227,6 +235,8 @@ async def test_summary_scheduler_handles_rpc_error_without_propagating(app_confi
         patch.object(sched, "llm_summarize", return_value="Summary"),
         patch.object(sched, "send_message_long", send_mock),
         patch.object(sched, "get_bot_client", return_value=MagicMock()),
+        patch.object(sched, "mark_outdated", return_value=0),
+        patch("teledigest.sources_db.get_active_countries", return_value=[]),
     ):
         mock_dt.datetime.now.return_value = _fixed_now(21, 0)
         # sleep(65) still fires after the error — that is what we break on.
@@ -246,6 +256,7 @@ async def test_summary_scheduler_handles_rpc_error_without_propagating(app_confi
 def realdb_app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
     """A config wired to a real (file) SQLite DB so we can exercise db queries."""
     import sqlite3 as _sqlite
+
     db_path = tmp_path / "messages_fts.db"
     app_cfg = _make_app_config()
     app_cfg.storage.db_path = db_path
@@ -254,6 +265,7 @@ def realdb_app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
     # Init schema like production does
     from teledigest import db as _db
     from teledigest import sources_db as _sdb
+
     _db.init_db()
     _sdb.init_sources_table()
 
@@ -263,8 +275,20 @@ def realdb_app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
         "INSERT INTO sources (country, url, name, language, added_at, chat_id, digest_target) "
         "VALUES (?, ?, ?, 'ru', '2026-04-24T00:00:00', ?, ?)",
         [
-            ("br", "@Brazil_ChatForum", "Brazil Chat Forum", -1001221994108, "@Digest_Br"),
-            ("lk", "https://t.me/+sri_lanka", "https://t.me/+sri_lanka", -1001605996131, None),
+            (
+                "br",
+                "@Brazil_ChatForum",
+                "Brazil Chat Forum",
+                -1001221994108,
+                "@Digest_Br",
+            ),
+            (
+                "lk",
+                "https://t.me/+sri_lanka",
+                "https://t.me/+sri_lanka",
+                -1001605996131,
+                None,
+            ),
         ],
     )
     conn.commit()
@@ -294,14 +318,20 @@ def test_daily_understanding_only_uses_messages_from_its_country(realdb_app_conf
     # br-channel messages — channel name matches the URL handle of the br source
     for i in range(3):
         _db.save_message(
-            f"br_{i}", "Brazil_ChatForum", base + real_dt.timedelta(minutes=i),
-            f"br message about price reais {i}", country="br",
+            f"br_{i}",
+            "Brazil_ChatForum",
+            base + real_dt.timedelta(minutes=i),
+            f"br message about price reais {i}",
+            country="br",
         )
     # lk-channel messages — channel value is the numeric chat_id (invite link)
     for i in range(3):
         _db.save_message(
-            f"lk_{i}", "-1001605996131", base + real_dt.timedelta(minutes=i),
-            f"lk message about visa rupees {i}", country="lk",
+            f"lk_{i}",
+            "-1001605996131",
+            base + real_dt.timedelta(minutes=i),
+            f"lk message about visa rupees {i}",
+            country="lk",
         )
 
     captured: dict[str, list[str] | None] = {}
@@ -312,6 +342,7 @@ def test_daily_understanding_only_uses_messages_from_its_country(realdb_app_conf
         captured.setdefault("calls", []).append(list(channels) if channels else None)
         # Pull from the real DB, filtered by channels just like prod.
         import sqlite3
+
         conn = sqlite3.connect(realdb_app_config.storage.db_path)
         rows = conn.execute(
             "SELECT channel, text FROM messages WHERE substr(date,1,10) = ?",
@@ -337,9 +368,9 @@ def test_daily_understanding_only_uses_messages_from_its_country(realdb_app_conf
     # 1. Every call to build_daily_artifact MUST receive a non-None channels list.
     #    A None here means we regressed — daily understanding fell back to
     #    "all channels" (the BUG #2 behaviour).
-    assert all(c is not None for c in captured["calls"]), (
-        "build_daily_artifact called without channel scope — BUG #2 regressed"
-    )
+    assert all(
+        c is not None for c in captured["calls"]
+    ), "build_daily_artifact called without channel scope — BUG #2 regressed"
 
     # 2. The br call must include the br URL handle and NOT the lk chat_id.
     br_channels = captured["calls"][0]
@@ -356,6 +387,7 @@ def test_daily_understanding_skips_country_with_no_sources(realdb_app_config):
     """If a country has no rows in `sources`, daily understanding logs a warning
     and returns 0 — no fallback to all-messages."""
     from teledigest import scheduler as _sched
+
     day = real_dt.date(2026, 4, 28)
 
     with patch.object(_sched, "build_daily_artifact") as build_mock:

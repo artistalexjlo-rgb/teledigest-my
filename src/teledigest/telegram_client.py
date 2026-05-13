@@ -14,18 +14,27 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.channels import JoinChannelRequest
 
 from .config import AppConfig, get_config, log
-from .db import get_messages_last_24h, get_relevant_messages_last_24h, save_message, delete_bot_messages, clear_knowledge_for_reextraction
+from .db import (
+    get_messages_last_24h,
+    get_relevant_messages_last_24h,
+    save_message,
+    delete_bot_messages,
+    clear_knowledge_for_reextraction,
+)
 from .knowledge_loader import load_unified_claims
 from .llm import build_prompt, llm_summarize, llm_summarize_brief
 from .message_utils import reply_long
 from .telegraph import post_to_telegraph
 from .knowledge_search import is_brain_query, search_and_format
 from .sources_db import (
-    init_sources_table, migrate_from_config, get_active_sources,
-    get_active_countries, get_digest_target, set_source_chat_id,
+    get_active_sources,
+    get_active_countries,
+    get_digest_target,
+    set_source_chat_id,
 )
 from .bot_menu import (
-    handle_callback, handle_text_in_conversation, get_conv,
+    handle_callback,
+    handle_text_in_conversation,
     main_menu_keyboard,
 )
 
@@ -111,7 +120,7 @@ async def _is_bot_sender(event) -> bool:
             return True
         # Check against blocked list from config
         cfg = get_config()
-        blocked = getattr(cfg.bot, "blocked_senders", set())
+        blocked: set = getattr(cfg.bot, "blocked_senders", set())
         if blocked:
             sender_id = str(event.sender_id or "")
             username = (getattr(sender, "username", None) or "").lower()
@@ -156,13 +165,28 @@ async def channel_message_handler(event):
     if country is None:
         log.warning(
             "save_message: no country mapping for chat_id=%s name=%s — saving with country=NULL",
-            chat_id, chat_name,
+            chat_id,
+            chat_name,
         )
 
-    log.info("Got message from %s (id=%s, reply_to=%s, sender=%s, country=%s)",
-             chat_name, msg.id, reply_to, sid, country)
-    save_message(msg_id, chat_name, date, text, reply_to_msg_id=reply_to,
-                 sender_id=sid, is_bot=s_bot, country=country)
+    log.info(
+        "Got message from %s (id=%s, reply_to=%s, sender=%s, country=%s)",
+        chat_name,
+        msg.id,
+        reply_to,
+        sid,
+        country,
+    )
+    save_message(
+        msg_id,
+        chat_name,
+        date,
+        text,
+        reply_to_msg_id=reply_to,
+        sender_id=sid,
+        is_bot=s_bot,
+        country=country,
+    )
 
 
 async def is_user_allowed(event) -> bool:
@@ -436,8 +460,12 @@ async def _extract_brain_reply_history(event) -> tuple[str | None, list[dict] | 
         prev_bot_text = prev_bot_text[1:].lstrip()
     # The "На основе N записей..." tail is informational, drop it.
     import re as _re
+
     prev_bot_text = _re.sub(
-        r"\n+На основе\s+\d+\s+записей.*$", "", prev_bot_text, flags=_re.DOTALL,
+        r"\n+На основе\s+\d+\s+записей.*$",
+        "",
+        prev_bot_text,
+        flags=_re.DOTALL,
     ).strip()
 
     history: list[dict] = []
@@ -489,8 +517,11 @@ async def brain_message_handler(event):
     trigger = "reply" if history else "prefix"
     log.info(
         "МОЗГ query in %s (country=%s, trigger=%s, history=%d): %s",
-        chat_id_to_name.get(chat_id, chat_id), country, trigger,
-        len(history or []), query[:80],
+        chat_id_to_name.get(chat_id, chat_id),
+        country,
+        trigger,
+        len(history or []),
+        query[:80],
     )
 
     response = await search_and_format(country, query, history=history)
@@ -506,7 +537,10 @@ async def backfill_command(event):
     text = event.raw_text.strip()
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        await event.reply("Usage: <code>bf &lt;country_code&gt;</code>\nExample: <code>bf br</code>", parse_mode="html")
+        await event.reply(
+            "Usage: <code>bf &lt;country_code&gt;</code>\nExample: <code>bf br</code>",
+            parse_mode="html",
+        )
         return
 
     country = parts[1].strip().lower()
@@ -542,8 +576,11 @@ async def backfill_command(event):
 
         try:
             count = await deep_backfill(
-                user_client, peer_id, chat_id_to_name[peer_id],
-                country, ch.get("language") or "ru",
+                user_client,
+                peer_id,
+                chat_id_to_name[peer_id],
+                country,
+                ch.get("language") or "ru",
             )
             total += count
             await event.reply(f"{ok_mark} {ch['name']}: {count} messages")
@@ -551,7 +588,10 @@ async def backfill_command(event):
             await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
     _backfill_running.discard(country)
-    await event.reply(f"Backfill for <b>{country}</b> complete: {total} messages total.", parse_mode="html")
+    await event.reply(
+        f"Backfill for <b>{country}</b> complete: {total} messages total.",
+        parse_mode="html",
+    )
 
 
 async def extract_command(event):
@@ -563,7 +603,10 @@ async def extract_command(event):
     text = event.raw_text.strip()
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        await event.reply("Usage: <code>extract &lt;country_code&gt;</code>\nExample: <code>extract br</code>", parse_mode="html")
+        await event.reply(
+            "Usage: <code>extract &lt;country_code&gt;</code>\nExample: <code>extract br</code>",
+            parse_mode="html",
+        )
         return
 
     country = parts[1].strip().lower()
@@ -573,7 +616,9 @@ async def extract_command(event):
         await event.reply(f"{cross_mark} No channels for country '{country}'.")
         return
 
-    await event.reply(f"Starting Q&A extraction for <b>{country}</b>...", parse_mode="html")
+    await event.reply(
+        f"Starting Q&A extraction for <b>{country}</b>...", parse_mode="html"
+    )
 
     from .qa_extractor import extract_from_chat
 
@@ -585,14 +630,20 @@ async def extract_command(event):
 
         try:
             count = await extract_from_chat(
-                user_client, peer_id, chat_id_to_name[peer_id], country,
+                user_client,
+                peer_id,
+                chat_id_to_name[peer_id],
+                country,
             )
             total += count
             await event.reply(f"{ok_mark} {ch['name']}: {count} Q&A pairs extracted")
         except Exception as e:
             await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
-    await event.reply(f"Extraction for <b>{country}</b> complete: {total} Q&A pairs total.", parse_mode="html")
+    await event.reply(
+        f"Extraction for <b>{country}</b> complete: {total} Q&A pairs total.",
+        parse_mode="html",
+    )
 
 
 async def relink_command(event):
@@ -604,7 +655,9 @@ async def relink_command(event):
     text = event.raw_text.strip()
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        await event.reply("Usage: <code>relink &lt;country_code&gt;</code>", parse_mode="html")
+        await event.reply(
+            "Usage: <code>relink &lt;country_code&gt;</code>", parse_mode="html"
+        )
         return
 
     country = parts[1].strip().lower()
@@ -614,7 +667,9 @@ async def relink_command(event):
         await event.reply(f"{cross_mark} No channels for country '{country}'.")
         return
 
-    await event.reply(f"Relinking reply chains for <b>{country}</b>...", parse_mode="html")
+    await event.reply(
+        f"Relinking reply chains for <b>{country}</b>...", parse_mode="html"
+    )
 
     from .deep_backfill import relink_replies
 
@@ -627,14 +682,18 @@ async def relink_command(event):
 
         try:
             updated = await relink_replies(
-                user_client, peer_id, chat_id_to_name[peer_id],
+                user_client,
+                peer_id,
+                chat_id_to_name[peer_id],
             )
             total += updated
             await event.reply(f"{ok_mark} {ch['name']}: {updated} reply links updated")
         except Exception as e:
             await event.reply(f"{cross_mark} {ch['name']}: {e}")
 
-    await event.reply(f"Relink for <b>{country}</b> complete: {total} links total.", parse_mode="html")
+    await event.reply(
+        f"Relink for <b>{country}</b> complete: {total} links total.", parse_mode="html"
+    )
 
 
 async def loadkb_command(event):
@@ -648,11 +707,12 @@ async def loadkb_command(event):
         return
 
     from pathlib import Path
+
     base_dir = Path(r"D:\temp1\_Grab\codex_teledigest-my")
 
     # Parse optional filename argument
     text = event.raw_text.strip()
-    arg = text[len("loadkb"):].strip() if len(text) > len("loadkb") else ""
+    arg = text[len("loadkb") :].strip() if len(text) > len("loadkb") else ""
 
     if arg:
         files = [arg]
@@ -749,7 +809,9 @@ async def ensure_joined_and_resolve_channels():
     for ch in all_channels:
         try:
             cached_id = url_to_cached_chat_id.get(ch)
-            is_invite = ch.startswith("https://t.me/+") or ch.startswith("http://t.me/+")
+            is_invite = ch.startswith("https://t.me/+") or ch.startswith(
+                "http://t.me/+"
+            )
 
             if cached_id is not None:
                 # Fast path: resolve by peer_id. No CheckChatInvite, no flood risk.
@@ -764,7 +826,9 @@ async def ensure_joined_and_resolve_channels():
                         log.warning(
                             "Cached peer_id %s for invite %s failed (%s); "
                             "falling back to CheckChatInvite (FloodWait risk).",
-                            cached_id, ch, e,
+                            cached_id,
+                            ch,
+                            e,
                         )
                         ent = await user_client.get_entity(ch)
                         peer_id = await user_client.get_peer_id(ent)
@@ -789,7 +853,9 @@ async def ensure_joined_and_resolve_channels():
                     log.info("User account joined channel: %s", ch)
                 except Exception as e:
                     log.warning(
-                        "User account could not join %s (maybe already joined): %s", ch, e
+                        "User account could not join %s (maybe already joined): %s",
+                        ch,
+                        e,
                     )
 
             scraped_chat_ids.add(peer_id)
@@ -805,7 +871,9 @@ async def ensure_joined_and_resolve_channels():
                 set_source_chat_id(ch, peer_id)
             except Exception as e:
                 log.warning("Failed to persist sources.chat_id for %s: %s", ch, e)
-            log.info("Will scrape chat %s (peer_id=%s, country=%s)", name, peer_id, country)
+            log.info(
+                "Will scrape chat %s (peer_id=%s, country=%s)", name, peer_id, country
+            )
 
         except Exception as e:
             log.warning("User account cannot resolve %s: %s", ch, e)
@@ -839,14 +907,17 @@ async def ensure_joined_and_resolve_channels():
                     chat_id_to_country[linked_peer_id] = country
                     log.info(
                         "МОЗГ mapped linked chat of %s (chat_id=%s) -> country=%s",
-                        target, linked_peer_id, country,
+                        target,
+                        linked_peer_id,
+                        country,
                     )
                 else:
                     # No linked chat — МОЗГ works directly in the channel/chat
                     chat_id_to_country[peer_id] = country
                     log.info(
                         "No linked chat for %s, МОЗГ mapped to channel itself -> country=%s",
-                        target, country,
+                        target,
+                        country,
                     )
             except Exception as e:
                 # Might not be a channel (could be a group chat already)
@@ -854,7 +925,9 @@ async def ensure_joined_and_resolve_channels():
                 log.info(
                     "Target %s is not a channel (or can't get full info: %s), "
                     "МОЗГ mapped directly -> country=%s",
-                    target, e, country,
+                    target,
+                    e,
+                    country,
                 )
         except Exception as e:
             log.warning("Bot cannot resolve digest target %s: %s", target, e)
@@ -865,11 +938,13 @@ async def ensure_joined_and_resolve_channels():
     # Doing it here, after resolve, picks up rows that were left as NULL.
     try:
         from .db import backfill_message_countries
+
         matched, unmatched = backfill_message_countries()
         if matched or unmatched:
             log.info(
                 "Post-resolve country backfill: matched=%d unmatched=%d",
-                matched, unmatched,
+                matched,
+                unmatched,
             )
     except Exception as e:
         log.error("Post-resolve country backfill failed: %s", e)
@@ -891,6 +966,7 @@ async def backfill_history(limit: int = 1000):
         log.info("Backfill: no channels to backfill.")
         return
 
+    assert user_client is not None, "user_client not initialized"
     log.info("Backfill: database is empty, fetching history...")
     total = 0
     for chat_id in scraped_chat_ids:
@@ -912,8 +988,16 @@ async def backfill_history(limit: int = 1000):
                     reply_to = f"{chat_name}_{msg.reply_to.reply_to_msg_id}"
                 sid = getattr(msg, "sender_id", None)
                 s_bot = bool(sender and getattr(sender, "bot", False))
-                save_message(msg_id, chat_name, msg.date, text, reply_to_msg_id=reply_to,
-                             sender_id=sid, is_bot=s_bot, country=country)
+                save_message(
+                    msg_id,
+                    chat_name,
+                    msg.date,
+                    text,
+                    reply_to_msg_id=reply_to,
+                    sender_id=sid,
+                    is_bot=s_bot,
+                    country=country,
+                )
                 count += 1
                 if count % 100 == 0:
                     await asyncio.sleep(2)
@@ -944,6 +1028,7 @@ def _session_paths(cfg: AppConfig) -> tuple[Path, Path]:
 # Dynamic channel subscription (called from bot_menu on add)
 # ---------------------------------------------------------------------------
 
+
 async def subscribe_channel(url: str, country: str | None = None) -> str | None:
     """
     Subscribe user_client to a channel at runtime.
@@ -956,6 +1041,7 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
             are tagged with country at write time.
     """
     global scraped_chat_ids
+    assert user_client is not None, "user_client not initialized"
     try:
         ent = await user_client.get_entity(url)
         peer_id = await user_client.get_peer_id(ent)
@@ -987,6 +1073,7 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
 # ---------------------------------------------------------------------------
 # Menu & conversation handlers
 # ---------------------------------------------------------------------------
+
 
 async def menu_command(event):
     """Handle /menu — show persistent reply keyboard."""
@@ -1027,18 +1114,25 @@ async def create_clients():
     proxy_url = os.environ.get("TG_PROXY")
     if proxy_url:
         from urllib.parse import urlparse
+
         p = urlparse(proxy_url)
         scheme = (p.scheme or "socks5").lower()
-        proto = {"socks5": "socks5", "socks4": "socks4", "http": "http"}.get(scheme, "socks5")
+        proto = {"socks5": "socks5", "socks4": "socks4", "http": "http"}.get(
+            scheme, "socks5"
+        )
         proxy = (proto, p.hostname, p.port)
         log.info("Using Telegram proxy: %s://%s:%s", proto, p.hostname, p.port)
 
     user_client = TelegramClient(
-        str(user_session_path), cfg.telegram.api_id, cfg.telegram.api_hash,
+        str(user_session_path),
+        cfg.telegram.api_id,
+        cfg.telegram.api_hash,
         proxy=proxy,
     )
     bot_client = TelegramClient(
-        str(bot_session_path), cfg.telegram.api_id, cfg.telegram.api_hash,
+        str(bot_session_path),
+        cfg.telegram.api_id,
+        cfg.telegram.api_hash,
         proxy=proxy,
     )
 
@@ -1054,9 +1148,7 @@ async def create_clients():
     bot_client.add_event_handler(
         auth_start_command, events.NewMessage(pattern=r"^/auth$")
     )
-    bot_client.add_event_handler(
-        backfill_command, events.NewMessage(pattern=r"^bf\s")
-    )
+    bot_client.add_event_handler(backfill_command, events.NewMessage(pattern=r"^bf\s"))
     bot_client.add_event_handler(
         extract_command, events.NewMessage(pattern=r"^extract\s")
     )
@@ -1066,15 +1158,9 @@ async def create_clients():
     bot_client.add_event_handler(
         cleanup_command, events.NewMessage(pattern=r"^cleanup$")
     )
-    bot_client.add_event_handler(
-        loadkb_command, events.NewMessage(pattern=r"^loadkb")
-    )
-    bot_client.add_event_handler(
-        menu_command, events.NewMessage(pattern=r"^/menu$")
-    )
-    bot_client.add_event_handler(
-        menu_callback_handler, events.CallbackQuery()
-    )
+    bot_client.add_event_handler(loadkb_command, events.NewMessage(pattern=r"^loadkb"))
+    bot_client.add_event_handler(menu_command, events.NewMessage(pattern=r"^/menu$"))
+    bot_client.add_event_handler(menu_callback_handler, events.CallbackQuery())
     bot_client.add_event_handler(auth_dialog_handler, events.NewMessage)
     # Conversation handler must be before МОЗГ to intercept dialog steps
     bot_client.add_event_handler(conversation_text_handler, events.NewMessage)
@@ -1102,7 +1188,7 @@ async def set_bot_menu_commands(client: TelegramClient) -> None:
             ],
         )
     )
-    log.info("Bot name for knowledge queries: %s", get_config().bot.bot_name)
+    log.info("Bot menu commands registered.")
 
 
 async def start_clients(auth_only: bool = False) -> None:
@@ -1164,7 +1250,10 @@ async def _reconnect_loop(client, name: str, max_retries: int = 0):
             wait = min(30, 5 * attempt)  # 5s, 10s, 15s... max 30s
             log.warning(
                 "%s connection error (attempt %d): %s. Retrying in %ds...",
-                name, attempt, e, wait,
+                name,
+                attempt,
+                e,
+                wait,
             )
             await asyncio.sleep(wait)
         except Exception as e:

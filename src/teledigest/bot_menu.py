@@ -15,23 +15,22 @@ from .sources_db import (
     get_active_countries,
     get_active_sources,
     get_digest_target,
-    remove_source,
     resolve_country,
     set_digest_target,
 )
-from .config import log
-
 
 # ---------------------------------------------------------------------------
 # Conversation state per user (in-memory, resets on restart — fine for admin)
 # ---------------------------------------------------------------------------
 
+
 class ConversationState:
     """Tracks multi-step dialog state for a user."""
+
     __slots__ = ("step", "country_code", "country_name", "channels_added")
 
     def __init__(self) -> None:
-        self.step: str = ""          # current step name
+        self.step: str = ""  # current step name
         self.country_code: str = ""
         self.country_name: str = ""
         self.channels_added: int = 0
@@ -62,11 +61,18 @@ def clear_conv(user_id: int) -> None:
 # Keyboards
 # ---------------------------------------------------------------------------
 
+
 def main_menu_keyboard():
     """Persistent reply keyboard — always visible at bottom."""
     return [
-        [Button.text("📡 Источники", resize=True), Button.text("📊 Статус", resize=True)],
-        [Button.text("📰 Дайджест", resize=True), Button.text("🧠 МОЗГ инфо", resize=True)],
+        [
+            Button.text("📡 Источники", resize=True),
+            Button.text("📊 Статус", resize=True),
+        ],
+        [
+            Button.text("📰 Дайджест", resize=True),
+            Button.text("🧠 МОЗГ инфо", resize=True),
+        ],
     ]
 
 
@@ -118,6 +124,7 @@ def back_to_main_keyboard():
 # ---------------------------------------------------------------------------
 # Callback handlers
 # ---------------------------------------------------------------------------
+
 
 async def handle_callback(event) -> None:
     """Route inline button callbacks."""
@@ -182,6 +189,7 @@ async def handle_callback(event) -> None:
 # ---------------------------------------------------------------------------
 # Dialog steps
 # ---------------------------------------------------------------------------
+
 
 async def _start_add_country(event) -> None:
     """Step 1: Ask for country name."""
@@ -267,16 +275,21 @@ async def _list_sources(event) -> None:
             lines.append(f"  📰 → {digest}")
         lines.append("")
 
-    await event.edit("\n".join(lines), buttons=sources_menu_keyboard(), parse_mode="html")
+    await event.edit(
+        "\n".join(lines), buttons=sources_menu_keyboard(), parse_mode="html"
+    )
 
 
 async def _show_status(event) -> None:
     """Show bot status."""
     from .db import get_db_connection
+
     with get_db_connection() as conn:
         cur = conn.cursor()
         msg_count = cur.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+        kb_count = cur.execute(
+            "SELECT COUNT(*) FROM knowledge WHERE is_outdated=0"
+        ).fetchone()[0]
 
     countries = get_active_countries()
     total_sources = len(get_active_sources())
@@ -288,7 +301,9 @@ async def _show_status(event) -> None:
         f"🌍 Стран: {len(countries)} ({', '.join(countries)})",
         f"📡 Источников: {total_sources}",
     ]
-    await event.edit("\n".join(lines), buttons=back_to_main_keyboard(), parse_mode="html")
+    await event.edit(
+        "\n".join(lines), buttons=back_to_main_keyboard(), parse_mode="html"
+    )
 
 
 async def _trigger_digest(event) -> None:
@@ -302,9 +317,12 @@ async def _trigger_digest(event) -> None:
 async def _show_brain_info(event) -> None:
     """МОЗГ info."""
     from .db import get_db_connection
+
     with get_db_connection() as conn:
         cur = conn.cursor()
-        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+        kb_count = cur.execute(
+            "SELECT COUNT(*) FROM knowledge WHERE is_outdated=0"
+        ).fetchone()[0]
         cats = cur.execute(
             "SELECT category, COUNT(*) FROM knowledge WHERE is_outdated=0 GROUP BY category ORDER BY COUNT(*) DESC"
         ).fetchall()
@@ -318,12 +336,15 @@ async def _show_brain_info(event) -> None:
         lines.append(f"  • {cat}: {cnt}")
     lines.append("\nЧтобы спросить, напиши в чат упоминая бота.")
 
-    await event.edit("\n".join(lines), buttons=back_to_main_keyboard(), parse_mode="html")
+    await event.edit(
+        "\n".join(lines), buttons=back_to_main_keyboard(), parse_mode="html"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Text message handler for multi-step dialogs
 # ---------------------------------------------------------------------------
+
 
 async def handle_text_in_conversation(event) -> bool:
     """
@@ -367,7 +388,7 @@ async def handle_text_in_conversation(event) -> bool:
             )
         else:
             await event.reply(
-                f"❓ Не знаю страну \"{text}\".\n"
+                f'❓ Не знаю страну "{text}".\n'
                 "Попробуй полное название на русском (Турция, Таиланд, Сербия...)",
                 buttons=[[Button.inline("◀️ Отмена", b"menu:sources")]],
             )
@@ -376,7 +397,11 @@ async def handle_text_in_conversation(event) -> bool:
     # Step: waiting for channel URL
     if conv.step == "await_channel":
         url = text.strip()
-        if not (url.startswith("@") or url.startswith("https://t.me/") or url.startswith("http://t.me/")):
+        if not (
+            url.startswith("@")
+            or url.startswith("https://t.me/")
+            or url.startswith("http://t.me/")
+        ):
             await event.reply(
                 "❌ Не похоже на ссылку. Отправь @username или https://t.me/...",
             )
@@ -384,6 +409,7 @@ async def handle_text_in_conversation(event) -> bool:
 
         # Try to add and subscribe
         from .telegram_client import subscribe_channel
+
         channel_name = await subscribe_channel(url, country=conv.country_code)
         if not channel_name:
             await event.reply(
@@ -423,7 +449,9 @@ async def _list_sources_reply(event) -> None:
     """Show all active sources — reply version."""
     countries = get_active_countries()
     if not countries:
-        await event.reply("Нет активных источников.\n\nИспользуй /menu → ➕ Добавить страну")
+        await event.reply(
+            "Нет активных источников.\n\nИспользуй /menu → ➕ Добавить страну"
+        )
         return
 
     lines = ["📡 <b>Активные источники:</b>\n"]
@@ -440,10 +468,12 @@ async def _list_sources_reply(event) -> None:
 
     # Build per-country edit buttons
     country_buttons = [
-        [Button.inline(
-            f"✏️ Дайджест {COUNTRY_NAMES.get(code, code.upper())}",
-            f"src:edit_digest:{code}".encode()
-        )]
+        [
+            Button.inline(
+                f"✏️ Дайджест {COUNTRY_NAMES.get(code, code.upper())}",
+                f"src:edit_digest:{code}".encode(),
+            )
+        ]
         for code in get_active_countries()
     ]
 
@@ -460,10 +490,13 @@ async def _list_sources_reply(event) -> None:
 async def _show_status_reply(event) -> None:
     """Show bot status — reply version."""
     from .db import get_db_connection
+
     with get_db_connection() as conn:
         cur = conn.cursor()
         msg_count = cur.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+        kb_count = cur.execute(
+            "SELECT COUNT(*) FROM knowledge WHERE is_outdated=0"
+        ).fetchone()[0]
 
     countries = get_active_countries()
     total_sources = len(get_active_sources())
@@ -481,9 +514,12 @@ async def _show_status_reply(event) -> None:
 async def _show_brain_info_reply(event) -> None:
     """МОЗГ info — reply version."""
     from .db import get_db_connection
+
     with get_db_connection() as conn:
         cur = conn.cursor()
-        kb_count = cur.execute("SELECT COUNT(*) FROM knowledge WHERE is_outdated=0").fetchone()[0]
+        kb_count = cur.execute(
+            "SELECT COUNT(*) FROM knowledge WHERE is_outdated=0"
+        ).fetchone()[0]
         cats = cur.execute(
             "SELECT category, COUNT(*) FROM knowledge WHERE is_outdated=0 GROUP BY category ORDER BY COUNT(*) DESC"
         ).fetchall()

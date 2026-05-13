@@ -28,7 +28,6 @@ import asyncio
 import datetime as dt
 import random
 from dataclasses import dataclass
-from typing import Any
 
 from .config import get_config, log
 
@@ -36,9 +35,15 @@ from .config import get_config, log
 
 # Lazy fallback; we try country_codes module first.
 _COUNTRY_RU_FALLBACK: dict[str, str] = {
-    "br": "Бразилия", "id": "Индонезия", "lk": "ШриЛанка",
-    "mu": "Маврикий", "at": "Австрия", "ar": "Аргентина",
-    "be": "Бельгия", "vn": "Вьетнам", "tr": "Турция",
+    "br": "Бразилия",
+    "id": "Индонезия",
+    "lk": "ШриЛанка",
+    "mu": "Маврикий",
+    "at": "Австрия",
+    "ar": "Аргентина",
+    "be": "Бельгия",
+    "vn": "Вьетнам",
+    "tr": "Турция",
     "any": "ЛайфхакиВПути",
 }
 
@@ -49,6 +54,7 @@ def _country_hashtag(code: str) -> str:
     name = None
     try:
         from . import country_codes
+
         info = country_codes.COUNTRIES.get(code)
         if info:
             name = info[0]  # display name
@@ -69,17 +75,21 @@ def _tag_hashtag(tag: str) -> str:
 
 # --- Firestore client ---------------------------------------------------------
 
+
 def _build_firestore_client():
     """Build a Firestore client using service account."""
     from .google_auth import build_firestore_client
+
     return build_firestore_client()
 
 
 # --- Selection logic ----------------------------------------------------------
 
+
 @dataclass
 class PostCandidate:
     """One Firestore document picked for posting."""
+
     doc_id: str
     country: str
     title: str
@@ -101,7 +111,9 @@ def _channel_field_safe(target: str) -> str:
 
 
 def select_next_candidate(
-    db, collection: str, channel_target: str,
+    db,
+    collection: str,
+    channel_target: str,
     recent_countries: list[str] | None = None,
     excluded_countries: set[str] | None = None,
 ) -> PostCandidate | None:
@@ -133,7 +145,9 @@ def select_next_candidate(
     coll = db.collection(collection)
     # We pull a bigger batch and filter Python-side because compound queries
     # with map fields require composite indexes on Firestore.
-    docs = list(coll.order_by("createdAt", direction=fs.Query.ASCENDING).limit(100).stream())
+    docs = list(
+        coll.order_by("createdAt", direction=fs.Query.ASCENDING).limit(100).stream()
+    )
 
     candidates: list[PostCandidate] = []
     for d in docs:
@@ -149,16 +163,18 @@ def select_next_candidate(
         if not (data.get("content") or "").strip():
             continue
         created = data.get("createdAt")
-        if hasattr(created, "to_pydatetime"):
+        if created is not None and hasattr(created, "to_pydatetime"):
             created = created.to_pydatetime()
-        candidates.append(PostCandidate(
-            doc_id=d.id,
-            country=country or "any",
-            title=str(data.get("title") or ""),
-            content=str(data.get("content") or ""),
-            tag=str(data.get("tag") or ""),
-            created_at=created if isinstance(created, dt.datetime) else None,
-        ))
+        candidates.append(
+            PostCandidate(
+                doc_id=d.id,
+                country=country or "any",
+                title=str(data.get("title") or ""),
+                content=str(data.get("content") or ""),
+                tag=str(data.get("tag") or ""),
+                created_at=created if isinstance(created, dt.datetime) else None,
+            )
+        )
 
     if not candidates:
         return None
@@ -174,8 +190,9 @@ def select_next_candidate(
     return candidates[0]
 
 
-def _load_recent_posted_countries(db, collection: str, channel_target: str,
-                                  n: int = 3) -> list[str]:
+def _load_recent_posted_countries(
+    db, collection: str, channel_target: str, n: int = 3
+) -> list[str]:
     """
     Read the most recent N posted docs for this channel and return their
     countries (oldest of the N first). Survives bot restarts: rotation
@@ -193,8 +210,9 @@ def _load_recent_posted_countries(db, collection: str, channel_target: str,
         docs = list(
             db.collection(collection)
             .where(f"postedTo.{channel_key}.posted", "==", True)
-            .order_by(f"postedTo.{channel_key}.posted_at",
-                      direction=fs.Query.DESCENDING)
+            .order_by(
+                f"postedTo.{channel_key}.posted_at", direction=fs.Query.DESCENDING
+            )
             .limit(n)
             .stream()
         )
@@ -203,7 +221,9 @@ def _load_recent_posted_countries(db, collection: str, channel_target: str,
             "Channel poster: could not load recent posted history "
             "(%s). Rotation will start fresh. May need a Firestore composite "
             "index for postedTo.%s.posted + postedTo.%s.posted_at.",
-            e, channel_key, channel_key,
+            e,
+            channel_key,
+            channel_key,
         )
         return []
 
@@ -219,6 +239,7 @@ def _load_recent_posted_countries(db, collection: str, channel_target: str,
 
 
 # --- Message formatting -------------------------------------------------------
+
 
 def format_message(candidate: PostCandidate) -> str:
     """Compose final Telegram message: content + country and tag hashtags."""
@@ -237,20 +258,24 @@ def format_message(candidate: PostCandidate) -> str:
 
 # --- Posting + Firestore update ----------------------------------------------
 
-def mark_posted(db, collection: str, doc_id: str, channel_target: str, posted_text: str) -> None:
+
+def mark_posted(
+    db, collection: str, doc_id: str, channel_target: str, posted_text: str
+) -> None:
     """Update postedTo.<channel> to mark this doc as posted with metadata."""
     channel_key = _channel_field_safe(channel_target)
     now = dt.datetime.now(dt.timezone.utc)
-    db.collection(collection).document(doc_id).update({
-        f"postedTo.{channel_key}.posted": True,
-        f"postedTo.{channel_key}.posted_at": now,
-        f"postedTo.{channel_key}.text": posted_text,
-        f"postedTo.{channel_key}.target": channel_target,
-    })
+    db.collection(collection).document(doc_id).update(
+        {
+            f"postedTo.{channel_key}.posted": True,
+            f"postedTo.{channel_key}.posted_at": now,
+            f"postedTo.{channel_key}.text": posted_text,
+            f"postedTo.{channel_key}.target": channel_target,
+        }
+    )
 
 
-async def post_one(bot_client,
-                   recent_countries: list[str] | None = None) -> str | None:
+async def post_one(bot_client, recent_countries: list[str] | None = None) -> str | None:
     """
     Pick + post one story to the configured channel.
 
@@ -278,8 +303,11 @@ async def post_one(bot_client,
         return None
 
     candidate = select_next_candidate(
-        db, cfg.google.firestore_collection, cfg.channel.target,
-        recent_countries=recent_countries, excluded_countries=excluded,
+        db,
+        cfg.google.firestore_collection,
+        cfg.channel.target,
+        recent_countries=recent_countries,
+        excluded_countries=excluded,
     )
     if candidate is None:
         log.info("Channel poster: no unposted stories found.")
@@ -288,7 +316,9 @@ async def post_one(bot_client,
     text = format_message(candidate)
     log.info(
         "Channel poster: posting doc=%s country=%s title=%r",
-        candidate.doc_id, candidate.country, candidate.title[:60],
+        candidate.doc_id,
+        candidate.country,
+        candidate.title[:60],
     )
 
     try:
@@ -296,24 +326,33 @@ async def post_one(bot_client,
     except Exception as e:
         log.error(
             "Channel poster: failed to send to %s: %s. Doc %s NOT marked posted.",
-            cfg.channel.target, e, candidate.doc_id,
+            cfg.channel.target,
+            e,
+            candidate.doc_id,
         )
         return None
 
     try:
-        mark_posted(db, cfg.google.firestore_collection,
-                    candidate.doc_id, cfg.channel.target, text)
+        mark_posted(
+            db,
+            cfg.google.firestore_collection,
+            candidate.doc_id,
+            cfg.channel.target,
+            text,
+        )
     except Exception as e:
         # Posted to channel but failed to mark — duplicate risk on next run.
         log.error(
             "Channel poster: posted to channel but Firestore update FAILED for %s: %s. "
             "May result in duplicate on next run; investigate manually.",
-            candidate.doc_id, e,
+            candidate.doc_id,
+            e,
         )
     return candidate.country
 
 
 # --- Schedule loop ------------------------------------------------------------
+
 
 def _todays_slots(cfg) -> list[dt.time]:
     """
@@ -339,14 +378,19 @@ def _todays_slots(cfg) -> list[dt.time]:
 
 def _next_slot_at(now_local: dt.datetime, slots: list[dt.time]) -> dt.datetime:
     """Find the next datetime (today or tomorrow) matching any slot."""
-    today_slots = [now_local.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-                   for t in slots]
+    today_slots = [
+        now_local.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+        for t in slots
+    ]
     future = [t for t in today_slots if t > now_local]
     if future:
         return min(future)
     # All today's slots passed — first slot of tomorrow
     tomorrow = (now_local + dt.timedelta(days=1)).replace(
-        hour=slots[0].hour, minute=slots[0].minute, second=0, microsecond=0,
+        hour=slots[0].hour,
+        minute=slots[0].minute,
+        second=0,
+        microsecond=0,
     )
     return tomorrow
 
@@ -359,6 +403,7 @@ async def channel_poster_loop():
     picks one story, posts it, updates Firestore, sleeps until next slot.
     """
     from zoneinfo import ZoneInfo
+
     from .telegram_client import get_bot_client
 
     cfg = get_config()
@@ -378,8 +423,10 @@ async def channel_poster_loop():
 
     log.info(
         "Channel poster started: target=%s posts/day=%d window=%02d:00-%02d:00 slots=%s",
-        cfg.channel.target, cfg.channel.posts_per_day,
-        cfg.channel.window_start_hour, cfg.channel.window_end_hour,
+        cfg.channel.target,
+        cfg.channel.posts_per_day,
+        cfg.channel.window_start_hour,
+        cfg.channel.window_end_hour,
         ", ".join(t.strftime("%H:%M") for t in slots),
     )
 
@@ -389,21 +436,29 @@ async def channel_poster_loop():
     # a day → three BR posts in a row. _load_recent_posted_countries reads
     # the most recent N posted docs to this channel and seeds the rotation.
     from collections import deque
+
     ROTATION_WINDOW = 3  # avoid repeating any of last 3 posted countries
     try:
         db_for_history = _build_firestore_client()
         seed = _load_recent_posted_countries(
-            db_for_history, cfg.google.firestore_collection,
-            cfg.channel.target, n=ROTATION_WINDOW,
+            db_for_history,
+            cfg.google.firestore_collection,
+            cfg.channel.target,
+            n=ROTATION_WINDOW,
         )
     except Exception as e:
-        log.warning("Channel poster: rotation seed from Firestore failed (%s); "
-                    "starting with empty rotation.", e)
+        log.warning(
+            "Channel poster: rotation seed from Firestore failed (%s); "
+            "starting with empty rotation.",
+            e,
+        )
         seed = []
     recent_countries: deque[str] = deque(seed, maxlen=ROTATION_WINDOW)
     if seed:
-        log.info("Channel poster: rotation seeded from Firestore history: %s",
-                 list(recent_countries))
+        log.info(
+            "Channel poster: rotation seeded from Firestore history: %s",
+            list(recent_countries),
+        )
 
     last_slot: dt.datetime | None = None
 
@@ -421,15 +476,19 @@ async def channel_poster_loop():
         jitter = random.randint(-cfg.channel.jitter_minutes, cfg.channel.jitter_minutes)
         next_at = next_slot + dt.timedelta(minutes=jitter)
         sleep_seconds = max(1, int((next_at - now).total_seconds()))
-        log.info("Channel poster: next post at %s (sleep %ds, recent=%s)",
-                 next_at.isoformat(timespec="minutes"), sleep_seconds,
-                 list(recent_countries))
+        log.info(
+            "Channel poster: next post at %s (sleep %ds, recent=%s)",
+            next_at.isoformat(timespec="minutes"),
+            sleep_seconds,
+            list(recent_countries),
+        )
         await asyncio.sleep(sleep_seconds)
 
         last_slot = next_slot
         try:
-            posted_country = await post_one(bot_client,
-                                            recent_countries=list(recent_countries))
+            posted_country = await post_one(
+                bot_client, recent_countries=list(recent_countries)
+            )
             if posted_country:
                 recent_countries.append(posted_country)
         except Exception as e:

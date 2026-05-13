@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import traceback
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -157,7 +157,10 @@ async def test_run_normal_mode_initialises_db_and_gathers_coroutines():
 
     with (
         patch("teledigest.main.init_config"),
+        patch("teledigest.main.get_config", return_value=MagicMock(sources=None)),
         patch("teledigest.main.init_db") as mock_init_db,
+        patch("teledigest.main.init_sources_table"),
+        patch("teledigest.main.backfill_message_countries", return_value=(0, 0)),
         patch("teledigest.main.create_clients", new_callable=AsyncMock),
         patch("teledigest.main.start_clients", new_callable=AsyncMock),
         patch("teledigest.main.run_clients", new_callable=AsyncMock),

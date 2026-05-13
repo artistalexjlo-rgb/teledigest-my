@@ -52,12 +52,10 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Iterable
 
 import requests
 
 from teledigest.config import init_config, log
-
 
 WIKI_API = "https://en.wikivoyage.org/w/api.php"
 WIKI_PAGE_BASE = "https://en.wikivoyage.org/wiki/"
@@ -71,42 +69,130 @@ REQUEST_PAUSE_S = 1.5
 # This map is the only iso2 → wiki-name source we need.
 COUNTRY_WIKI_NAME = {
     # Tier 0 — active user chats (import first)
-    "ar": "Argentina", "at": "Austria", "be": "Belgium", "bg": "Bulgaria",
-    "br": "Brazil", "de": "Germany", "fr": "France", "id": "Indonesia",
-    "lk": "Sri Lanka", "mu": "Mauritius", "ph": "Philippines",
-    "th": "Thailand", "tr": "Turkey", "vn": "Vietnam",
+    "ar": "Argentina",
+    "at": "Austria",
+    "be": "Belgium",
+    "bg": "Bulgaria",
+    "br": "Brazil",
+    "de": "Germany",
+    "fr": "France",
+    "id": "Indonesia",
+    "lk": "Sri Lanka",
+    "mu": "Mauritius",
+    "ph": "Philippines",
+    "th": "Thailand",
+    "tr": "Turkey",
+    "vn": "Vietnam",
     # Tier 1 — popular expat/digital-nomad destinations
-    "ae": "United Arab Emirates", "am": "Armenia", "az": "Azerbaijan",
-    "ba": "Bosnia and Herzegovina", "by": "Belarus", "ca": "Canada",
-    "cl": "Chile", "cn": "China", "co": "Colombia", "cr": "Costa Rica",
-    "cy": "Cyprus", "cz": "Czech Republic", "dk": "Denmark", "ec": "Ecuador",
-    "ee": "Estonia", "eg": "Egypt", "es": "Spain", "fi": "Finland",
-    "gb": "United Kingdom", "ge": "Georgia", "gr": "Greece", "hr": "Croatia",
-    "hu": "Hungary", "ie": "Ireland", "il": "Israel", "in": "India",
-    "it": "Italy", "jo": "Jordan", "jp": "Japan", "ke": "Kenya",
-    "kg": "Kyrgyzstan", "kh": "Cambodia", "kr": "South Korea",
-    "kz": "Kazakhstan", "la": "Laos", "lb": "Lebanon", "lt": "Lithuania",
-    "lv": "Latvia", "ma": "Morocco", "md": "Moldova", "me": "Montenegro",
-    "mk": "North Macedonia", "mm": "Myanmar", "mn": "Mongolia",
-    "mx": "Mexico", "my": "Malaysia", "nl": "Netherlands", "no": "Norway",
-    "np": "Nepal", "nz": "New Zealand", "pe": "Peru", "pk": "Pakistan",
-    "pl": "Poland", "pt": "Portugal", "py": "Paraguay", "ro": "Romania",
-    "rs": "Serbia", "ru": "Russia", "sa": "Saudi Arabia", "se": "Sweden",
-    "sg": "Singapore", "si": "Slovenia", "sk": "Slovakia", "tn": "Tunisia",
-    "tw": "Taiwan", "ua": "Ukraine", "us": "United States of America",
-    "uy": "Uruguay", "uz": "Uzbekistan", "za": "South Africa",
+    "ae": "United Arab Emirates",
+    "am": "Armenia",
+    "az": "Azerbaijan",
+    "ba": "Bosnia and Herzegovina",
+    "by": "Belarus",
+    "ca": "Canada",
+    "cl": "Chile",
+    "cn": "China",
+    "co": "Colombia",
+    "cr": "Costa Rica",
+    "cy": "Cyprus",
+    "cz": "Czech Republic",
+    "dk": "Denmark",
+    "ec": "Ecuador",
+    "ee": "Estonia",
+    "eg": "Egypt",
+    "es": "Spain",
+    "fi": "Finland",
+    "gb": "United Kingdom",
+    "ge": "Georgia",
+    "gr": "Greece",
+    "hr": "Croatia",
+    "hu": "Hungary",
+    "ie": "Ireland",
+    "il": "Israel",
+    "in": "India",
+    "it": "Italy",
+    "jo": "Jordan",
+    "jp": "Japan",
+    "ke": "Kenya",
+    "kg": "Kyrgyzstan",
+    "kh": "Cambodia",
+    "kr": "South Korea",
+    "kz": "Kazakhstan",
+    "la": "Laos",
+    "lb": "Lebanon",
+    "lt": "Lithuania",
+    "lv": "Latvia",
+    "ma": "Morocco",
+    "md": "Moldova",
+    "me": "Montenegro",
+    "mk": "North Macedonia",
+    "mm": "Myanmar",
+    "mn": "Mongolia",
+    "mx": "Mexico",
+    "my": "Malaysia",
+    "nl": "Netherlands",
+    "no": "Norway",
+    "np": "Nepal",
+    "nz": "New Zealand",
+    "pe": "Peru",
+    "pk": "Pakistan",
+    "pl": "Poland",
+    "pt": "Portugal",
+    "py": "Paraguay",
+    "ro": "Romania",
+    "rs": "Serbia",
+    "ru": "Russia",
+    "sa": "Saudi Arabia",
+    "se": "Sweden",
+    "sg": "Singapore",
+    "si": "Slovenia",
+    "sk": "Slovakia",
+    "tn": "Tunisia",
+    "tw": "Taiwan",
+    "ua": "Ukraine",
+    "us": "United States of America",
+    "uy": "Uruguay",
+    "uz": "Uzbekistan",
+    "za": "South Africa",
     # Tier 2 — extended coverage
-    "bd": "Bangladesh", "bo": "Bolivia", "cd": "Democratic Republic of Congo",
-    "ci": "Ivory Coast", "cm": "Cameroon", "cu": "Cuba", "do": "Dominican Republic",
-    "dz": "Algeria", "et": "Ethiopia", "gh": "Ghana", "gt": "Guatemala",
-    "hn": "Honduras", "ht": "Haiti", "li": "Liechtenstein", "lu": "Luxembourg",
-    "ly": "Libya", "mg": "Madagascar", "mk": "North Macedonia",
-    "ml": "Mali", "mm": "Myanmar", "mw": "Malawi", "mz": "Mozambique",
-    "na": "Namibia", "ng": "Nigeria", "ni": "Nicaragua", "om": "Oman",
-    "pa": "Panama", "qa": "Qatar", "rw": "Rwanda", "sd": "Sudan",
-    "sn": "Senegal", "sv": "El Salvador", "sy": "Syria",
-    "tz": "Tanzania", "ug": "Uganda", "ve": "Venezuela",
-    "xk": "Kosovo", "ye": "Yemen", "zm": "Zambia", "zw": "Zimbabwe",
+    "bd": "Bangladesh",
+    "bo": "Bolivia",
+    "cd": "Democratic Republic of Congo",
+    "ci": "Ivory Coast",
+    "cm": "Cameroon",
+    "cu": "Cuba",
+    "do": "Dominican Republic",
+    "dz": "Algeria",
+    "et": "Ethiopia",
+    "gh": "Ghana",
+    "gt": "Guatemala",
+    "hn": "Honduras",
+    "ht": "Haiti",
+    "li": "Liechtenstein",
+    "lu": "Luxembourg",
+    "ly": "Libya",
+    "mg": "Madagascar",
+    "ml": "Mali",
+    "mw": "Malawi",
+    "mz": "Mozambique",
+    "na": "Namibia",
+    "ng": "Nigeria",
+    "ni": "Nicaragua",
+    "om": "Oman",
+    "pa": "Panama",
+    "qa": "Qatar",
+    "rw": "Rwanda",
+    "sd": "Sudan",
+    "sn": "Senegal",
+    "sv": "El Salvador",
+    "sy": "Syria",
+    "tz": "Tanzania",
+    "ug": "Uganda",
+    "ve": "Venezuela",
+    "xk": "Kosovo",
+    "ye": "Yemen",
+    "zm": "Zambia",
+    "zw": "Zimbabwe",
 }
 
 # Wiki section heading -> our chat-мух tag vocabulary. Keeps wisdom_base
@@ -152,11 +238,12 @@ LISTING_TAG_MAP: dict[str, str] = {
     "sleep": "Accommodation",
     "buy": "Shopping",
     "listing": "Travel",  # generic
-    "marker": "Travel",   # also a listing-like template
+    "marker": "Travel",  # also a listing-like template
 }
 
 
 # --- Wiki API ---------------------------------------------------------------
+
 
 def _api(session: requests.Session, **params) -> dict:
     """One MediaWiki API call. JSON format, polite pause after.
@@ -166,8 +253,12 @@ def _api(session: requests.Session, **params) -> dict:
     for attempt in range(4):
         resp = session.get(WIKI_API, params=params, timeout=30)
         if resp.status_code == 429:
-            wait = 30 * (2 ** attempt)
-            log.warning("WikiVoyage 429 rate limit — waiting %ds (attempt %d/4)", wait, attempt + 1)
+            wait = 30 * (2**attempt)
+            log.warning(
+                "WikiVoyage 429 rate limit — waiting %ds (attempt %d/4)",
+                wait,
+                attempt + 1,
+            )
             time.sleep(wait)
             continue
         resp.raise_for_status()
@@ -178,7 +269,9 @@ def _api(session: requests.Session, **params) -> dict:
 
 
 def list_category_members(
-    session: requests.Session, category: str, max_depth: int,
+    session: requests.Session,
+    category: str,
+    max_depth: int,
 ) -> list[str]:
     """
     Walk Category:<category> recursively up to max_depth and return all
@@ -248,20 +341,21 @@ def fetch_wikitext(session: requests.Session, title: str) -> str | None:
 
 # --- Parsing ---------------------------------------------------------------
 
+
 def _norm_section(name: str) -> str:
     return name.strip().lower()
 
 
 def _normalize_text(s: str) -> str:
     """Strip wiki-markup leftovers, collapse whitespace."""
-    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)        # [[Link|Label]] -> Label
-    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)                  # [[Plain]] -> Plain
-    s = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", s)        # [url label] -> label
-    s = re.sub(r"\[https?://\S+\]", "", s)                     # bare [url] -> drop
-    s = re.sub(r"\{\{[^}]+\}\}", "", s)                        # leftover templates
-    s = re.sub(r"'''([^']+)'''", r"\1", s)                     # bold
-    s = re.sub(r"''([^']+)''", r"\1", s)                       # italic
-    s = re.sub(r"<[^>]+>", "", s)                              # html tags
+    s = re.sub(r"\[\[[^|\]]+\|([^\]]+)\]\]", r"\1", s)  # [[Link|Label]] -> Label
+    s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)  # [[Plain]] -> Plain
+    s = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", s)  # [url label] -> label
+    s = re.sub(r"\[https?://\S+\]", "", s)  # bare [url] -> drop
+    s = re.sub(r"\{\{[^}]+\}\}", "", s)  # leftover templates
+    s = re.sub(r"'''([^']+)'''", r"\1", s)  # bold
+    s = re.sub(r"''([^']+)''", r"\1", s)  # italic
+    s = re.sub(r"<[^>]+>", "", s)  # html tags
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
@@ -274,7 +368,10 @@ def _template_field(template, name: str) -> str:
 
 
 def _build_listing_pattern(
-    template, country: str, page_title: str, idx: int,
+    template,
+    country: str,
+    page_title: str,
+    idx: int,
 ) -> dict | None:
     """Convert a {{see/do/eat/...}} template into a pattern dict."""
     tname = str(template.name).strip().lower()
@@ -322,7 +419,10 @@ def _build_listing_pattern(
 
 
 def _build_section_patterns(
-    section_name: str, paragraphs: list[str], country: str, page_title: str,
+    section_name: str,
+    paragraphs: list[str],
+    country: str,
+    page_title: str,
     base_idx: int,
 ) -> list[dict]:
     """One pattern per non-trivial paragraph in a section, tag from section."""
@@ -334,18 +434,22 @@ def _build_section_patterns(
         # Drop very short fragments — bullets without prose, single words.
         if len(clean) < 60:
             continue
-        out.append({
-            "title": f"{page_title}: {section_name.strip()}",
-            "country": country,
-            "tag": tag,
-            "instruction": clean,
-            "_seed_index": base_idx + j,
-        })
+        out.append(
+            {
+                "title": f"{page_title}: {section_name.strip()}",
+                "country": country,
+                "tag": tag,
+                "instruction": clean,
+                "_seed_index": base_idx + j,
+            }
+        )
     return out
 
 
 def parse_page(
-    wikitext: str, country: str, page_title: str,
+    wikitext: str,
+    country: str,
+    page_title: str,
 ) -> list[dict]:
     """Return list of pattern dicts ready for Firestore."""
     import mwparserfromhell as mw
@@ -379,9 +483,15 @@ def parse_page(
         # Remove the heading line itself from body text
         text = re.sub(r"^==[^=]+==\s*", "", text, count=1)
         paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
-        patterns.extend(_build_section_patterns(
-            section_name, paragraphs, country, page_title, idx,
-        ))
+        patterns.extend(
+            _build_section_patterns(
+                section_name,
+                paragraphs,
+                country,
+                page_title,
+                idx,
+            )
+        )
         idx += len(paragraphs)
 
     return patterns
@@ -389,9 +499,11 @@ def parse_page(
 
 # --- Firestore writer -------------------------------------------------------
 
+
 def _build_firestore_client():
     """Reuse OAuth creds + Firestore project from channel_poster wiring."""
     from teledigest.channel_poster import _build_firestore_client as _bld
+
     return _bld()
 
 
@@ -400,7 +512,9 @@ def _doc_id(country: str, page_title: str, idx: int) -> str:
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:24]
 
 
-def write_patterns(db, country: str, page_title: str, patterns: list[dict]) -> tuple[int, int]:
+def write_patterns(
+    db, country: str, page_title: str, patterns: list[dict]
+) -> tuple[int, int]:
     """Returns (written, skipped). Skipped = already-exists (idempotent)."""
     if not patterns:
         return 0, 0
@@ -433,27 +547,48 @@ def write_patterns(db, country: str, page_title: str, patterns: list[dict]) -> t
 
 # --- Main ------------------------------------------------------------------
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--country", required=True,
-                        help="ISO 3166-1 alpha-2 country code (lowercase), "
-                             "e.g. 'th'. Must have an entry in COUNTRY_WIKI_NAME.")
-    parser.add_argument("--max-depth", type=int, default=2,
-                        help="Subcategory recursion depth (default 2). "
-                             "0 = only the top country page's direct members.")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="Cap on number of pages to process (0 = all). "
-                             "Useful for first dry-run sanity checks.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Walk + parse + count, do not write Firestore")
-    parser.add_argument("--config", default="/config/teledigest.conf",
-                        help="Path to teledigest.conf (default container path)")
+    parser.add_argument(
+        "--country",
+        required=True,
+        help="ISO 3166-1 alpha-2 country code (lowercase), "
+        "e.g. 'th'. Must have an entry in COUNTRY_WIKI_NAME.",
+    )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=2,
+        help="Subcategory recursion depth (default 2). "
+        "0 = only the top country page's direct members.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Cap on number of pages to process (0 = all). "
+        "Useful for first dry-run sanity checks.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Walk + parse + count, do not write Firestore",
+    )
+    parser.add_argument(
+        "--config",
+        default="/config/teledigest.conf",
+        help="Path to teledigest.conf (default container path)",
+    )
     args = parser.parse_args()
 
     country = args.country.lower()
     if country not in COUNTRY_WIKI_NAME:
-        log.error("Country '%s' not in COUNTRY_WIKI_NAME map. "
-                  "Add it to wikivoyage_import.py and retry.", country)
+        log.error(
+            "Country '%s' not in COUNTRY_WIKI_NAME map. "
+            "Add it to wikivoyage_import.py and retry.",
+            country,
+        )
         return 2
     wiki_name = COUNTRY_WIKI_NAME[country]
 
@@ -462,12 +597,20 @@ def main() -> int:
     session = requests.Session()
     session.headers["User-Agent"] = USER_AGENT
 
-    log.info("WikiVoyage import: country=%s wiki_category=%s max_depth=%d",
-             country, wiki_name, args.max_depth)
+    log.info(
+        "WikiVoyage import: country=%s wiki_category=%s max_depth=%d",
+        country,
+        wiki_name,
+        args.max_depth,
+    )
 
     pages = list_category_members(session, wiki_name, args.max_depth)
-    log.info("Found %d destination pages in Category:%s tree (depth<=%d).",
-             len(pages), wiki_name, args.max_depth)
+    log.info(
+        "Found %d destination pages in Category:%s tree (depth<=%d).",
+        len(pages),
+        wiki_name,
+        args.max_depth,
+    )
     if args.limit and len(pages) > args.limit:
         log.info("Limiting to first %d pages for this run.", args.limit)
         pages = pages[: args.limit]
@@ -496,25 +639,36 @@ def main() -> int:
             total_written += written
             total_skipped += skipped
             total_patterns += len(patterns)
-            log.info("[%d/%d] %s -> %d patterns (wrote=%d skipped=%d)",
-                     i, len(pages), title, len(patterns), written, skipped)
+            log.info(
+                "[%d/%d] %s -> %d patterns (wrote=%d skipped=%d)",
+                i,
+                len(pages),
+                title,
+                len(patterns),
+                written,
+                skipped,
+            )
         except Exception as e:
-            log.exception("[%d/%d] %s: parse/write failed: %s",
-                          i, len(pages), title, e)
+            log.exception("[%d/%d] %s: parse/write failed: %s", i, len(pages), title, e)
             failed_pages.append(title)
 
     log.info(
         "Import complete: country=%s pages_in_tree=%d "
         "pages_parsed_ok=%d pages_failed=%d pages_no_wikitext=%d "
         "patterns_total=%d wrote_new=%d skipped_existing=%d",
-        country, len(pages),
+        country,
+        len(pages),
         len(pages) - len(failed_pages) - len(skipped_empty),
-        len(failed_pages), len(skipped_empty),
-        total_patterns, total_written, total_skipped,
+        len(failed_pages),
+        len(skipped_empty),
+        total_patterns,
+        total_written,
+        total_skipped,
     )
     if failed_pages:
-        log.warning("Failed pages (re-run will retry these): %s",
-                    ", ".join(failed_pages))
+        log.warning(
+            "Failed pages (re-run will retry these): %s", ", ".join(failed_pages)
+        )
     return 0
 
 

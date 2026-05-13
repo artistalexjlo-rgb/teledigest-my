@@ -10,8 +10,8 @@ Based on Codex's build_daily_memory_artifact.py, ported into the bot.
 
 from __future__ import annotations
 
-import re
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,7 +47,8 @@ NOISE_RE = re.compile(r"^(?:спасибо|благодарю|ясно|поня�
 # Subject classification
 BANK_RE = re.compile(
     r"\b(?:банк|карт[аеу]|сч[её]т|pix|wise|itau|nubank|bradesco|bb|"
-    r"banco do brasil|inter|c6|santander|99)\b", re.I,
+    r"banco do brasil|inter|c6|santander|99)\b",
+    re.I,
 )
 DOC_RE = re.compile(
     r"\b(?:внж|rnm|cpf|спф|апостил|справк|карторио|консуль|свидетельств|перевод)\b",
@@ -62,19 +63,23 @@ FLIGHT_RE = re.compile(
     re.I,
 )
 TRANSPORT_RE = re.compile(
-    r"\b(?:такси|uber|автобус|метро|поезд|машин|аренда авто)\b", re.I,
+    r"\b(?:такси|uber|автобус|метро|поезд|машин|аренда авто)\b",
+    re.I,
 )
 HOUSING_RE = re.compile(
-    r"\b(?:квартир|аренд|кондо|condo|condominio|quinto andar|жиль)\b", re.I,
+    r"\b(?:квартир|аренд|кондо|condo|condominio|quinto andar|жиль)\b",
+    re.I,
 )
 FOOD_RE = re.compile(
     r"\b(?:супермаркет|магазин|продукт|еда|кухн|ресторан|кафе|доставк|ifood|"
     r"rappi|mercado|feira|хлеб|молок|мяс|рыб|фрукт|овощ|готови|рецепт|"
-    r"pão de açúcar|assaí|carrefour|extra|atacadão)\b", re.I,
+    r"pão de açúcar|assaí|carrefour|extra|atacadão)\b",
+    re.I,
 )
 SHOPPING_RE = re.compile(
     r"\b(?:магазин|шоппинг|торгов|mall|shopping|купить|покупк|одежд|обувь|"
-    r"техник|электрон|aliexpress|mercado livre|shopee|amazon)\b", re.I,
+    r"техник|электрон|aliexpress|mercado livre|shopee|amazon)\b",
+    re.I,
 )
 
 # Subject -> bot category mapping
@@ -114,16 +119,23 @@ TAG_PATTERNS = [
     (re.compile(r"\b(?:аренд\w*|квартир\w*|жиль\w*)\b", re.I), "жильё"),
     (re.compile(r"\b(?:сим|vivo|tim|claro)\b", re.I), "связь"),
     (re.compile(r"\b(?:супермаркет\w*|mercado|feira)\b", re.I), "супермаркет"),
-    (re.compile(r"\b(?:pão de açúcar|assaí|carrefour|extra|atacadão)\b", re.I), "супермаркет"),
+    (
+        re.compile(r"\b(?:pão de açúcar|assaí|carrefour|extra|atacadão)\b", re.I),
+        "супермаркет",
+    ),
     (re.compile(r"\b(?:ресторан\w*|кафе|ifood|rappi)\b", re.I), "еда"),
     (re.compile(r"\b(?:продукт\w*|еда|готовк\w*)\b", re.I), "продукты"),
-    (re.compile(r"\b(?:mercado livre|shopee|aliexpress|amazon)\b", re.I), "маркетплейс"),
+    (
+        re.compile(r"\b(?:mercado livre|shopee|aliexpress|amazon)\b", re.I),
+        "маркетплейс",
+    ),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Msg:
@@ -143,6 +155,7 @@ class Chain:
 @dataclass
 class Claim:
     """A single extracted claim — either qa or fact."""
+
     claim_type: str  # "qa" or "fact"
     subject: str
     category: str
@@ -159,6 +172,7 @@ class Claim:
 # ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
+
 
 def _normalize(text: str) -> str:
     return " ".join((text or "").replace("\n", " ").replace("\r", " ").split())
@@ -312,35 +326,39 @@ def _claims_from_span(span: list[Msg]) -> list[Claim]:
     # Q&A claim (if root is a question)
     if _looks_question(root.text):
         best_answers = [m.text for m in useful_answers[:2]]
-        claims.append(Claim(
-            claim_type="qa",
-            subject=subject,
-            category=category,
-            question=root.text,
-            answer=" ".join(best_answers),
-            source_msgs=source_ids,
-            tags=tags,
-            channel=channel,
-            first_seen=first_seen,
-            last_seen=last_seen,
-            chain_size=chain_size,
-        ))
+        claims.append(
+            Claim(
+                claim_type="qa",
+                subject=subject,
+                category=category,
+                question=root.text,
+                answer=" ".join(best_answers),
+                source_msgs=source_ids,
+                tags=tags,
+                channel=channel,
+                first_seen=first_seen,
+                last_seen=last_seen,
+                chain_size=chain_size,
+            )
+        )
 
     # Fact claims (standalone useful answers)
     for answer_msg in useful_answers[:3]:
-        claims.append(Claim(
-            claim_type="fact",
-            subject=subject,
-            category=category,
-            question=root.text if _looks_question(root.text) else "",
-            answer=answer_msg.text,
-            source_msgs=source_ids,
-            tags=tags,
-            channel=channel,
-            first_seen=first_seen,
-            last_seen=last_seen,
-            chain_size=chain_size,
-        ))
+        claims.append(
+            Claim(
+                claim_type="fact",
+                subject=subject,
+                category=category,
+                question=root.text if _looks_question(root.text) else "",
+                answer=answer_msg.text,
+                source_msgs=source_ids,
+                tags=tags,
+                channel=channel,
+                first_seen=first_seen,
+                last_seen=last_seen,
+                chain_size=chain_size,
+            )
+        )
 
     return claims
 
@@ -348,6 +366,7 @@ def _claims_from_span(span: list[Msg]) -> list[Claim]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def build_daily_artifact(
     day: dt.date,
@@ -373,7 +392,11 @@ def build_daily_artifact(
 
     log.info(
         "Daily artifact for %s: %d messages, %d chains, %d spans, %d claims",
-        day.isoformat(), len(messages), len(chains), spans_count, len(all_claims),
+        day.isoformat(),
+        len(messages),
+        len(chains),
+        spans_count,
+        len(all_claims),
     )
 
     return {
@@ -391,15 +414,17 @@ def artifact_claims_as_dicts(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     result = []
     for claim in artifact.get("claims", []):
         if isinstance(claim, Claim):
-            result.append({
-                "country": "",  # filled by caller
-                "category": claim.category,
-                "question": claim.question,
-                "answer": claim.answer,
-                "source_msgs": claim.source_msgs,
-                "tags": claim.tags,
-                "confidence": "high" if claim.chain_size >= 3 else "medium",
-            })
+            result.append(
+                {
+                    "country": "",  # filled by caller
+                    "category": claim.category,
+                    "question": claim.question,
+                    "answer": claim.answer,
+                    "source_msgs": claim.source_msgs,
+                    "tags": claim.tags,
+                    "confidence": "high" if claim.chain_size >= 3 else "medium",
+                }
+            )
         else:
             result.append(claim)
     return result

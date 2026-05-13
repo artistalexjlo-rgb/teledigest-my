@@ -1,6 +1,7 @@
 # Teledigest — project rules
 
 ## Обязательно
+
 - **После любых значимых изменений в коде/архитектуре** — обновить memory файлы в `C:\Users\Servak\.claude\projects\D--temp1--Grab\memory\`. Не ждать пока попросят.
 - **Язык общения** — русский, коротко, по делу. Не лить воду.
 - **Не делать предположений** — если не уверен, спроси. Не мысли жопой.
@@ -9,6 +10,7 @@
 - **Git workflow** — всегда через ветку + PR, не в main напрямую.
 
 ## Архитектура
+
 - Память проекта: `memory/MEMORY.md` — индекс, остальные файлы — детали
 - Код бота: `src/teledigest/`
 - Codex (GPT desktop) делает extraction/backfill, НЕ трогает код бота
@@ -19,6 +21,7 @@
 - Digest target: хранится в `sources` таблице, меняется через бота без редеплоя
 
 ## Деплой
+
 - GitHub → Coolify auto-deploy при push в main
 - Docker multi-stage, secrets через env (TELEGRAM_API_ID/HASH/BOT_TOKEN, DEEPSEEK_API_KEY)
 - Конфиг: File Mount в Coolify → `/config/teledigest.conf`
@@ -27,6 +30,7 @@
 - sessions_dir в конфиге: `/home/teledigest/data`
 
 ## Pending
+
 - Редактирование digest target через бота (в работе)
 - Telegram Forum с топиками по странам вместо отдельных каналов
 - Daily samples для анализа паттернов чата

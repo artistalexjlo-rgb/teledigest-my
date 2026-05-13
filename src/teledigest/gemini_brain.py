@@ -64,6 +64,7 @@ Behavior:
 def _build_firestore_client():
     """Build a Firestore client using service account."""
     from .google_auth import build_firestore_client
+
     return build_firestore_client()
 
 
@@ -203,7 +204,7 @@ async def _ask_live_api(
     #   correct way to push a single user turn for batch Q&A.
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
-        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),  # type: ignore[arg-type]
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=_BRAIN_SYSTEM,
     )
@@ -224,7 +225,7 @@ async def _ask_live_api(
     chunks: list[str] = []
     async with client.aio.live.connect(model=model_name, config=config) as session:
         await session.send_client_content(
-            turns=turns,
+            turns=turns,  # type: ignore[arg-type]
             turn_complete=True,
         )
         async for response in session.receive():
@@ -318,7 +319,10 @@ async def search_and_format(
     useful_count = context.count("\n\n") + 1 if context else 0
     log.info(
         "Gemini МОЗГ: %d docs fetched (%d useful), history=%d turns, query=%r",
-        len(docs), useful_count, len(history or []), query[:60],
+        len(docs),
+        useful_count,
+        len(history or []),
+        query[:60],
     )
 
     if not context:
@@ -337,19 +341,26 @@ async def search_and_format(
     if cfg.gemini.live_model:
         try:
             answer = await _ask_live_api(
-                prompt, cfg.gemini.live_model, cfg.gemini.api_key, history=history,
+                prompt,
+                cfg.gemini.live_model,
+                cfg.gemini.api_key,
+                history=history,
             )
         except Exception as e:
             log.warning(
                 "Gemini Live API failed (%s) — falling back to sync %s",
-                e, cfg.gemini.model,
+                e,
+                cfg.gemini.model,
             )
 
     # Fallback: legacy synchronous Gemini (shares 500 RPD cap).
     if not answer:
         try:
             answer = await _ask_sync_fallback(
-                prompt, cfg.gemini.model, cfg.gemini.api_key, history=history,
+                prompt,
+                cfg.gemini.model,
+                cfg.gemini.api_key,
+                history=history,
             )
         except Exception as e:
             log.error("Gemini sync fallback also failed: %s", e)

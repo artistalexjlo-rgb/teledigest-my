@@ -17,7 +17,6 @@ from .config import log
 from .db import save_message
 from .knowledge_db import get_source_meta, update_source_meta, upsert_source_meta
 
-
 # Maximum history depth: 1 year
 MAX_HISTORY_DAYS = 365
 BATCH_SIZE = 200
@@ -61,7 +60,10 @@ async def deep_backfill(
 
     log.info(
         "Starting deep backfill for %s (country=%s, offset_id=%d, cutoff=%s)",
-        chat_name, country, offset_id, cutoff.isoformat(),
+        chat_name,
+        country,
+        offset_id,
+        cutoff.isoformat(),
     )
 
     while True:
@@ -77,7 +79,9 @@ async def deep_backfill(
                 if msg.date and msg.date < cutoff:
                     log.info(
                         "Backfill %s: reached 1-year cutoff at msg %d (%s)",
-                        chat_name, msg.id, msg.date.isoformat(),
+                        chat_name,
+                        msg.id,
+                        msg.date.isoformat(),
                     )
                     # Save what we got in this batch, then finish
                     messages.append(msg)
@@ -100,9 +104,16 @@ async def deep_backfill(
                     if msg.reply_to and hasattr(msg.reply_to, "reply_to_msg_id"):
                         reply_to = f"{chat_name}_{msg.reply_to.reply_to_msg_id}"
                     sid = getattr(msg, "sender_id", None)
-                    save_message(f"{chat_name}_{msg.id}", chat_name, msg.date, text,
-                                 reply_to_msg_id=reply_to, sender_id=sid, is_bot=False,
-                                 country=country)
+                    save_message(
+                        f"{chat_name}_{msg.id}",
+                        chat_name,
+                        msg.date,
+                        text,
+                        reply_to_msg_id=reply_to,
+                        sender_id=sid,
+                        is_bot=False,
+                        country=country,
+                    )
                 # Check cutoff
                 if msg.date and msg.date < cutoff:
                     reached_cutoff = True
@@ -119,7 +130,9 @@ async def deep_backfill(
 
             log.info(
                 "Backfill %s: %d messages so far (oldest_id=%d)",
-                chat_name, total, offset_id,
+                chat_name,
+                total,
+                offset_id,
             )
 
             if progress_callback:
@@ -134,7 +147,8 @@ async def deep_backfill(
         except FloodWaitError as e:
             log.warning(
                 "Backfill %s: FloodWait %d seconds, sleeping...",
-                chat_name, e.seconds,
+                chat_name,
+                e.seconds,
             )
             await asyncio.sleep(e.seconds + 1)
             continue
@@ -171,7 +185,10 @@ async def relink_replies(
         try:
             messages = []
             async for msg in user_client.iter_messages(
-                chat_id, limit=BATCH_SIZE, offset_id=offset_id, reverse=False,
+                chat_id,
+                limit=BATCH_SIZE,
+                offset_id=offset_id,
+                reverse=False,
             ):
                 if msg.date and msg.date < cutoff:
                     messages.append(msg)
@@ -201,7 +218,12 @@ async def relink_replies(
             total += len(messages)
 
             if total % 2000 == 0:
-                log.info("Relink %s: %d messages scanned, %d links updated", chat_name, total, updated)
+                log.info(
+                    "Relink %s: %d messages scanned, %d links updated",
+                    chat_name,
+                    total,
+                    updated,
+                )
                 if progress_callback:
                     await progress_callback(total, updated)
 
@@ -217,7 +239,12 @@ async def relink_replies(
             log.error("Relink %s: error: %s", chat_name, e)
             raise
 
-    log.info("Relink complete for %s: %d scanned, %d links updated.", chat_name, total, updated)
+    log.info(
+        "Relink complete for %s: %d scanned, %d links updated.",
+        chat_name,
+        total,
+        updated,
+    )
     return updated
 
 
@@ -253,7 +280,7 @@ async def backfill_country(
                 ch_name = name
                 break
 
-        if peer_id is None:
+        if peer_id is None or ch_name is None:
             log.warning("Backfill: channel %s not resolved, skipping.", ch.get("url"))
             continue
 

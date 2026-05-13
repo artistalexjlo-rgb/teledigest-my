@@ -202,6 +202,7 @@ async def test_channel_message_handler_saves_message_from_target_chat(
     event = MagicMock()
     event.chat_id = chat_id
     event.message = msg
+    event.get_sender = AsyncMock(return_value=None)
 
     await tc.channel_message_handler(event)
 
@@ -231,6 +232,7 @@ async def test_channel_message_handler_uses_chat_id_as_fallback_name(
     event = MagicMock()
     event.chat_id = chat_id
     event.message = msg
+    event.get_sender = AsyncMock(return_value=None)
 
     await tc.channel_message_handler(event)
 
@@ -540,6 +542,7 @@ async def test_auth_dialog_handler_code_step_success(monkeypatch, app_config):
     fake_user_client.get_me = AsyncMock()
     monkeypatch.setattr(tc, "user_client", fake_user_client)
     monkeypatch.setattr(tc, "ensure_joined_and_resolve_channels", AsyncMock())
+    monkeypatch.setattr(tc, "backfill_history", AsyncMock())
 
     event = _make_event(raw_text="1 2 3 4 5", chat_id=456)
     await tc.auth_dialog_handler(event)

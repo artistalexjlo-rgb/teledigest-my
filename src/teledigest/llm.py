@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from typing import Any
 
 from openai import OpenAI
@@ -20,7 +19,9 @@ def _get_client() -> OpenAI:
     return _openai_client
 
 
-def _format_messages_corpus(messages, max_items: int = 500, max_chars: int = 500) -> str:
+def _format_messages_corpus(
+    messages, max_items: int = 500, max_chars: int = 500
+) -> str:
     lines = []
     for channel, text in messages[:max_items]:
         t = " ".join(text.split())
@@ -38,7 +39,6 @@ def _format_knowledge_context(knowledge: list[dict[str, Any]]) -> str:
         return ""
     lines = []
     for k in knowledge[:30]:  # top 30 entries max
-        tags = json.loads(k["tags"]) if isinstance(k["tags"], str) else k["tags"]
         lines.append(
             f"[{k['category']}] Q: {k['question']}\n"
             f"A: {k['answer']} (confidence: {k['confidence']})"
@@ -88,7 +88,12 @@ TODAY'S MESSAGES ({MSG_COUNT} messages):
 """
 
 
-def build_prompt(day: dt.date, messages, knowledge: list[dict[str, Any]] | None = None, country: str = ""):
+def build_prompt(
+    day: dt.date,
+    messages,
+    knowledge: list[dict[str, Any]] | None = None,
+    country: str = "",
+):
     if not messages:
         return (
             "You are a helpful assistant.",
@@ -158,8 +163,11 @@ def llm_summarize(
 ) -> str:
     client = _get_client()
     system, user = build_prompt(day, messages, knowledge=knowledge, country=country)
-    log.info("Calling OpenAI for summary (%d messages, knowledge=%d)...",
-             len(messages), len(knowledge) if knowledge else 0)
+    log.info(
+        "Calling OpenAI for summary (%d messages, knowledge=%d)...",
+        len(messages),
+        len(knowledge) if knowledge else 0,
+    )
 
     try:
         response = client.chat.completions.create(

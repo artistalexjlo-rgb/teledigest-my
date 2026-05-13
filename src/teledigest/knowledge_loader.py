@@ -75,11 +75,18 @@ def load_unified_claims(path: str | Path, country: str = "br") -> dict[str, int]
                 stats["errors"] += 1
 
             if line_num % 500 == 0:
-                log.info("Loading claims: %d processed, %d loaded...", line_num, stats["loaded"])
+                log.info(
+                    "Loading claims: %d processed, %d loaded...",
+                    line_num,
+                    stats["loaded"],
+                )
 
     log.info(
         "Bulk load complete: %d loaded, %d skipped, %d errors (from %s)",
-        stats["loaded"], stats["skipped"], stats["errors"], path,
+        stats["loaded"],
+        stats["skipped"],
+        stats["errors"],
+        path,
     )
     return stats
 
@@ -120,5 +127,7 @@ def load_daily_claims(
         except Exception as e:
             log.warning("Daily claim merge failed: %s", e)
 
-    log.info("Daily claims loaded: %d / %d for country=%s", loaded, len(claims), country)
+    log.info(
+        "Daily claims loaded: %d / %d for country=%s", loaded, len(claims), country
+    )
     return loaded

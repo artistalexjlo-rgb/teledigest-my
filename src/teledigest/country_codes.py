@@ -175,9 +175,7 @@ COUNTRIES: dict[str, tuple[str, str]] = {
 }
 
 # Russian name (lowercase) -> code
-_NAME_TO_CODE: dict[str, str] = {
-    v[0].lower(): k for k, v in COUNTRIES.items()
-}
+_NAME_TO_CODE: dict[str, str] = {v[0].lower(): k for k, v in COUNTRIES.items()}
 
 # Variants with spaces/dashes normalized
 _NORMALIZED: dict[str, str] = {}

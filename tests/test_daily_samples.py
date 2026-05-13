@@ -11,16 +11,14 @@ some noise (bot messages, other countries). Run dump_all_targets. Assert:
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-import sqlite3
-
 from teledigest import config as cfg
-from teledigest import db
 from teledigest import daily_samples as ds
-from teledigest import sources_db
+from teledigest import db, sources_db
 
 
 def _make_app_config(db_path: Path) -> cfg.AppConfig:
@@ -77,27 +75,55 @@ def test_dump_all_targets_uses_sources_db_and_isolates(app_config):
     base = dt.datetime.combine(day, dt.time(12, 0), dt.timezone.utc)
 
     # Public br source (Brazil_ChatForum) — channel value = handle
-    db.save_message("Brazil_ChatForum_100", "Brazil_ChatForum", base, "br public msg",
-                    sender_id=111, country="br")
-    db.save_message("Brazil_ChatForum_101", "Brazil_ChatForum", base + dt.timedelta(minutes=1),
-                    "br public reply", sender_id=222,
-                    reply_to_msg_id="Brazil_ChatForum_100", country="br")
+    db.save_message(
+        "Brazil_ChatForum_100",
+        "Brazil_ChatForum",
+        base,
+        "br public msg",
+        sender_id=111,
+        country="br",
+    )
+    db.save_message(
+        "Brazil_ChatForum_101",
+        "Brazil_ChatForum",
+        base + dt.timedelta(minutes=1),
+        "br public reply",
+        sender_id=222,
+        reply_to_msg_id="Brazil_ChatForum_100",
+        country="br",
+    )
     # Invite-link br source (TravelAsk Brazil) — channel value = numeric chat_id
-    db.save_message("invite_br_50", "-1001631614451", base, "br invite msg",
-                    sender_id=333, country="br")
+    db.save_message(
+        "invite_br_50",
+        "-1001631614451",
+        base,
+        "br invite msg",
+        sender_id=333,
+        country="br",
+    )
     # id source (balichat handle)
-    db.save_message("balichat_a", "balichat", base, "id msg",
-                    sender_id=444, country="id")
+    db.save_message(
+        "balichat_a", "balichat", base, "id msg", sender_id=444, country="id"
+    )
     # lk source (invite-link numeric)
-    db.save_message("lk_a", "-1001605996131", base, "lk msg",
-                    sender_id=555, country="lk")
+    db.save_message(
+        "lk_a", "-1001605996131", base, "lk msg", sender_id=555, country="lk"
+    )
 
     # Noise: bot message in a target channel
-    db.save_message("bot_a", "Brazil_ChatForum", base, "bot spam",
-                    sender_id=1, is_bot=True, country="br")
+    db.save_message(
+        "bot_a",
+        "Brazil_ChatForum",
+        base,
+        "bot spam",
+        sender_id=1,
+        is_bot=True,
+        country="br",
+    )
     # Noise: country with no source row in our seeded DB
-    db.save_message("at_a", "-1001716659625", base, "at msg",
-                    sender_id=999, country="at")
+    db.save_message(
+        "at_a", "-1001716659625", base, "at msg", sender_id=999, country="at"
+    )
 
     results = ds.dump_all_targets(day)
 
@@ -190,14 +216,18 @@ def test_format_line_handles_missing_sender(app_config):
 
 
 def test_format_line_collapses_newlines(app_config):
-    line = ds._format_line("2026-04-28T12:34:56+00:00", "hello\nworld\n  multiple", 5, None)
+    line = ds._format_line(
+        "2026-04-28T12:34:56+00:00", "hello\nworld\n  multiple", 5, None
+    )
     assert "\n" not in line
     assert "hello world multiple" in line
 
 
 def test_format_line_reply_marker(app_config):
     line = ds._format_line(
-        "2026-04-28T12:34:56+00:00", "answer", 7,
+        "2026-04-28T12:34:56+00:00",
+        "answer",
+        7,
         reply_to_msg_id="Brazil_ChatForum_408865",
     )
     assert "← reply 408865" in line

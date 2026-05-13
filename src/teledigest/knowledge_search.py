@@ -11,14 +11,12 @@ Flow:
 
 from __future__ import annotations
 
-import json
 import re
 
 from openai import OpenAI
 
 from .config import get_config, log
 from .knowledge_db import search_knowledge
-
 
 _BRAIN_SYSTEM = """
 Ты — бот «МОЗГ» в чате экспатов. Отвечаешь на вопросы по базе знаний сообщества.
@@ -54,8 +52,6 @@ def _format_facts_for_llm(results: list[dict]) -> str:
         question = (r.get("question") or "").strip()
         answer = (r.get("answer") or "").strip()
         confidence = r.get("confidence", "medium")
-        tags = json.loads(r["tags"]) if isinstance(r["tags"], str) else r.get("tags", [])
-
         header = f"[Факт {i}, {confidence}]"
         if question:
             parts.append(f"{header}\nВопрос: {question}\nОтвет: {answer}")
@@ -76,11 +72,14 @@ def _synthesize_answer(query: str, results: list[dict]) -> str:
             model=cfg.llm.model,
             messages=[
                 {"role": "system", "content": _BRAIN_SYSTEM},
-                {"role": "user", "content": _BRAIN_USER.format(
-                    QUESTION=query,
-                    COUNT=len(results),
-                    FACTS=facts_text,
-                )},
+                {
+                    "role": "user",
+                    "content": _BRAIN_USER.format(
+                        QUESTION=query,
+                        COUNT=len(results),
+                        FACTS=facts_text,
+                    ),
+                },
             ],
             temperature=0.3,
             max_tokens=500,
@@ -146,8 +145,11 @@ async def search_and_format(
     # --- Gemini path (Firestore wisdom_base + wikivoyage_base, Live API) ---
     try:
         from . import gemini_brain
+
         if gemini_brain.is_enabled():
-            answer = await gemini_brain.search_and_format(country, query, history=history)
+            answer = await gemini_brain.search_and_format(
+                country, query, history=history
+            )
             if answer:
                 return answer
             log.warning("МОЗГ: Gemini returned empty — falling back to DeepSeek+SQLite")
@@ -164,7 +166,9 @@ async def search_and_format(
             "кто-нибудь точно подскажет!"
         )
 
-    log.info("МОЗГ: found %d entries for '%s', synthesizing...", len(results), query[:50])
+    log.info(
+        "МОЗГ: found %d entries for '%s', synthesizing...", len(results), query[:50]
+    )
 
     answer = _synthesize_answer(query, results)
 

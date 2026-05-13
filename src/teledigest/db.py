@@ -174,7 +174,16 @@ def save_message(
                     (id, channel, date, text, reply_to_msg_id, sender_id, is_bot, country)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (msg_id, channel, iso, text, reply_to_msg_id, sender_id, int(is_bot), country),
+                (
+                    msg_id,
+                    channel,
+                    iso,
+                    text,
+                    reply_to_msg_id,
+                    sender_id,
+                    int(is_bot),
+                    country,
+                ),
             )
 
             # Only mirror to FTS when the row was actually inserted.
@@ -370,7 +379,8 @@ def clear_knowledge_for_reextraction() -> None:
             e_count = cur.rowcount
             log.info(
                 "Cleared knowledge (%d entries) and extraction_log (%d entries) for re-extraction.",
-                k_count, e_count,
+                k_count,
+                e_count,
             )
     except sqlite3.Error as e:
         log.error("Failed to clear knowledge tables: %s", e)
@@ -411,6 +421,7 @@ def get_relevant_messages_last_24h(max_docs: int = 1000) -> list[Message]:
 # ---------------------------------------------------------------------------
 # Country-scoped retrieval
 # ---------------------------------------------------------------------------
+
 
 def get_messages_for_country_range(
     country: str,
@@ -453,7 +464,9 @@ def get_relevant_messages_for_country_range(
     """
     query = build_fts_query()
     if query is None:
-        log.warning("No RAG keywords configured — using full scan for country=%s.", country)
+        log.warning(
+            "No RAG keywords configured — using full scan for country=%s.", country
+        )
         return get_messages_for_country_range(country, start, end, limit=max_docs)
 
     try:
@@ -469,15 +482,23 @@ def get_relevant_messages_for_country_range(
                 ORDER BY m.date ASC
                 LIMIT ?
             """
-            cur.execute(sql, (query, country, start.isoformat(), end.isoformat(), max_docs))
+            cur.execute(
+                sql, (query, country, start.isoformat(), end.isoformat(), max_docs)
+            )
             rows = [Message(*row) for row in cur.fetchall()]
             if rows:
                 log.info(
                     "FTS retrieval for country=%s %s..%s returned %d messages (max %d)",
-                    country, start.isoformat(), end.isoformat(), len(rows), max_docs,
+                    country,
+                    start.isoformat(),
+                    end.isoformat(),
+                    len(rows),
+                    max_docs,
                 )
                 return rows
-            log.info("FTS country retrieval returned 0 rows — falling back to plain scan")
+            log.info(
+                "FTS country retrieval returned 0 rows — falling back to plain scan"
+            )
     except sqlite3.OperationalError as e:
         log.warning("FTS country retrieval failed (%s). Falling back to plain scan.", e)
 
@@ -495,6 +516,7 @@ def get_relevant_messages_for_country_last_24h(
 # ---------------------------------------------------------------------------
 # One-time backfill of messages.country
 # ---------------------------------------------------------------------------
+
 
 def backfill_message_countries(
     cutoff: str = COUNTRY_BACKFILL_CUTOFF,
@@ -557,7 +579,9 @@ def backfill_message_countries(
         if matched or unmatched_total:
             log.info(
                 "backfill_message_countries: matched=%d unmatched=%d cutoff=%s",
-                matched, unmatched_total, cutoff,
+                matched,
+                unmatched_total,
+                cutoff,
             )
             for ch, n in unmatched_channels.items():
                 log.warning("Unmatched channel for backfill: %r (%d rows)", ch, n)

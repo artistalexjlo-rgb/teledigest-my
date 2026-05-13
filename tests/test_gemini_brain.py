@@ -21,22 +21,34 @@ import pytest
 
 from teledigest.gemini_brain import _format_context, is_enabled
 
-
 # --- Unit: _format_context ---------------------------------------------------
+
 
 def test_format_context_basic():
     docs = [
-        {"title": "SIM card Brazil", "tag": "Telecom", "country": "br",
-         "instruction": "Vivo and Claro are the best carriers. SIM costs R$20."},
-        {"title": "Airport SIM", "tag": "Travel", "country": "any",
-         "instruction": "Most airports have carrier kiosks past customs."},
-        {"title": "No instruction", "tag": "Other", "country": "br",
-         "instruction": ""},  # should be skipped
+        {
+            "title": "SIM card Brazil",
+            "tag": "Telecom",
+            "country": "br",
+            "instruction": "Vivo and Claro are the best carriers. SIM costs R$20.",
+        },
+        {
+            "title": "Airport SIM",
+            "tag": "Travel",
+            "country": "any",
+            "instruction": "Most airports have carrier kiosks past customs.",
+        },
+        {
+            "title": "No instruction",
+            "tag": "Other",
+            "country": "br",
+            "instruction": "",
+        },  # should be skipped
     ]
     result = _format_context(docs)
     assert "[1." in result
     assert "[2." in result
-    assert "[3." not in result          # empty instruction skipped
+    assert "[3." not in result  # empty instruction skipped
     assert "Vivo and Claro" in result
     assert "airport" in result.lower()
 
@@ -52,8 +64,10 @@ def test_format_context_all_empty_instructions():
 
 # --- Unit: is_enabled --------------------------------------------------------
 
+
 def test_is_enabled_with_key(monkeypatch):
     from teledigest import config as cfg_mod
+
     mock_cfg = MagicMock()
     mock_cfg.gemini.api_key = "fake-key"
     monkeypatch.setattr(cfg_mod, "_CONFIG", mock_cfg)
@@ -62,6 +76,7 @@ def test_is_enabled_with_key(monkeypatch):
 
 def test_is_enabled_no_key(monkeypatch):
     from teledigest import config as cfg_mod
+
     mock_cfg = MagicMock()
     mock_cfg.gemini.api_key = ""
     monkeypatch.setattr(cfg_mod, "_CONFIG", mock_cfg)
@@ -69,6 +84,7 @@ def test_is_enabled_no_key(monkeypatch):
 
 
 # --- Integration: search_and_format routes correctly -------------------------
+
 
 def _make_mock_config(gemini_key: str = "fake-key", firestore_project: str = "proj"):
     cfg = MagicMock()
@@ -83,10 +99,18 @@ def _make_mock_config(gemini_key: str = "fake-key", firestore_project: str = "pr
 
 
 _SAMPLE_DOCS = [
-    {"title": "SIM Brazil", "tag": "Telecom", "country": "br",
-     "instruction": "Vivo is best, R$20 SIM, ID required."},
-    {"title": "Airport SIM", "tag": "Travel", "country": "any",
-     "instruction": "Airport kiosks available past customs."},
+    {
+        "title": "SIM Brazil",
+        "tag": "Telecom",
+        "country": "br",
+        "instruction": "Vivo is best, R$20 SIM, ID required.",
+    },
+    {
+        "title": "Airport SIM",
+        "tag": "Travel",
+        "country": "any",
+        "instruction": "Airport kiosks available past customs.",
+    },
 ]
 
 
@@ -106,12 +130,14 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
     mock_fetch.return_value = _SAMPLE_DOCS
 
     async def _fake_live(prompt, model_name, api_key, history=None):
-        assert "Vivo" in prompt          # context made it into the prompt
+        assert "Vivo" in prompt  # context made it into the prompt
         assert model_name == "gemini-3.1-flash-live-preview"
         return "Лучший оператор — Vivo. SIM стоит R$20, нужен паспорт."
+
     mock_live.side_effect = _fake_live
 
     from teledigest.gemini_brain import search_and_format
+
     result = await search_and_format("br", "где сделать SIM-карту")
 
     assert "🧠" in result
@@ -127,7 +153,10 @@ async def test_search_and_format_gemini_path(mock_live, mock_fetch, mock_get_cfg
 @patch("teledigest.gemini_brain._ask_live_api")
 @patch("teledigest.gemini_brain._ask_sync_fallback")
 async def test_search_and_format_falls_back_to_sync_when_live_fails(
-    mock_sync, mock_live, mock_fetch, mock_get_cfg,
+    mock_sync,
+    mock_live,
+    mock_fetch,
+    mock_get_cfg,
 ):
     """Live API raises → sync fallback runs → answer returned."""
     cfg = _make_mock_config()
@@ -137,13 +166,16 @@ async def test_search_and_format_falls_back_to_sync_when_live_fails(
 
     async def _fake_live_raises(*a, **kw):
         raise RuntimeError("simulated Live API outage")
+
     mock_live.side_effect = _fake_live_raises
 
     async def _fake_sync(prompt, model_name, api_key, history=None):
         return "Ответ из синхронного API."
+
     mock_sync.side_effect = _fake_sync
 
     from teledigest.gemini_brain import search_and_format
+
     result = await search_and_format("br", "anything")
 
     assert "🧠" in result
@@ -155,7 +187,9 @@ async def test_search_and_format_falls_back_to_sync_when_live_fails(
 @patch("teledigest.gemini_brain.get_config")
 @patch("teledigest.gemini_brain._fetch_wisdom_and_wiki")
 @patch("teledigest.gemini_brain._ask_live_api")
-async def test_search_and_format_passes_history_to_live(mock_live, mock_fetch, mock_get_cfg):
+async def test_search_and_format_passes_history_to_live(
+    mock_live, mock_fetch, mock_get_cfg
+):
     """history list reaches _ask_live_api as keyword arg."""
     cfg = _make_mock_config()
     cfg.gemini.live_model = "gemini-3.1-flash-live-preview"
@@ -167,6 +201,7 @@ async def test_search_and_format_passes_history_to_live(mock_live, mock_fetch, m
     async def _fake_live(prompt, model_name, api_key, history=None):
         received_history["value"] = history
         return "ответ с учётом истории"
+
     mock_live.side_effect = _fake_live
 
     history = [
@@ -174,6 +209,7 @@ async def test_search_and_format_passes_history_to_live(mock_live, mock_fetch, m
         {"role": "model", "text": "Автобусы, аренда, такси по приложению..."},
     ]
     from teledigest.gemini_brain import search_and_format
+
     result = await search_and_format("default", "Какое есть такси", history=history)
 
     assert "ответ с учётом истории" in result
@@ -186,7 +222,10 @@ async def test_search_and_format_passes_history_to_live(mock_live, mock_fetch, m
 @patch("teledigest.gemini_brain._ask_live_api")
 @patch("teledigest.gemini_brain._ask_sync_fallback")
 async def test_search_and_format_both_paths_empty_returns_empty(
-    mock_sync, mock_live, mock_fetch, mock_get_cfg,
+    mock_sync,
+    mock_live,
+    mock_fetch,
+    mock_get_cfg,
 ):
     """Both Live and sync return empty → '' so caller hits DeepSeek."""
     cfg = _make_mock_config()
@@ -196,15 +235,18 @@ async def test_search_and_format_both_paths_empty_returns_empty(
 
     async def _empty(*a, **kw):
         return ""
+
     mock_live.side_effect = _empty
     mock_sync.side_effect = _empty
 
     from teledigest.gemini_brain import search_and_format
+
     result = await search_and_format("br", "anything")
     assert result == ""
 
 
 # --- Integration: knowledge_search falls back when Gemini disabled -----------
+
 
 @pytest.mark.asyncio
 async def test_knowledge_search_fallback_when_gemini_disabled(monkeypatch):
@@ -213,9 +255,11 @@ async def test_knowledge_search_fallback_when_gemini_disabled(monkeypatch):
     should skip gemini_brain and go straight to DeepSeek+SQLite path.
     """
     import teledigest.gemini_brain as gb
+
     monkeypatch.setattr(gb, "is_enabled", lambda: False)
 
     import teledigest.knowledge_search as ks
+
     monkeypatch.setattr(ks, "search_knowledge", lambda country, query, limit=20: [])
 
     result = await ks.search_and_format("br", "anything")
