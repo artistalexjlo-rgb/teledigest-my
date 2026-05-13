@@ -1,0 +1,22 @@
+[Unit]
+Description=Teledigest — daily WikiVoyage batch import to Firestore
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\
+  CID=$(docker ps --format "{{.ID}} {{.Names}} {{.Image}}" \
+    | grep -iE "bots-grab|teledigest" | awk "{print \$1}" | head -1); \
+  if [ -z "$CID" ]; then \
+    echo "wikivoyage-batch: no teledigest container found" >&2; \
+    docker ps --format "  {{.ID}} {{.Names}} {{.Image}}" >&2; \
+    exit 1; \
+  fi; \
+  echo "wikivoyage-batch: using container $CID"; \
+  docker exec "$CID" python -m teledigest.scripts.wikivoyage_batch'
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
