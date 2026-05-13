@@ -22,16 +22,10 @@
 
 ## Деплой
 
-- GitHub → Coolify auto-deploy при push в main
-- Docker multi-stage, secrets через env (TELEGRAM_API_ID/HASH/BOT_TOKEN, DEEPSEEK_API_KEY)
-- Конфиг: File Mount в Coolify → `/config/teledigest.conf`
-- Данные (SQLite + сессии): Directory Mount в Coolify — Source path И Mount path = `/home/teledigest/data`
+- GitHub → Dokploy auto-deploy при push в main
+- Docker multi-stage, secrets через env (TELEGRAM_API_ID/HASH/BOT_TOKEN, GEMINI_API_KEY)
+- Конфиг: File Mount в Dokploy → `/config/teledigest.conf`
+- Данные (SQLite + сессии): Directory Mount — `/home/teledigest/data`
 - db_path в конфиге: `/home/teledigest/data/messages_fts.db`
 - sessions_dir в конфиге: `/home/teledigest/data`
-
-## Pending
-
-- Редактирование digest target через бота (в работе)
-- Telegram Forum с топиками по странам вместо отдельных каналов
-- Daily samples для анализа паттернов чата
-- Дайджест без повторов (контекст из истории постов)
+- VPS: 199.195.252.114 (BuyVM), контейнер: `docker ps | grep bots-grab`
