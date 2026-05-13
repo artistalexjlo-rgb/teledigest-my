@@ -72,7 +72,7 @@ def _build_firestore_client():
 # Embeddings
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_MODEL = "gemini-embedding-001"
+_EMBEDDING_MODELS = ["gemini-embedding-001", "gemini-embedding-2"]
 _EMBEDDING_DIM = 768
 
 
@@ -86,8 +86,8 @@ def _get_embedding_api_key() -> str:
     )
 
 
-def _compute_embedding(text: str) -> list[float] | None:
-    """Compute text-embedding-004 vector for a single text. Returns None on error."""
+def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
+    """Compute embedding vector for a single text. Returns None on error."""
     try:
         from google import genai
 
@@ -95,9 +95,10 @@ def _compute_embedding(text: str) -> list[float] | None:
         if not api_key:
             log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
             return None
+        model = _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)]
         client = genai.Client(api_key=api_key)
         result = client.models.embed_content(
-            model=_EMBEDDING_MODEL,
+            model=model,
             contents=text,
             config={"output_dimensionality": _EMBEDDING_DIM},
         )
@@ -110,8 +111,14 @@ def _compute_embedding(text: str) -> list[float] | None:
         return None
 
 
-def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
-    """Compute embeddings for up to 100 texts in one API call."""
+def compute_embeddings_batch(
+    texts: list[str], model_idx: int = 0
+) -> list[list[float] | None]:
+    """Compute embeddings for a batch of texts.
+
+    model_idx is used to alternate between two embedding models
+    so each stays under 100 RPM free-tier quota.
+    """
     if not texts:
         return []
     try:
@@ -120,16 +127,17 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
         api_key = _get_embedding_api_key()
         if not api_key:
             return [None] * len(texts)
+        model = _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)]
         client = genai.Client(api_key=api_key)
         result = client.models.embed_content(
-            model=_EMBEDDING_MODEL,
+            model=model,
             contents=texts,  # type: ignore[arg-type]
             config={"output_dimensionality": _EMBEDDING_DIM},
         )
         embeddings = result.embeddings or []
         return [list(e.values or []) for e in embeddings]
     except Exception as e:
-        log.warning("МОЗГ: batch embed failed: %s", e)
+        log.warning("МОЗГ: batch embed failed (model=%s): %s", model, e)
         return [None] * len(texts)
 
 
