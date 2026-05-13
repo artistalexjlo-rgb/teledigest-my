@@ -76,27 +76,34 @@ _EMBEDDING_MODEL = "models/text-embedding-004"
 _EMBEDDING_DIM = 768
 
 
+def _get_embedding_api_key() -> str:
+    """Return Gemini API key from config or env."""
+    import os
+
+    cfg = get_config()
+    return str(
+        getattr(cfg.gemini, "api_key", None) or os.environ.get("GEMINI_API_KEY", "")
+    )
+
+
 def _compute_embedding(text: str) -> list[float] | None:
     """Compute text-embedding-004 vector for a single text. Returns None on error."""
     try:
-        import os
+        from google import genai
 
-        import google.generativeai as genai
-
-        cfg = get_config()
-        api_key = getattr(cfg.gemini, "api_key", None) or os.environ.get(
-            "GEMINI_API_KEY", ""
-        )
+        api_key = _get_embedding_api_key()
         if not api_key:
             log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
             return None
-        genai.configure(api_key=api_key)
-        result = genai.embed_content(
+        client = genai.Client(api_key=api_key)
+        result = client.models.embed_content(
             model=_EMBEDDING_MODEL,
-            content=text,
-            task_type="retrieval_document",
+            contents=text,
         )
-        return result["embedding"]
+        embeddings = result.embeddings
+        if not embeddings:
+            return None
+        return list(embeddings[0].values or [])
     except Exception as e:
         log.warning("МОЗГ: embed_content failed: %s", e)
         return None
@@ -107,24 +114,18 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     if not texts:
         return []
     try:
-        import os
+        from google import genai
 
-        import google.generativeai as genai
-
-        cfg = get_config()
-        api_key = getattr(cfg.gemini, "api_key", None) or os.environ.get(
-            "GEMINI_API_KEY", ""
-        )
+        api_key = _get_embedding_api_key()
         if not api_key:
             return [None] * len(texts)
-        genai.configure(api_key=api_key)
-        result = genai.embed_content(
+        client = genai.Client(api_key=api_key)
+        result = client.models.embed_content(
             model=_EMBEDDING_MODEL,
-            content=texts,
-            task_type="retrieval_document",
+            contents=texts,
         )
-        embeddings = result["embedding"]
-        return embeddings
+        embeddings = result.embeddings or []
+        return [list(e.values or []) for e in embeddings]
     except Exception as e:
         log.warning("МОЗГ: batch embed failed: %s", e)
         return [None] * len(texts)
