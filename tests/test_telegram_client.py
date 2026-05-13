@@ -495,10 +495,11 @@ async def test_auth_dialog_handler_phone_step_handles_send_code_error(
 
 def test_session_paths_returns_correct_paths(app_config, tmp_path):
     app_config.telegram.sessions_dir = tmp_path / "sessions"
-    user_path, bot_path = tc._session_paths(app_config)
+    user_path, bot_path, user2_path = tc._session_paths(app_config)
 
     assert user_path == tmp_path / "sessions" / "user.session"
     assert bot_path == tmp_path / "sessions" / "bot.session"
+    assert user2_path is None
     assert (tmp_path / "sessions").is_dir()
 
 
