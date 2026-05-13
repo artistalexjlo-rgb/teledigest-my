@@ -13,7 +13,6 @@ Requires GOOGLE_APPLICATION_CREDENTIALS or google-token.json in the repo root.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -90,7 +89,7 @@ def create_vector_index(
             f"  Index is building async, check: https://console.firebase.google.com/project/{PROJECT_ID}/firestore/indexes"
         )
     elif resp.status_code == 409:
-        print(f"  ALREADY EXISTS — skipped")
+        print("  ALREADY EXISTS — skipped")
     else:
         print(f"  ERROR {resp.status_code}: {resp.text}")
 

@@ -14,7 +14,6 @@ Fallback scenario:
 
 from __future__ import annotations
 
-import types
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -99,7 +99,7 @@ def test_upload_file_creates_when_not_exists(tmp_path, app_config):
         create=True,
     ):
         # Patch the import inside upload_file
-        with patch("googleapiclient.http.MediaFileUpload") as mock_media:
+        with patch("googleapiclient.http.MediaFileUpload"):
             fid, created = du.upload_file(service, sample, "FOLDER123")
 
     assert fid == "NEW_ID_123"

@@ -97,6 +97,27 @@ user2_auth_state: UserAuthState = UserAuthState.REQUIRED
 auth_dialogs: dict[int, AuthDialog] = {}
 auth2_dialogs: dict[int, AuthDialog] = {}
 
+# peer_id -> account number (1 or 2); populated during ensure_joined_and_resolve_channels
+_peer_id_to_account: dict[int, int] = {}
+
+
+def _client_for_peer_id(peer_id: int) -> "TelegramClient":
+    """Return the grabber client that owns this peer_id."""
+    if _peer_id_to_account.get(peer_id) == 2 and user2_client is not None:
+        return user2_client
+    assert user_client is not None
+    return user_client
+
+
+def _client_for_url(url: str) -> "TelegramClient":
+    """Return the grabber client for a source URL."""
+    peer_id = _url_to_peer_id.get(url)
+    if peer_id is not None:
+        return _client_for_peer_id(peer_id)
+    assert user_client is not None
+    return user_client
+
+
 SUPPORTED_COMMANDS: dict[str, str] = {
     "/auth": "Start two-factor authentication process for the client instance",
     "/auth2": "Authorize second grabber account (user2_session)",
@@ -657,7 +678,7 @@ async def backfill_command(event):
 
         try:
             count = await deep_backfill(
-                user_client,
+                _client_for_peer_id(peer_id),
                 peer_id,
                 chat_id_to_name[peer_id],
                 country,
@@ -711,7 +732,7 @@ async def extract_command(event):
 
         try:
             count = await extract_from_chat(
-                user_client,
+                _client_for_peer_id(peer_id),
                 peer_id,
                 chat_id_to_name[peer_id],
                 country,
@@ -763,7 +784,7 @@ async def relink_command(event):
 
         try:
             updated = await relink_replies(
-                user_client,
+                _client_for_peer_id(peer_id),
                 peer_id,
                 chat_id_to_name[peer_id],
             )
@@ -855,12 +876,13 @@ async def ensure_joined_and_resolve_channels():
     - build chat_id_to_country mapping (МОЗГ works in OUR chats, not source chats)
     """
     global scraped_chat_ids, chat_id_to_name, chat_id_to_country, _url_to_peer_id
-    global source_chat_id_to_country
+    global source_chat_id_to_country, _peer_id_to_account
     scraped_chat_ids = set()
     chat_id_to_name = {}
     chat_id_to_country = {}
     source_chat_id_to_country = {}
     _url_to_peer_id = {}
+    _peer_id_to_account = {}
 
     cfg = get_config()
 
@@ -956,6 +978,7 @@ async def ensure_joined_and_resolve_channels():
 
             scraped_chat_ids.add(peer_id)
             _url_to_peer_id[ch] = peer_id
+            _peer_id_to_account[peer_id] = acct
             country = url_to_country.get(ch)
             if country:
                 source_chat_id_to_country[peer_id] = country
@@ -1062,15 +1085,15 @@ async def backfill_history(limit: int = 1000):
         log.info("Backfill: no channels to backfill.")
         return
 
-    assert user_client is not None, "user_client not initialized"
     log.info("Backfill: database is empty, fetching history...")
     total = 0
     for chat_id in scraped_chat_ids:
         chat_name = chat_id_to_name.get(chat_id, str(chat_id))
         country = source_chat_id_to_country.get(chat_id)
+        grabber = _client_for_peer_id(chat_id)
         count = 0
         try:
-            async for msg in user_client.iter_messages(chat_id, limit=limit):
+            async for msg in grabber.iter_messages(chat_id, limit=limit):
                 # Skip bot messages
                 sender = getattr(msg, "sender", None)
                 if sender and getattr(sender, "bot", False):
@@ -1123,33 +1146,36 @@ def _session_paths(cfg: AppConfig) -> tuple[Path, Path, Path | None]:
 
 async def subscribe_channel(url: str, country: str | None = None) -> str | None:
     """
-    Subscribe user_client to a channel at runtime.
+    Subscribe to a channel at runtime. Uses user2_client if available and authorized,
+    otherwise falls back to user_client. New sources are saved with account=2.
     Returns channel name on success, None on failure.
-
-    Args:
-        url: Channel URL/handle.
-        country: ISO country code; when provided, the resolved peer_id is
-            registered in `source_chat_id_to_country` so newly arrived messages
-            are tagged with country at write time.
     """
     global scraped_chat_ids
-    assert user_client is not None, "user_client not initialized"
+    # Always subscribe new channels via user2 if available
+    if user2_client is not None and user2_auth_state == UserAuthState.OK:
+        grabber = user2_client
+        acct = 2
+    else:
+        assert user_client is not None, "user_client not initialized"
+        grabber = user_client
+        acct = 1
     try:
-        ent = await user_client.get_entity(url)
-        peer_id = await user_client.get_peer_id(ent)
+        ent = await grabber.get_entity(url)
+        peer_id = await grabber.get_peer_id(ent)
 
         username = getattr(ent, "username", None)
         name = username if username else str(peer_id)
         chat_id_to_name[peer_id] = name
 
         try:
-            await user_client(JoinChannelRequest(ent))
-            log.info("Subscribed to channel: %s", url)
+            await grabber(JoinChannelRequest(ent))
+            log.info("Account%d subscribed to channel: %s", acct, url)
         except Exception as e:
             log.warning("Could not join %s (maybe already joined): %s", url, e)
 
         scraped_chat_ids.add(peer_id)
         _url_to_peer_id[url] = peer_id
+        _peer_id_to_account[peer_id] = acct
         if country:
             source_chat_id_to_country[peer_id] = country
         try:
