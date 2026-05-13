@@ -110,8 +110,9 @@ def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     if not texts:
         return []
     try:
-        import google.generativeai as genai
         import os
+
+        import google.generativeai as genai
 
         cfg = get_config()
         api_key = getattr(cfg.google, "gemini_api_key", None) or os.environ.get(
