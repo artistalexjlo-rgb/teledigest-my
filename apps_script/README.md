@@ -111,7 +111,7 @@ clasp push
 - `YYYY-MM-DD_stories.txt` — котлеты (channel stories, human_story)
 
 Формат одной строки:
-```
+```text
 [br/Finance] Bank card for non-residents :: Use Caixa branch in SP with passport + tax ID  (src: 2026-05-07_br_chatforum.txt)
 ```
 
