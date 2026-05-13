@@ -16,7 +16,9 @@ from .db import get_db_connection
 from .country_codes import resolve_country as _resolve, COUNTRIES
 
 # Display names from country_codes.py
-COUNTRY_NAMES: dict[str, str] = {code: f"{flag} {name}" for code, (name, flag) in COUNTRIES.items()}
+COUNTRY_NAMES: dict[str, str] = {
+    code: f"{flag} {name}" for code, (name, flag) in COUNTRIES.items()
+}
 
 
 def resolve_country(text: str) -> tuple[str, str] | None:
@@ -35,11 +37,13 @@ def resolve_country(text: str) -> tuple[str, str] | None:
 # DB schema
 # ---------------------------------------------------------------------------
 
+
 def init_sources_table() -> None:
     """Create sources table if not exists."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS sources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 country TEXT NOT NULL,
@@ -52,21 +56,26 @@ def init_sources_table() -> None:
                 chat_id INTEGER DEFAULT NULL,
                 UNIQUE(country, url)
             )
-        """)
+        """
+        )
         # Upgrade path: add chat_id column to existing tables.
         try:
             cur.execute("ALTER TABLE sources ADD COLUMN chat_id INTEGER DEFAULT NULL")
             log.info("Added chat_id column to sources table.")
         except sqlite3.OperationalError:
             pass  # column already exists
-        cur.execute("""
+        cur.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_sources_country
             ON sources(country)
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_sources_chat_id
             ON sources(chat_id)
-        """)
+        """
+        )
         log.info("Sources table initialized.")
 
 
@@ -86,8 +95,9 @@ def set_source_chat_id(url: str, chat_id: int) -> None:
         )
 
 
-def migrate_from_config(channels: list[dict[str, str]],
-                        digest_targets: dict[str, str]) -> int:
+def migrate_from_config(
+    channels: list[dict[str, str]], digest_targets: dict[str, str]
+) -> int:
     """
     One-time migration: copy channels from config into sources table.
 
@@ -134,8 +144,8 @@ def migrate_from_config(channels: list[dict[str, str]],
 # CRUD
 # ---------------------------------------------------------------------------
 
-def add_source(country: str, url: str, name: str = "",
-               language: str = "ru") -> int:
+
+def add_source(country: str, url: str, name: str = "", language: str = "ru") -> int:
     """Add a new source channel. Returns row id or 0 if duplicate."""
     now = dt.datetime.utcnow().isoformat()
     with get_db_connection() as conn:
@@ -183,7 +193,9 @@ def get_active_sources(country: str | None = None) -> list[dict[str, Any]]:
                 (country,),
             )
         else:
-            cur.execute("SELECT * FROM sources WHERE active = 1 ORDER BY country, added_at")
+            cur.execute(
+                "SELECT * FROM sources WHERE active = 1 ORDER BY country, added_at"
+            )
         return [dict(row) for row in cur.fetchall()]
 
 
@@ -203,7 +215,9 @@ def get_active_countries() -> list[str]:
     """Get list of countries that have active sources."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT DISTINCT country FROM sources WHERE active = 1 ORDER BY country")
+        cur.execute(
+            "SELECT DISTINCT country FROM sources WHERE active = 1 ORDER BY country"
+        )
         return [row[0] for row in cur.fetchall()]
 
 
@@ -249,6 +263,7 @@ def get_channel_values_for_country(country: str) -> set[str]:
 # Channel → country resolution
 # ---------------------------------------------------------------------------
 
+
 def _normalize_url_handle(url: str) -> str | None:
     """
     Extract a comparable handle from a sources.url value.
@@ -266,7 +281,7 @@ def _normalize_url_handle(url: str) -> str | None:
         return s[1:] or None
     for prefix in ("https://t.me/", "http://t.me/", "tg://resolve?domain="):
         if s.startswith(prefix):
-            tail = s[len(prefix):]
+            tail = s[len(prefix) :]
             return tail.split("/")[0] or None
     return None
 

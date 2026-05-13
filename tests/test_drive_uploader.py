@@ -48,6 +48,7 @@ def app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
 # Upload primitives
 # ---------------------------------------------------------------------------
 
+
 def _make_fake_service(existing_files: dict[tuple[str, str], str] | None = None):
     """
     Build a MagicMock that mimics the subset of Drive API we use.
@@ -62,6 +63,7 @@ def _make_fake_service(existing_files: dict[tuple[str, str], str] | None = None)
         # Parse our query format: "name = 'X' and 'F' in parents and trashed = false"
         # Quick brittle parser is fine for tests.
         import re
+
         m = re.search(r"name = '([^']+)' and '([^']+)' in parents", q)
         if not m:
             return MagicMock(execute=lambda: {"files": []})
@@ -90,8 +92,12 @@ def test_upload_file_creates_when_not_exists(tmp_path, app_config):
     sample.write_text("hello", encoding="utf-8")
     service, files_api = _make_fake_service(existing_files={})
 
-    with patch.object(du, "MediaFileUpload" if hasattr(du, "MediaFileUpload") else "_NA",
-                      MagicMock(), create=True):
+    with patch.object(
+        du,
+        "MediaFileUpload" if hasattr(du, "MediaFileUpload") else "_NA",
+        MagicMock(),
+        create=True,
+    ):
         # Patch the import inside upload_file
         with patch("googleapiclient.http.MediaFileUpload") as mock_media:
             fid, created = du.upload_file(service, sample, "FOLDER123")
@@ -109,9 +115,11 @@ def test_upload_file_creates_when_not_exists(tmp_path, app_config):
 def test_upload_file_updates_when_exists(tmp_path, app_config):
     sample = tmp_path / "2026-04-30_br_Brazil_ChatForum.txt"
     sample.write_text("hello v2", encoding="utf-8")
-    service, files_api = _make_fake_service(existing_files={
-        ("2026-04-30_br_Brazil_ChatForum.txt", "FOLDER123"): "EXISTING_ID_42",
-    })
+    service, files_api = _make_fake_service(
+        existing_files={
+            ("2026-04-30_br_Brazil_ChatForum.txt", "FOLDER123"): "EXISTING_ID_42",
+        }
+    )
 
     with patch("googleapiclient.http.MediaFileUpload"):
         fid, created = du.upload_file(service, sample, "FOLDER123")
@@ -132,15 +140,20 @@ def test_upload_files_continues_on_per_file_failure(tmp_path, app_config):
       Expectation: first and last succeed; middle returns (path, None, False);
                    loop didn't crash.
     """
-    a = tmp_path / "a.txt"; a.write_text("a")
-    b = tmp_path / "b.txt"; b.write_text("b")
-    c = tmp_path / "c.txt"; c.write_text("c")
+    a = tmp_path / "a.txt"
+    a.write_text("a")
+    b = tmp_path / "b.txt"
+    b.write_text("b")
+    c = tmp_path / "c.txt"
+    c.write_text("c")
     service, files_api = _make_fake_service()
 
     # Make the 2nd create() raise
     create_call_ok = MagicMock(execute=MagicMock(return_value={"id": "ID_OK"}))
     create_call_fail = MagicMock(execute=MagicMock(side_effect=RuntimeError("boom")))
-    files_api.create = MagicMock(side_effect=[create_call_ok, create_call_fail, create_call_ok])
+    files_api.create = MagicMock(
+        side_effect=[create_call_ok, create_call_fail, create_call_ok]
+    )
 
     with patch("googleapiclient.http.MediaFileUpload"):
         results = du.upload_files(service, [a, b, c], "FOLDER123")
@@ -156,10 +169,12 @@ def test_upload_files_continues_on_per_file_failure(tmp_path, app_config):
 # upload_samples_dir end-to-end (the entry point scheduler calls)
 # ---------------------------------------------------------------------------
 
+
 def test_upload_samples_dir_skips_when_disabled(app_config, tmp_path, monkeypatch):
     # Re-make config with disabled Drive
     cfg_disabled = _make_app_config(
-        db_path=tmp_path / "messages_fts.db", drive_enabled=False,
+        db_path=tmp_path / "messages_fts.db",
+        drive_enabled=False,
     )
     monkeypatch.setattr(cfg, "_CONFIG", cfg_disabled, raising=False)
     samples = tmp_path / "samples" / "br"
@@ -189,8 +204,10 @@ def test_upload_samples_dir_uploads_every_txt(app_config, tmp_path, monkeypatch)
 
     fake_service, files_api = _make_fake_service()
 
-    with patch.object(du, "get_drive_service", return_value=fake_service), \
-         patch("googleapiclient.http.MediaFileUpload"):
+    with (
+        patch.object(du, "get_drive_service", return_value=fake_service),
+        patch("googleapiclient.http.MediaFileUpload"),
+    ):
         results = du.upload_samples_dir(samples_dir=samples_root)
 
     # 3 .txt files uploaded, .json ignored
@@ -219,7 +236,9 @@ def test_upload_samples_dir_swallows_auth_failure(app_config, tmp_path, monkeypa
     samples.mkdir(parents=True)
     (samples / "f.txt").write_text("x")
 
-    with patch.object(du, "get_drive_service", side_effect=FileNotFoundError("no token")):
+    with patch.object(
+        du, "get_drive_service", side_effect=FileNotFoundError("no token")
+    ):
         results = du.upload_samples_dir(samples_dir=tmp_path / "samples")
     assert results == []
 
@@ -227,6 +246,7 @@ def test_upload_samples_dir_swallows_auth_failure(app_config, tmp_path, monkeypa
 # ---------------------------------------------------------------------------
 # Credentials loading
 # ---------------------------------------------------------------------------
+
 
 def test_load_credentials_missing_token_raises(app_config, tmp_path):
     missing = tmp_path / "nope.json"

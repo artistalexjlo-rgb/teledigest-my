@@ -18,7 +18,9 @@ from .telegram_client import get_bot_client
 from .telegraph import post_to_telegraph
 
 
-async def _post_digest(bot_client, target: str, day: dt.date, messages, country: str = ""):
+async def _post_digest(
+    bot_client, target: str, day: dt.date, messages, country: str = ""
+):
     """Generate and post a digest to the target chat/channel."""
     cfg = get_config()
 
@@ -42,8 +44,7 @@ async def _post_digest(bot_client, target: str, day: dt.date, messages, country:
             )
             brief = llm_summarize_brief(day, summary)
             outgoing = (
-                f"{brief}\n\n"
-                f'<a href="{telegraph_url}">Full digest on Telegraph</a>'
+                f"{brief}\n\n" f'<a href="{telegraph_url}">Full digest on Telegraph</a>'
             )
         else:
             outgoing = summary
@@ -83,7 +84,9 @@ def _run_daily_understanding(day: dt.date, country: str) -> int:
     if artifact["claims_count"] == 0:
         log.info(
             "No claims extracted for %s (country=%s, %d messages)",
-            day.isoformat(), country, artifact["messages_count"],
+            day.isoformat(),
+            country,
+            artifact["messages_count"],
         )
         return 0
 
@@ -92,9 +95,12 @@ def _run_daily_understanding(day: dt.date, country: str) -> int:
 
     log.info(
         "Daily understanding for %s (country=%s): %d messages -> %d spans -> %d claims -> %d loaded",
-        day.isoformat(), country,
-        artifact["messages_count"], artifact["spans_count"],
-        artifact["claims_count"], loaded,
+        day.isoformat(),
+        country,
+        artifact["messages_count"],
+        artifact["spans_count"],
+        artifact["claims_count"],
+        loaded,
     )
     return loaded
 
@@ -126,7 +132,8 @@ async def summary_scheduler():
 
             log.info(
                 "Daily pipeline starting: %s (ending %s)",
-                today.isoformat(), now.isoformat(),
+                today.isoformat(),
+                now.isoformat(),
             )
 
             # Mark outdated knowledge entries
@@ -139,6 +146,7 @@ async def summary_scheduler():
             # Country list comes from the sources DB — that is the authoritative
             # source for active countries. Static config is only bootstrap.
             from .sources_db import get_active_countries
+
             yesterday = today - dt.timedelta(days=1)
             countries = get_active_countries()
 
@@ -162,17 +170,26 @@ async def summary_scheduler():
                 from .sources_db import get_digest_target
 
                 for country in countries:
-                    target = get_digest_target(country) or cfg.sources.digest_targets.get(country)
+                    target = get_digest_target(
+                        country
+                    ) or cfg.sources.digest_targets.get(country)
                     if not target:
-                        log.warning("No digest_target for country '%s', skipping.", country)
+                        log.warning(
+                            "No digest_target for country '%s', skipping.", country
+                        )
                         continue
                     messages = get_relevant_messages_for_country_last_24h(
-                        country, max_docs=cfg.llm.max_messages,
+                        country,
+                        max_docs=cfg.llm.max_messages,
                     )
                     log.info(
-                        "Digest country=%s: %d messages retrieved", country, len(messages),
+                        "Digest country=%s: %d messages retrieved",
+                        country,
+                        len(messages),
                     )
-                    await _post_digest(bot_client, target, today, messages, country=country)
+                    await _post_digest(
+                        bot_client, target, today, messages, country=country
+                    )
             else:
                 # Legacy mode: single digest to summary_target, no country split
                 messages = get_relevant_messages_last_24h(max_docs=cfg.llm.max_messages)
@@ -183,6 +200,7 @@ async def summary_scheduler():
             # Same `yesterday` window as STEP 1 so artifact and sample agree.
             try:
                 from .daily_samples import dump_all_targets
+
                 dump_all_targets(yesterday)
             except Exception as e:
                 log.error("Daily samples dump failed (non-fatal): %s", e)
@@ -193,6 +211,7 @@ async def summary_scheduler():
             # leaves the bot pipeline intact, files stay locally for retry.
             try:
                 from .drive_uploader import upload_samples_dir
+
                 upload_samples_dir()
             except Exception as e:
                 log.error("Drive upload failed (non-fatal): %s", e)

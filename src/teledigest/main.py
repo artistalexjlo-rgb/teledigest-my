@@ -56,10 +56,17 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
         cfg = get_config()
         if hasattr(cfg, "sources") and cfg.sources and cfg.sources.channels:
             channels = [
-                {"url": ch.url, "country": ch.country, "name": ch.name, "language": ch.language}
+                {
+                    "url": ch.url,
+                    "country": ch.country,
+                    "name": ch.name,
+                    "language": ch.language,
+                }
                 for ch in cfg.sources.channels
             ]
-            digest_targets = cfg.sources.digest_targets if cfg.sources.digest_targets else {}
+            digest_targets = (
+                cfg.sources.digest_targets if cfg.sources.digest_targets else {}
+            )
             migrate_from_config(channels, digest_targets)
 
         # One-time backfill of messages.country for post-cutoff rows.
@@ -69,12 +76,11 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
             if matched or unmatched:
                 log.info(
                     "Country backfill complete: matched=%d unmatched=%d",
-                    matched, unmatched,
+                    matched,
+                    unmatched,
                 )
         except Exception as e:
             log.error("Country backfill failed (non-fatal): %s", e)
-
-
 
     await create_clients()
     await start_clients(auth_only=auth_only)
@@ -90,6 +96,7 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
 
     # Run both clients + scheduler + channel poster
     from .channel_poster import channel_poster_loop
+
     await asyncio.gather(
         run_clients(),
         summary_scheduler(),

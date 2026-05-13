@@ -64,6 +64,7 @@ Behavior:
 def _build_firestore_client():
     """Build a Firestore client using service account."""
     from .google_auth import build_firestore_client
+
     return build_firestore_client()
 
 
@@ -318,7 +319,10 @@ async def search_and_format(
     useful_count = context.count("\n\n") + 1 if context else 0
     log.info(
         "Gemini МОЗГ: %d docs fetched (%d useful), history=%d turns, query=%r",
-        len(docs), useful_count, len(history or []), query[:60],
+        len(docs),
+        useful_count,
+        len(history or []),
+        query[:60],
     )
 
     if not context:
@@ -337,19 +341,26 @@ async def search_and_format(
     if cfg.gemini.live_model:
         try:
             answer = await _ask_live_api(
-                prompt, cfg.gemini.live_model, cfg.gemini.api_key, history=history,
+                prompt,
+                cfg.gemini.live_model,
+                cfg.gemini.api_key,
+                history=history,
             )
         except Exception as e:
             log.warning(
                 "Gemini Live API failed (%s) — falling back to sync %s",
-                e, cfg.gemini.model,
+                e,
+                cfg.gemini.model,
             )
 
     # Fallback: legacy synchronous Gemini (shares 500 RPD cap).
     if not answer:
         try:
             answer = await _ask_sync_fallback(
-                prompt, cfg.gemini.model, cfg.gemini.api_key, history=history,
+                prompt,
+                cfg.gemini.model,
+                cfg.gemini.api_key,
+                history=history,
             )
         except Exception as e:
             log.error("Gemini sync fallback also failed: %s", e)

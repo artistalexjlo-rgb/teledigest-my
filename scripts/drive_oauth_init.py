@@ -55,7 +55,8 @@ def main() -> int:
         return 1
 
     token_path = (
-        Path(sys.argv[2]).expanduser() if len(sys.argv) > 2
+        Path(sys.argv[2]).expanduser()
+        if len(sys.argv) > 2
         else creds_path.with_name("google-token.json")
     )
 
@@ -88,7 +89,9 @@ def main() -> int:
         # on a random port for the OAuth redirect. If your firewall blocks it
         # or the browser hangs, re-run with --console flag for manual paste.
         try:
-            creds = flow.run_local_server(port=0, timeout_seconds=180, open_browser=True)
+            creds = flow.run_local_server(
+                port=0, timeout_seconds=180, open_browser=True
+            )
         except Exception as e:
             print(
                 f"\nLocal server flow failed ({e}).\n"

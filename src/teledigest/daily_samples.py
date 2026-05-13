@@ -36,6 +36,7 @@ from .db import get_db_connection
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SampleTarget:
     """One country/channel pair to dump as a daily sample.
@@ -43,6 +44,7 @@ class SampleTarget:
     `channel` must match the value stored in `messages.channel` (handle for
     public channels, numeric chat_id as string for invite-link channels).
     """
+
     country: str
     channel: str
 
@@ -96,7 +98,8 @@ def get_sample_targets() -> list[SampleTarget]:
         else:
             log.warning(
                 "Sample target skipped — no usable channel id for source id=%s url=%s",
-                src.get("id"), url,
+                src.get("id"),
+                url,
             )
             continue
         targets.append(SampleTarget(country=country, channel=channel))
@@ -107,8 +110,11 @@ def get_sample_targets() -> list[SampleTarget]:
 # DB query
 # ---------------------------------------------------------------------------
 
+
 def _fetch_messages(
-    country: str, channel: str, day: dt.date,
+    country: str,
+    channel: str,
+    day: dt.date,
 ) -> list[tuple]:
     """
     Pull a day's worth of human messages for a country/channel pair, sorted.
@@ -140,6 +146,7 @@ def _fetch_messages(
 # Formatting
 # ---------------------------------------------------------------------------
 
+
 def _format_line(date_iso: str, text: str, sender_id, reply_to_msg_id) -> str:
     """Build one line for the sample file. UTC time, impersonal sender id."""
     # date_iso has shape '2026-04-28T12:34:56+00:00' (UTC) — extract HH:MM
@@ -165,6 +172,7 @@ def _format_line(date_iso: str, text: str, sender_id, reply_to_msg_id) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_samples_dir() -> Path:
     """The samples directory, derived from db_path. Created if missing."""
     db_path = Path(get_config().storage.db_path)
@@ -174,7 +182,9 @@ def get_samples_dir() -> Path:
 
 
 def dump_country_samples(
-    target: SampleTarget, day: dt.date, samples_dir: Path | None = None,
+    target: SampleTarget,
+    day: dt.date,
+    samples_dir: Path | None = None,
 ) -> tuple[Path, int]:
     """
     Write one source's daily sample file. Returns (path, message_count).
@@ -203,14 +213,16 @@ def dump_country_samples(
         _format_line(date_iso, text, sender_id, reply_to_msg_id)
         for (_id, date_iso, text, sender_id, reply_to_msg_id) in rows
     ]
-    out_path.write_text(header + "\n".join(body_lines) + ("\n" if body_lines else ""),
-                        encoding="utf-8")
+    out_path.write_text(
+        header + "\n".join(body_lines) + ("\n" if body_lines else ""), encoding="utf-8"
+    )
 
     return out_path, len(rows)
 
 
 def dump_all_targets(
-    day: dt.date, targets: list[SampleTarget] | None = None,
+    day: dt.date,
+    targets: list[SampleTarget] | None = None,
 ) -> list[tuple[SampleTarget, Path, int]]:
     """
     Dump samples for every active source in `sources` DB for a given day.
@@ -227,12 +239,18 @@ def dump_all_targets(
             path, count = dump_country_samples(target, day, samples_dir)
             log.info(
                 "Sample dump: country=%s channel=%s day=%s -> %s (%d messages)",
-                target.country, target.channel, day.isoformat(), path, count,
+                target.country,
+                target.channel,
+                day.isoformat(),
+                path,
+                count,
             )
             results.append((target, path, count))
         except Exception as e:
             log.error(
                 "Sample dump failed for country=%s channel=%s: %s",
-                target.country, target.channel, e,
+                target.country,
+                target.channel,
+                e,
             )
     return results

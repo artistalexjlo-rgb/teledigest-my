@@ -83,8 +83,8 @@ def test_build_channel_country_map_includes_all_keys(app_config: cfg.AppConfig) 
     mapping = sources_db.build_channel_country_map()
     # name + url-handle both indexed
     assert mapping["Brazil_ChatForum"] == "br"
-    assert mapping["Brazil Chat Forum"] == "br"      # name with spaces
-    assert mapping["balichat"] == "id"               # via url + via name
+    assert mapping["Brazil Chat Forum"] == "br"  # name with spaces
+    assert mapping["balichat"] == "id"  # via url + via name
     assert mapping["-1001646838441"] == "mu"
 
 

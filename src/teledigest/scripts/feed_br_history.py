@@ -106,7 +106,7 @@ def dump_chunked(target: SampleTarget, day: dt.date, samples_dir: Path) -> list[
     # would loop forever.
     chunks: list[list[str]] = [[]]
     sizes: list[int] = [0]
-    for (_id, date_iso, text, sender_id, reply_to_msg_id) in rows:
+    for _id, date_iso, text, sender_id, reply_to_msg_id in rows:
         line = _format_line(date_iso, text, sender_id, reply_to_msg_id)
         addition = len(line) + 1  # +1 for trailing newline
         if sizes[-1] + addition > CHAR_CAP and chunks[-1]:
@@ -133,7 +133,9 @@ def dump_chunked(target: SampleTarget, day: dt.date, samples_dir: Path) -> list[
     return written
 
 
-def find_pending_pairs(country: str, samples_dir: Path) -> list[tuple[SampleTarget, dt.date]]:
+def find_pending_pairs(
+    country: str, samples_dir: Path
+) -> list[tuple[SampleTarget, dt.date]]:
     """List (target, day) pairs for country that aren't on disk yet."""
     pending: list[tuple[SampleTarget, dt.date]] = []
     for target in get_sample_targets():
@@ -148,16 +150,27 @@ def find_pending_pairs(country: str, samples_dir: Path) -> list[tuple[SampleTarg
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--country", default="br",
-                        help="ISO country code (default: br)")
-    parser.add_argument("--batch", type=int, default=15,
-                        help="How many (source, day) pairs to dump this run "
-                             "(default: 15, sized to fit Gemini free-tier RPD)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print what would be dumped, write nothing")
-    parser.add_argument("--config", default="/config/teledigest.conf",
-                        help="Path to teledigest.conf "
-                             "(default: /config/teledigest.conf inside container)")
+    parser.add_argument(
+        "--country", default="br", help="ISO country code (default: br)"
+    )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=15,
+        help="How many (source, day) pairs to dump this run "
+        "(default: 15, sized to fit Gemini free-tier RPD)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be dumped, write nothing",
+    )
+    parser.add_argument(
+        "--config",
+        default="/config/teledigest.conf",
+        help="Path to teledigest.conf "
+        "(default: /config/teledigest.conf inside container)",
+    )
     args = parser.parse_args()
 
     # Bot's entrypoint normally calls init_config(); this script is a
@@ -175,7 +188,9 @@ def main() -> int:
     take = pending[: args.batch]
     log.info(
         "Country=%s: %d pending pairs total, processing %d this run (oldest first).",
-        args.country, len(pending), len(take),
+        args.country,
+        len(pending),
+        len(take),
     )
 
     if args.dry_run:
@@ -189,8 +204,11 @@ def main() -> int:
             written = dump_chunked(target, day, samples_dir)
             log.info(
                 "Dumped country=%s channel=%s day=%s -> %d file(s) %s",
-                target.country, target.channel, day.isoformat(),
-                len(written), [p.name for p in written],
+                target.country,
+                target.channel,
+                day.isoformat(),
+                len(written),
+                [p.name for p in written],
             )
             dumped_files += len(written)
         except Exception as e:
@@ -201,7 +219,11 @@ def main() -> int:
     log.info(
         "Run complete: %d files written from %d pairs. "
         "%d pairs remaining (~%d more runs at batch=%d).",
-        dumped_files, len(take), remaining, eta_runs, args.batch,
+        dumped_files,
+        len(take),
+        remaining,
+        eta_runs,
+        args.batch,
     )
     return 0
 

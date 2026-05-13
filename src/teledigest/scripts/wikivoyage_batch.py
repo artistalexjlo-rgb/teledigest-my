@@ -40,22 +40,142 @@ from pathlib import Path
 # Country priority list — imported in this order (Tier 0 first = active chats)
 PRIORITY = [
     # Tier 0 — active chats
-    "th", "br", "ar", "id", "lk", "mu", "at", "be", "bg", "de",
-    "vn", "fr", "ph", "tr",
+    "th",
+    "br",
+    "ar",
+    "id",
+    "lk",
+    "mu",
+    "at",
+    "be",
+    "bg",
+    "de",
+    "vn",
+    "fr",
+    "ph",
+    "tr",
     # Tier 1 — popular expat destinations
-    "ae", "ge", "am", "az", "kz", "uz", "kg", "ua", "ru", "by",
-    "es", "pt", "it", "gr", "hr", "rs", "me", "mk", "ba", "ro",
-    "hu", "pl", "cz", "sk", "si", "ee", "lv", "lt", "fi", "se",
-    "no", "dk", "nl", "ie", "gb", "ca", "us", "mx", "co", "pe",
-    "cl", "uy", "py", "ec", "bo", "cr", "pa", "gt", "hn", "sv",
-    "ni", "cu", "do", "ve", "jp", "kr", "cn", "tw", "sg", "my",
-    "mm", "kh", "la", "mn", "np", "bd", "pk", "in", "il", "jo",
-    "lb", "sa", "qa", "om", "cy", "ma", "tn", "eg", "dz", "ke",
-    "tz", "ug", "gh", "ng", "sn", "et", "za", "zm", "zw", "mz",
-    "mg", "na", "rw", "cm", "ci", "ly", "sd", "ye", "sy", "nz",
+    "ae",
+    "ge",
+    "am",
+    "az",
+    "kz",
+    "uz",
+    "kg",
+    "ua",
+    "ru",
+    "by",
+    "es",
+    "pt",
+    "it",
+    "gr",
+    "hr",
+    "rs",
+    "me",
+    "mk",
+    "ba",
+    "ro",
+    "hu",
+    "pl",
+    "cz",
+    "sk",
+    "si",
+    "ee",
+    "lv",
+    "lt",
+    "fi",
+    "se",
+    "no",
+    "dk",
+    "nl",
+    "ie",
+    "gb",
+    "ca",
+    "us",
+    "mx",
+    "co",
+    "pe",
+    "cl",
+    "uy",
+    "py",
+    "ec",
+    "bo",
+    "cr",
+    "pa",
+    "gt",
+    "hn",
+    "sv",
+    "ni",
+    "cu",
+    "do",
+    "ve",
+    "jp",
+    "kr",
+    "cn",
+    "tw",
+    "sg",
+    "my",
+    "mm",
+    "kh",
+    "la",
+    "mn",
+    "np",
+    "bd",
+    "pk",
+    "in",
+    "il",
+    "jo",
+    "lb",
+    "sa",
+    "qa",
+    "om",
+    "cy",
+    "ma",
+    "tn",
+    "eg",
+    "dz",
+    "ke",
+    "tz",
+    "ug",
+    "gh",
+    "ng",
+    "sn",
+    "et",
+    "za",
+    "zm",
+    "zw",
+    "mz",
+    "mg",
+    "na",
+    "rw",
+    "cm",
+    "ci",
+    "ly",
+    "sd",
+    "ye",
+    "sy",
+    "nz",
     # Tier 2
-    "md", "xk", "li", "lu", "gt", "hn", "ni", "sv", "pa", "cu",
-    "do", "ht", "cd", "ml", "mw", "ng", "dz", "ug", "ve", "qa",
+    "md",
+    "xk",
+    "li",
+    "lu",
+    "gt",
+    "hn",
+    "ni",
+    "sv",
+    "pa",
+    "cu",
+    "do",
+    "ht",
+    "cd",
+    "ml",
+    "mw",
+    "ng",
+    "dz",
+    "ug",
+    "ve",
+    "qa",
 ]
 
 # Remove duplicates while preserving order
@@ -78,6 +198,7 @@ log = logging.getLogger("teledigest")
 # State file helpers
 # ---------------------------------------------------------------------------
 
+
 def load_state(state_path: Path) -> dict:
     if state_path.exists():
         try:
@@ -89,7 +210,9 @@ def load_state(state_path: Path) -> dict:
 
 def save_state(state: dict, state_path: Path) -> None:
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    state_path.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def mark_done(state: dict, country: str, patterns: int, state_path: Path) -> None:
@@ -114,10 +237,13 @@ def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None
 # Import one country (reuses wikivoyage_import internals)
 # ---------------------------------------------------------------------------
 
+
 def count_in_firestore(db, country: str, collection: str = "wikivoyage_base") -> int:
     """Count docs for a country in Firestore. Returns 0 if none or error."""
     try:
-        docs = list(db.collection(collection).where("country", "==", country).limit(1).stream())
+        docs = list(
+            db.collection(collection).where("country", "==", country).limit(1).stream()
+        )
         return len(docs)
     except Exception:
         return 0
@@ -158,7 +284,11 @@ def import_country(country: str, db, session) -> int:
 
     log.info(
         "=== %s done: pages=%d wrote=%d skipped=%d failed=%d ===",
-        country, len(pages), total_written, total_skipped, len(failed),
+        country,
+        len(pages),
+        total_written,
+        total_skipped,
+        len(failed),
     )
     return total_written + total_skipped  # total patterns in DB
 
@@ -166,6 +296,7 @@ def import_country(country: str, db, session) -> int:
 # ---------------------------------------------------------------------------
 # Status report
 # ---------------------------------------------------------------------------
+
 
 def print_status(state: dict) -> None:
     from teledigest.scripts.wikivoyage_import import COUNTRY_WIKI_NAME
@@ -198,22 +329,43 @@ def print_status(state: dict) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--n", type=int, default=DEFAULT_BATCH_SIZE,
-                        help=f"Countries per run (default {DEFAULT_BATCH_SIZE})")
-    parser.add_argument("--status", action="store_true",
-                        help="Show import status table and exit")
-    parser.add_argument("--sync", action="store_true",
-                        help="Scan Firestore and mark already-imported countries as done")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what would be imported, do not write")
-    parser.add_argument("--reset", metavar="COUNTRY",
-                        help="Reset a country's state to pending (re-import it next run)")
-    parser.add_argument("--state", default=str(DEFAULT_STATE_PATH),
-                        help=f"State file path (default {DEFAULT_STATE_PATH})")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
-                        help=f"Config path (default {DEFAULT_CONFIG_PATH})")
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"Countries per run (default {DEFAULT_BATCH_SIZE})",
+    )
+    parser.add_argument(
+        "--status", action="store_true", help="Show import status table and exit"
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Scan Firestore and mark already-imported countries as done",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be imported, do not write",
+    )
+    parser.add_argument(
+        "--reset",
+        metavar="COUNTRY",
+        help="Reset a country's state to pending (re-import it next run)",
+    )
+    parser.add_argument(
+        "--state",
+        default=str(DEFAULT_STATE_PATH),
+        help=f"State file path (default {DEFAULT_STATE_PATH})",
+    )
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help=f"Config path (default {DEFAULT_CONFIG_PATH})",
+    )
     args = parser.parse_args()
 
     # Init logging to both stderr and log file
@@ -249,8 +401,12 @@ def main() -> int:
     if args.sync:
         from pathlib import Path as _Path
         from teledigest.config import init_config
-        from teledigest.scripts.wikivoyage_import import _build_firestore_client, COUNTRY_WIKI_NAME
+        from teledigest.scripts.wikivoyage_import import (
+            _build_firestore_client,
+            COUNTRY_WIKI_NAME,
+        )
         from collections import Counter
+
         init_config(_Path(args.config))
         db = _build_firestore_client()
         print("Scanning Firestore wikivoyage_base...")
@@ -268,8 +424,10 @@ def main() -> int:
 
     # Pick next N pending countries
     from teledigest.scripts.wikivoyage_import import COUNTRY_WIKI_NAME
+
     queue = [
-        cc for cc in PRIORITY
+        cc
+        for cc in PRIORITY
         if cc in COUNTRY_WIKI_NAME and state.get(cc, {}).get("status") != "done"
     ]
 
@@ -284,7 +442,9 @@ def main() -> int:
         print(f"Remaining after this run: {len(queue) - len(batch)}")
         return 0
 
-    log.info("WikiVoyage batch: importing %d countries: %s", len(batch), ", ".join(batch))
+    log.info(
+        "WikiVoyage batch: importing %d countries: %s", len(batch), ", ".join(batch)
+    )
 
     from pathlib import Path as _Path
     from teledigest.config import init_config
@@ -298,13 +458,19 @@ def main() -> int:
 
     for i, cc in enumerate(batch):
         if i > 0:
-            log.info("Pausing 60s between countries to respect WikiVoyage rate limits...")
+            log.info(
+                "Pausing 60s between countries to respect WikiVoyage rate limits..."
+            )
             time.sleep(60)
         try:
             # Check Firestore first — skip if already has data (imported manually)
             existing = count_in_firestore(db, cc)
             if existing > 0:
-                log.info("Country %s already has data in Firestore (%d docs) — marking done", cc, existing)
+                log.info(
+                    "Country %s already has data in Firestore (%d docs) — marking done",
+                    cc,
+                    existing,
+                )
                 mark_done(state, cc, existing, state_path)
                 continue
             patterns = import_country(cc, db, session)
@@ -314,7 +480,7 @@ def main() -> int:
             mark_failed(state, cc, str(e), state_path)
 
     log.info("WikiVoyage batch run complete. Imported: %s", ", ".join(batch))
-    remaining = len([c for c in queue[args.n:] if COUNTRY_WIKI_NAME.get(c)])
+    remaining = len([c for c in queue[args.n :] if COUNTRY_WIKI_NAME.get(c)])
     log.info("Remaining in queue: %d countries", remaining)
     return 0
 

@@ -22,12 +22,14 @@ from .db import get_db_connection
 # Schema
 # ---------------------------------------------------------------------------
 
+
 def init_knowledge_tables() -> None:
     """Create knowledge-base tables if they don't exist yet."""
     with get_db_connection() as conn:
         cur = conn.cursor()
 
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS sources_meta (
                 chat_id       INTEGER PRIMARY KEY,
                 chat_name     TEXT NOT NULL,
@@ -38,9 +40,11 @@ def init_knowledge_tables() -> None:
                 total_messages INTEGER DEFAULT 0,
                 created_at    TEXT DEFAULT (datetime('now'))
             )
-        """)
+        """
+        )
 
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS knowledge (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 country       TEXT NOT NULL,
@@ -57,9 +61,11 @@ def init_knowledge_tables() -> None:
                 tags          TEXT NOT NULL,
                 created_at    TEXT DEFAULT (datetime('now'))
             )
-        """)
+        """
+        )
 
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS extraction_log (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id       INTEGER NOT NULL,
@@ -68,16 +74,21 @@ def init_knowledge_tables() -> None:
                 facts_extracted INTEGER NOT NULL,
                 run_at        TEXT DEFAULT (datetime('now'))
             )
-        """)
+        """
+        )
 
-        cur.execute("""
+        cur.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_knowledge_country
             ON knowledge(country)
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_knowledge_category
             ON knowledge(country, category)
-        """)
+        """
+        )
 
         # Add lemmas column if missing
         try:
@@ -91,6 +102,7 @@ def init_knowledge_tables() -> None:
 # ---------------------------------------------------------------------------
 # sources_meta CRUD
 # ---------------------------------------------------------------------------
+
 
 def get_source_meta(chat_id: int) -> dict[str, Any] | None:
     with get_db_connection() as conn:
@@ -146,11 +158,24 @@ def update_source_meta(chat_id: int, **fields: Any) -> None:
 # knowledge CRUD
 # ---------------------------------------------------------------------------
 
-VALID_CATEGORIES = frozenset({
-    "visa", "documents", "finance", "housing", "transport",
-    "health", "telecom", "safety", "food", "language",
-    "work", "culture", "shopping", "other",
-})
+VALID_CATEGORIES = frozenset(
+    {
+        "visa",
+        "documents",
+        "finance",
+        "housing",
+        "transport",
+        "health",
+        "telecom",
+        "safety",
+        "food",
+        "language",
+        "work",
+        "culture",
+        "shopping",
+        "other",
+    }
+)
 
 
 def insert_knowledge(
@@ -209,7 +234,9 @@ def update_knowledge(kid: int, **fields: Any) -> None:
         if not (q and a):
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT question, answer, tags FROM knowledge WHERE id = ?", (kid,))
+                cur.execute(
+                    "SELECT question, answer, tags FROM knowledge WHERE id = ?", (kid,)
+                )
                 row = cur.fetchone()
                 if row:
                     q = q or row[0] or ""
@@ -233,14 +260,42 @@ from pymorphy3 import MorphAnalyzer as _MorphAnalyzer  # noqa: E402
 _morph = _MorphAnalyzer()
 _WORD_RE = _re.compile(r"[а-яёa-z0-9]+", _re.IGNORECASE)
 
-_SEARCH_STOP_WORDS = frozenset({
-    "какой", "какая", "какое", "какие", "как", "где", "кто", "что",
-    "лучше", "лучший", "хороший", "самый",
-    "можно", "нужно", "надо", "есть", "нет", "это", "для", "или",
-    "подсказать", "посоветовать", "рассказать", "сказать",
-    "пожалуйста", "мочь", "быть",
-    "весь", "привет", "здравствуйте", "добрый", "день",
-})
+_SEARCH_STOP_WORDS = frozenset(
+    {
+        "какой",
+        "какая",
+        "какое",
+        "какие",
+        "как",
+        "где",
+        "кто",
+        "что",
+        "лучше",
+        "лучший",
+        "хороший",
+        "самый",
+        "можно",
+        "нужно",
+        "надо",
+        "есть",
+        "нет",
+        "это",
+        "для",
+        "или",
+        "подсказать",
+        "посоветовать",
+        "рассказать",
+        "сказать",
+        "пожалуйста",
+        "мочь",
+        "быть",
+        "весь",
+        "привет",
+        "здравствуйте",
+        "добрый",
+        "день",
+    }
+)
 
 
 def _lemmatize(text: str) -> list[str]:
@@ -268,19 +323,25 @@ def _build_lemma_index() -> None:
             pass
 
         # Check how many need indexing
-        cur.execute("SELECT COUNT(*) FROM knowledge WHERE lemmas = '' OR lemmas IS NULL")
+        cur.execute(
+            "SELECT COUNT(*) FROM knowledge WHERE lemmas = '' OR lemmas IS NULL"
+        )
         need = cur.fetchone()[0]
         if need == 0:
             return
 
         log.info("Building lemma index for %d knowledge entries...", need)
-        cur.execute("SELECT id, question, answer, tags FROM knowledge WHERE lemmas = '' OR lemmas IS NULL")
+        cur.execute(
+            "SELECT id, question, answer, tags FROM knowledge WHERE lemmas = '' OR lemmas IS NULL"
+        )
         rows = cur.fetchall()
         for kid, q, a, t in rows:
             all_text = f"{q or ''} {a or ''} {t or ''}"
             lemmas = _lemmatize(all_text)
             lemma_str = " ".join(sorted(set(lemmas)))
-            cur.execute("UPDATE knowledge SET lemmas = ? WHERE id = ?", (lemma_str, kid))
+            cur.execute(
+                "UPDATE knowledge SET lemmas = ? WHERE id = ?", (lemma_str, kid)
+            )
 
         log.info("Lemma index built for %d entries.", len(rows))
 
@@ -419,6 +480,7 @@ def mark_outdated(days: int = 90) -> int:
 # ---------------------------------------------------------------------------
 # extraction_log CRUD
 # ---------------------------------------------------------------------------
+
 
 def get_last_processed_msg_id(chat_id: int) -> int:
     with get_db_connection() as conn:

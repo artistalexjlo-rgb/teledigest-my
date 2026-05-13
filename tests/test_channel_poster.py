@@ -36,14 +36,20 @@ def _make_app_config(
         storage=cfg.StorageConfig(rag_keywords=[], db_path=db_path),
         logging=cfg.LoggingConfig(level="INFO"),
         google=cfg.GoogleConfig(
-            drive_folder_id="F", token_path=Path("t"),
+            drive_folder_id="F",
+            token_path=Path("t"),
             enabled=True,
-            firestore_project_id="proj-1", firestore_database="default",
+            firestore_project_id="proj-1",
+            firestore_database="default",
             firestore_collection="telegram_queue",
         ),
         channel=cfg.ChannelConfig(
-            target=target, posts_per_day=5, window_start_hour=8, window_end_hour=24,
-            jitter_minutes=5, enabled=channel_enabled,
+            target=target,
+            posts_per_day=5,
+            window_start_hour=8,
+            window_end_hour=24,
+            jitter_minutes=5,
+            enabled=channel_enabled,
         ),
     )
 
@@ -56,6 +62,7 @@ def app_config(tmp_path, monkeypatch) -> cfg.AppConfig:
 
 
 # --- Hashtag helpers ----------------------------------------------------------
+
 
 def test_country_hashtag_known_codes():
     assert cp._country_hashtag("br") == "#Бразилия"
@@ -81,11 +88,15 @@ def test_channel_field_safe_strips_special_chars():
 
 # --- format_message -----------------------------------------------------------
 
+
 def test_format_message_combines_content_and_hashtags():
     cand = cp.PostCandidate(
-        doc_id="x", country="br", title="t",
+        doc_id="x",
+        country="br",
+        title="t",
         content="Это пример истории про Бразилию.",
-        tag="Finance", created_at=None,
+        tag="Finance",
+        created_at=None,
     )
     msg = cp.format_message(cand)
     assert "Это пример истории про Бразилию." in msg
@@ -97,15 +108,21 @@ def test_format_message_combines_content_and_hashtags():
 
 # --- selection ----------------------------------------------------------------
 
-def _fake_doc(doc_id, country, content, posted_to_channel=None, tag="General",
-              created_at=None):
+
+def _fake_doc(
+    doc_id, country, content, posted_to_channel=None, tag="General", created_at=None
+):
     """Build a minimal stand-in for Firestore DocumentSnapshot."""
     posted = {}
     if posted_to_channel:
         posted = {posted_to_channel: {"posted": True}}
     data = {
-        "country": country, "content": content, "tag": tag, "title": doc_id,
-        "createdAt": created_at, "postedTo": posted,
+        "country": country,
+        "content": content,
+        "tag": tag,
+        "title": doc_id,
+        "createdAt": created_at,
+        "postedTo": posted,
     }
     snap = MagicMock()
     snap.id = doc_id
@@ -149,8 +166,9 @@ def test_select_country_rotation_prefers_different():
         _fake_doc("d3", "id", "id msg"),
     ]
     db = _fake_db(docs)
-    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    recent_countries=["br"])
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["br"]
+    )
     assert pick is not None
     assert pick.doc_id == "d3"
     assert pick.country == "id"
@@ -163,8 +181,9 @@ def test_select_country_rotation_falls_back_when_only_repeat_left():
         _fake_doc("d2", "br", "br2"),
     ]
     db = _fake_db(docs)
-    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    recent_countries=["br"])
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["br"]
+    )
     assert pick is not None
     assert pick.doc_id == "d1"
 
@@ -182,8 +201,9 @@ def test_select_country_rotation_window_shrinks_on_starvation():
         _fake_doc("d3", "id", "id1"),
     ]
     db = _fake_db(docs)
-    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    recent_countries=["br", "vn", "id"])
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["br", "vn", "id"]
+    )
     assert pick is not None
     # Window 3 → empty. Window 2 (vn,id) → only br left → returns d1.
     assert pick.country == "br"
@@ -198,8 +218,9 @@ def test_select_rotation_window_3_avoids_recent_three():
         _fake_doc("d4", "mu", "mu1"),
     ]
     db = _fake_db(docs)
-    pick = cp.select_next_candidate(db, "telegram_queue", "@luky_channel",
-                                    recent_countries=["br", "vn", "id"])
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["br", "vn", "id"]
+    )
     assert pick is not None
     assert pick.country == "mu"
 
@@ -211,7 +232,9 @@ def test_select_excludes_countries():
     ]
     db = _fake_db(docs)
     pick = cp.select_next_candidate(
-        db, "telegram_queue", "@luky_channel",
+        db,
+        "telegram_queue",
+        "@luky_channel",
         excluded_countries={"vn"},
     )
     assert pick is not None
@@ -230,8 +253,8 @@ def test_select_returns_none_when_all_posted():
 
 def test_select_skips_empty_content():
     docs = [
-        _fake_doc("d1", "br", ""),       # empty content — skip
-        _fake_doc("d2", "br", "   "),    # whitespace only — skip
+        _fake_doc("d1", "br", ""),  # empty content — skip
+        _fake_doc("d2", "br", "   "),  # whitespace only — skip
         _fake_doc("d3", "id", "real content"),
     ]
     db = _fake_db(docs)
@@ -241,6 +264,7 @@ def test_select_skips_empty_content():
 
 
 # --- mark_posted --------------------------------------------------------------
+
 
 def test_mark_posted_writes_correct_path(app_config):
     """Verify that postedTo.<channel-key>.* fields are written on update()."""
@@ -259,11 +283,15 @@ def test_mark_posted_writes_correct_path(app_config):
     assert update_arg["postedTo.luky_channel.posted"] is True
     assert update_arg["postedTo.luky_channel.text"] == "posted text"
     assert update_arg["postedTo.luky_channel.target"] == "@luky_channel"
-    assert "posted_at" in update_arg["postedTo.luky_channel.posted_at"].__class__.__name__.lower() or \
-           isinstance(update_arg["postedTo.luky_channel.posted_at"], dt.datetime)
+    assert "posted_at" in update_arg[
+        "postedTo.luky_channel.posted_at"
+    ].__class__.__name__.lower() or isinstance(
+        update_arg["postedTo.luky_channel.posted_at"], dt.datetime
+    )
 
 
 # --- post_one end-to-end (with mocks) ----------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_post_one_end_to_end(app_config):
@@ -281,8 +309,10 @@ async def test_post_one_end_to_end(app_config):
     bot_client = MagicMock()
     bot_client.send_message = AsyncMock()
 
-    with patch.object(cp, "_build_firestore_client", return_value=fake_db), \
-         patch.object(cp, "mark_posted") as mark_mock:
+    with (
+        patch.object(cp, "_build_firestore_client", return_value=fake_db),
+        patch.object(cp, "mark_posted") as mark_mock,
+    ):
         result = await cp.post_one(bot_client, recent_countries=None)
 
     assert result == "br"
@@ -314,8 +344,10 @@ async def test_post_one_does_not_mark_when_send_fails(app_config):
     bot_client = MagicMock()
     bot_client.send_message = AsyncMock(side_effect=RuntimeError("network"))
 
-    with patch.object(cp, "_build_firestore_client", return_value=fake_db), \
-         patch.object(cp, "mark_posted") as mark_mock:
+    with (
+        patch.object(cp, "_build_firestore_client", return_value=fake_db),
+        patch.object(cp, "mark_posted") as mark_mock,
+    ):
         result = await cp.post_one(bot_client)
 
     assert result is None
@@ -324,10 +356,15 @@ async def test_post_one_does_not_mark_when_send_fails(app_config):
 
 # --- schedule slots -----------------------------------------------------------
 
+
 def test_todays_slots_5_per_day_8_to_24(app_config):
     slots = cp._todays_slots(app_config)
     assert [t.strftime("%H:%M") for t in slots] == [
-        "08:00", "11:12", "14:24", "17:36", "20:48"
+        "08:00",
+        "11:12",
+        "14:24",
+        "17:36",
+        "20:48",
     ]
 
 

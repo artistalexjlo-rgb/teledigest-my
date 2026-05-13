@@ -502,9 +502,7 @@ def test_save_message_persists_country(app_config: cfg.AppConfig) -> None:
     db.save_message("2", "balichat", base, "halo", country="id")
 
     conn = sqlite3.connect(app_config.storage.db_path)
-    rows = conn.execute(
-        "SELECT id, country FROM messages ORDER BY id"
-    ).fetchall()
+    rows = conn.execute("SELECT id, country FROM messages ORDER BY id").fetchall()
     conn.close()
     assert rows == [("1", "br"), ("2", "id")]
 
@@ -566,7 +564,7 @@ def test_backfill_message_countries_matches_post_cutoff(
     db.init_db()
     _seed_sources(app_config.storage.db_path)
 
-    pre = dt.datetime(2026, 4, 20, 12, 0, 0, tzinfo=dt.timezone.utc)   # before cutoff
+    pre = dt.datetime(2026, 4, 20, 12, 0, 0, tzinfo=dt.timezone.utc)  # before cutoff
     post = dt.datetime(2026, 4, 25, 12, 0, 0, tzinfo=dt.timezone.utc)  # after cutoff
 
     # All saved without country (legacy path)

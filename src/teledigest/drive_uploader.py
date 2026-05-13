@@ -74,6 +74,7 @@ def get_drive_service():
 # Upload primitives
 # ---------------------------------------------------------------------------
 
+
 def _find_existing_file_id(service, name: str, folder_id: str) -> str | None:
     """
     Look up a file by exact name within a parent folder. Returns id or None.
@@ -83,9 +84,16 @@ def _find_existing_file_id(service, name: str, folder_id: str) -> str | None:
     (date + country + slug only), so we keep it simple.
     """
     q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
-    res = service.files().list(
-        q=q, fields="files(id, name)", pageSize=10, spaces="drive",
-    ).execute()
+    res = (
+        service.files()
+        .list(
+            q=q,
+            fields="files(id, name)",
+            pageSize=10,
+            spaces="drive",
+        )
+        .execute()
+    )
     files = res.get("files", [])
     return files[0]["id"] if files else None
 
@@ -103,24 +111,40 @@ def upload_file(service, local_path: Path, folder_id: str) -> tuple[str, bool]:
 
     name = local_path.name
     media = MediaFileUpload(
-        str(local_path), mimetype="text/plain", resumable=False,
+        str(local_path),
+        mimetype="text/plain",
+        resumable=False,
     )
     existing_id = _find_existing_file_id(service, name, folder_id)
     if existing_id:
-        f = service.files().update(
-            fileId=existing_id, media_body=media, fields="id",
-        ).execute()
+        f = (
+            service.files()
+            .update(
+                fileId=existing_id,
+                media_body=media,
+                fields="id",
+            )
+            .execute()
+        )
         return f["id"], False
 
     body = {"name": name, "parents": [folder_id]}
-    f = service.files().create(
-        body=body, media_body=media, fields="id",
-    ).execute()
+    f = (
+        service.files()
+        .create(
+            body=body,
+            media_body=media,
+            fields="id",
+        )
+        .execute()
+    )
     return f["id"], True
 
 
 def upload_files(
-    service, paths: Iterable[Path], folder_id: str,
+    service,
+    paths: Iterable[Path],
+    folder_id: str,
 ) -> list[tuple[Path, str | None, bool]]:
     """
     Upload multiple files. Returns list of (path, drive_id_or_None, created).
@@ -135,7 +159,9 @@ def upload_files(
             fid, created = upload_file(service, p, folder_id)
             log.info(
                 "Drive upload: %s -> id=%s %s",
-                p.name, fid, "(created)" if created else "(updated)",
+                p.name,
+                fid,
+                "(created)" if created else "(updated)",
             )
             results.append((p, fid, created))
         except Exception as e:
@@ -148,7 +174,10 @@ def upload_files(
 # Public entry: upload a directory of sample files
 # ---------------------------------------------------------------------------
 
-def upload_samples_dir(samples_dir: Path | None = None) -> list[tuple[Path, str | None, bool]]:
+
+def upload_samples_dir(
+    samples_dir: Path | None = None,
+) -> list[tuple[Path, str | None, bool]]:
     """
     Walk the daily-samples directory and push every .txt file to Drive.
 
@@ -163,6 +192,7 @@ def upload_samples_dir(samples_dir: Path | None = None) -> list[tuple[Path, str 
 
     if samples_dir is None:
         from .daily_samples import get_samples_dir
+
         samples_dir = get_samples_dir()
 
     if not samples_dir.exists():

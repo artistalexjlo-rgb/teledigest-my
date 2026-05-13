@@ -73,11 +73,14 @@ def _synthesize_answer(query: str, results: list[dict]) -> str:
             model=cfg.llm.model,
             messages=[
                 {"role": "system", "content": _BRAIN_SYSTEM},
-                {"role": "user", "content": _BRAIN_USER.format(
-                    QUESTION=query,
-                    COUNT=len(results),
-                    FACTS=facts_text,
-                )},
+                {
+                    "role": "user",
+                    "content": _BRAIN_USER.format(
+                        QUESTION=query,
+                        COUNT=len(results),
+                        FACTS=facts_text,
+                    ),
+                },
             ],
             temperature=0.3,
             max_tokens=500,
@@ -143,8 +146,11 @@ async def search_and_format(
     # --- Gemini path (Firestore wisdom_base + wikivoyage_base, Live API) ---
     try:
         from . import gemini_brain
+
         if gemini_brain.is_enabled():
-            answer = await gemini_brain.search_and_format(country, query, history=history)
+            answer = await gemini_brain.search_and_format(
+                country, query, history=history
+            )
             if answer:
                 return answer
             log.warning("МОЗГ: Gemini returned empty — falling back to DeepSeek+SQLite")
@@ -161,7 +167,9 @@ async def search_and_format(
             "кто-нибудь точно подскажет!"
         )
 
-    log.info("МОЗГ: found %d entries for '%s', synthesizing...", len(results), query[:50])
+    log.info(
+        "МОЗГ: found %d entries for '%s', synthesizing...", len(results), query[:50]
+    )
 
     answer = _synthesize_answer(query, results)
 

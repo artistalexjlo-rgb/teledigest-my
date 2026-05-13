@@ -25,6 +25,7 @@ class TelegramConfig:
 @dataclass
 class SourceChannel:
     """A single Telegram source channel/chat."""
+
     name: str
     url: str
     country: str
@@ -34,6 +35,7 @@ class SourceChannel:
 @dataclass
 class SourcesConfig:
     """Multi-country source configuration."""
+
     channels: List[SourceChannel] = field(default_factory=list)
     digest_targets: Dict[str, str] = field(default_factory=dict)
 
@@ -63,6 +65,7 @@ _DEFAULT_USER_BRIEF_PROMPT = (
 @dataclass
 class ExtractionLLMConfig:
     """Separate LLM config for heavy Q&A extraction (e.g. free Yandex tier)."""
+
     model: str = ""
     api_key: str = ""
     base_url: Optional[str] = None
@@ -138,8 +141,9 @@ class GoogleConfig:
     Drive: OAuth user token (token_path) — SA can't create files in personal Drive.
     Firestore: Service Account (service_account_path) — no expiry, no scope drift.
     """
+
     drive_folder_id: str = ""
-    token_path: Path = Path("google-token.json")          # Drive OAuth
+    token_path: Path = Path("google-token.json")  # Drive OAuth
     service_account_path: Path = Path("service-account.json")  # Firestore SA
     enabled: bool = False
     # Firestore (for channel poster reading telegram_queue collection)
@@ -153,6 +157,7 @@ class GoogleConfig:
 @dataclass
 class GeminiConfig:
     """Gemini API settings for МОЗГ chat assistant."""
+
     api_key: str = ""
     # Legacy synchronous model (used by Apps Script extraction-style flows
     # and as fallback if Live API errors). Shares 500 RPD on free tier.
@@ -173,11 +178,12 @@ class ChannelConfig:
     Uses the same OAuth user creds as Drive (token.json must include
     `datastore` scope alongside `drive.file`).
     """
-    target: str = ""              # @luky_channel or numeric chat_id (e.g. -100...)
+
+    target: str = ""  # @luky_channel or numeric chat_id (e.g. -100...)
     posts_per_day: int = 5
-    window_start_hour: int = 8    # 08:00
-    window_end_hour: int = 24     # exclusive — 24 = up to 23:59:59
-    jitter_minutes: int = 5       # ± random minutes per slot to look natural
+    window_start_hour: int = 8  # 08:00
+    window_end_hour: int = 24  # exclusive — 24 = up to 23:59:59
+    jitter_minutes: int = 5  # ± random minutes per slot to look natural
     enabled: bool = False
     # Optional comma-separated list of country codes to exclude from posting
     exclude_countries: str = ""
@@ -368,12 +374,14 @@ def _parse_sources(raw: Dict[str, Any]) -> SourcesConfig:
 
     channels = []
     for ch in channels_raw:
-        channels.append(SourceChannel(
-            name=str(ch.get("name", "")),
-            url=str(ch.get("url", "")),
-            country=str(ch.get("country", "")).lower(),
-            language=str(ch.get("language", "ru")),
-        ))
+        channels.append(
+            SourceChannel(
+                name=str(ch.get("name", "")),
+                url=str(ch.get("url", "")),
+                country=str(ch.get("country", "")).lower(),
+                language=str(ch.get("language", "ru")),
+            )
+        )
 
     digest_targets = {str(k).lower(): str(v) for k, v in targets_raw.items()}
 
@@ -386,20 +394,35 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
     return GoogleConfig(
         drive_folder_id=folder_id,
         token_path=Path(g_raw.get("token_path", "google-token.json")),
-        service_account_path=Path(g_raw.get("service_account_path", "service-account.json")),
+        service_account_path=Path(
+            g_raw.get("service_account_path", "service-account.json")
+        ),
         enabled=bool(folder_id) and bool(g_raw.get("enabled", True)),
         firestore_project_id=str(g_raw.get("firestore_project_id", "")).strip(),
-        firestore_database=str(g_raw.get("firestore_database", "default")).strip() or "default",
-        firestore_collection=str(g_raw.get("firestore_collection", "telegram_queue")).strip() or "telegram_queue",
-        assistant_collection=str(g_raw.get("assistant_collection", "wisdom_base")).strip() or "wisdom_base",
+        firestore_database=str(g_raw.get("firestore_database", "default")).strip()
+        or "default",
+        firestore_collection=str(
+            g_raw.get("firestore_collection", "telegram_queue")
+        ).strip()
+        or "telegram_queue",
+        assistant_collection=str(
+            g_raw.get("assistant_collection", "wisdom_base")
+        ).strip()
+        or "wisdom_base",
     )
 
 
 def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
-    model = str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip() or "gemini-3.1-flash-lite-preview"
-    live_model = str(g_raw.get("live_model", "gemini-3.1-flash-live-preview")).strip() or "gemini-3.1-flash-live-preview"
+    model = (
+        str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip()
+        or "gemini-3.1-flash-lite-preview"
+    )
+    live_model = (
+        str(g_raw.get("live_model", "gemini-3.1-flash-live-preview")).strip()
+        or "gemini-3.1-flash-live-preview"
+    )
     return GeminiConfig(
         api_key=api_key,
         model=model,
