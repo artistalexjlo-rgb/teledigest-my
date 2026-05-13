@@ -1160,6 +1160,16 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
         grabber = user_client
         acct = 1
     try:
+        is_invite = url.startswith("https://t.me/+") or url.startswith("http://t.me/+")
+        if is_invite:
+            # For invite links: join first, then get_entity — otherwise Telegram
+            # raises "not part of channel" before we even have the entity.
+            try:
+                await grabber(JoinChannelRequest(url))
+                log.info("Account%d joined via invite: %s", acct, url)
+            except Exception as e:
+                log.warning("Join attempt for %s: %s (may already be member)", url, e)
+
         ent = await grabber.get_entity(url)
         peer_id = await grabber.get_peer_id(ent)
 
@@ -1167,11 +1177,12 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
         name = username if username else str(peer_id)
         chat_id_to_name[peer_id] = name
 
-        try:
-            await grabber(JoinChannelRequest(ent))
-            log.info("Account%d subscribed to channel: %s", acct, url)
-        except Exception as e:
-            log.warning("Could not join %s (maybe already joined): %s", url, e)
+        if not is_invite:
+            try:
+                await grabber(JoinChannelRequest(ent))
+                log.info("Account%d subscribed to channel: %s", acct, url)
+            except Exception as e:
+                log.warning("Could not join %s (maybe already joined): %s", url, e)
 
         scraped_chat_ids.add(peer_id)
         _url_to_peer_id[url] = peer_id
