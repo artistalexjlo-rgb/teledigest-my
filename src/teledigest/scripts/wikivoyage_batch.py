@@ -114,8 +114,17 @@ def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None
 # Import one country (reuses wikivoyage_import internals)
 # ---------------------------------------------------------------------------
 
+def count_in_firestore(db, country: str, collection: str = "wikivoyage_base") -> int:
+    """Count docs for a country in Firestore. Returns 0 if none or error."""
+    try:
+        docs = list(db.collection(collection).where("country", "==", country).limit(1).stream())
+        return len(docs)
+    except Exception:
+        return 0
+
+
 def import_country(country: str, db, session) -> int:
-    """Import one country. Returns total patterns written."""
+    """Import one country. Returns total patterns in Firestore after import."""
     import requests as _req
     from teledigest.scripts.wikivoyage_import import (
         COUNTRY_WIKI_NAME,
@@ -268,6 +277,12 @@ def main() -> int:
 
     for cc in batch:
         try:
+            # Check Firestore first — skip if already has data (imported manually)
+            existing = count_in_firestore(db, cc)
+            if existing > 0:
+                log.info("Country %s already has data in Firestore (%d docs) — marking done", cc, existing)
+                mark_done(state, cc, existing, state_path)
+                continue
             patterns = import_country(cc, db, session)
             mark_done(state, cc, patterns, state_path)
         except Exception as e:

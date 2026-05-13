@@ -20,33 +20,7 @@ systemctl enable --now wikivoyage-batch.timer
 systemctl list-timers wikivoyage-batch.timer
 ```
 
-### 2. Отметь уже залитые страны (Thailand залита руками раньше)
-
-```bash
-CID=$(docker ps --format '{{.ID}} {{.Names}}' | grep bots-grab | awk '{print $1}' | head -1)
-
-docker exec "$CID" python3 -c "
-import json
-from pathlib import Path
-from datetime import datetime, timezone
-
-state_path = Path('/home/teledigest/data/wikivoyage_batch_state.json')
-state = json.loads(state_path.read_text()) if state_path.exists() else {}
-
-# Страны, залитые вручную до запуска батча
-already_done = {
-    'th': 9649,   # Thailand — первый тестовый прогон 2026-05-11
-}
-now = datetime.now(timezone.utc).isoformat()
-for cc, patterns in already_done.items():
-    state[cc] = {'status': 'done', 'patterns': patterns, 'finished_at': now}
-
-state_path.write_text(json.dumps(state, indent=2))
-print('Marked:', list(already_done.keys()))
-"
-```
-
-### 3. Посмотри статус
+### 2. Посмотри статус
 
 ```bash
 docker exec "$CID" python -m teledigest.scripts.wikivoyage_batch --status
