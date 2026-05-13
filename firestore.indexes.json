@@ -28,40 +28,6 @@
       ]
     }
   ],
-  "fieldOverrides": [
-    {
-      "_comment": "wisdom_base: vector index for text-embedding-004 (768-dim COSINE). Required by gemini_brain._fetch_by_vector (find_nearest). Deploy: firebase deploy --only firestore:indexes",
-      "collectionGroup": "wisdom_base",
-      "fieldPath": "embedding",
-      "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
-          "vectorConfig": {
-            "dimension": 768,
-            "flat": {}
-          }
-        }
-      ]
-    },
-    {
-      "_comment": "wikivoyage_base: vector index for text-embedding-004 (768-dim COSINE). Same as wisdom_base.",
-      "collectionGroup": "wikivoyage_base",
-      "fieldPath": "embedding",
-      "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
-          "vectorConfig": {
-            "dimension": 768,
-            "flat": {}
-          }
-        }
-      ]
-    }
-  ]
+  "fieldOverrides": []
 }
+

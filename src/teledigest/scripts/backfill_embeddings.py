@@ -111,6 +111,9 @@ def _backfill_collection(
 
 
 def run_backfill(collections: list[str]) -> None:
+    from ..config import init_config
+
+    init_config()
     cfg = get_config()
     if not cfg.google.firestore_project_id:
         log.error("backfill_embeddings: firestore_project_id not configured")
