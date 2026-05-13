@@ -20,7 +20,7 @@ from pathlib import Path
 import requests
 
 PROJECT_ID = "project-56cb62a9-8914-4ae3-b44"
-DATABASE = "(default)"
+DATABASE = "default"
 
 VECTOR_INDEXES = [
     {"collection": "wisdom_base", "field": "embedding", "dimension": 768},
@@ -29,38 +29,35 @@ VECTOR_INDEXES = [
 
 
 def _get_access_token() -> str:
-    """Get OAuth2 access token from google-token.json (same as bot uses)."""
-    token_paths = [
-        Path(__file__).parent.parent / "google-token.json",
-        Path(__file__).parent.parent / "token.json",
+    """
+    Get OAuth2 access token with cloud-platform scope via installed-app flow.
+    Opens browser for one-time consent, then returns the token.
+    Does NOT overwrite google-token.json — uses a temp file.
+    """
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+    creds_paths = [
+        Path(__file__).parent.parent / "credentials.json",
+        Path(__file__).parent.parent / "google-credentials.json",
+        Path(__file__).parent.parent / "scripts" / "credentials.json",
     ]
-    for p in token_paths:
-        if p.exists():
-            data = json.loads(p.read_text())
-            token = data.get("access_token") or data.get("token")
-            if token:
-                print(f"Using token from {p}")
-                return token
+    creds_file = next((p for p in creds_paths if p.exists()), None)
+    if not creds_file:
+        print("ERROR: credentials.json not found")
+        sys.exit(1)
 
-    # Try google.auth default credentials (service account via env)
-    try:
-        import google.auth
-        import google.auth.transport.requests
-
-        creds, _ = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        creds.refresh(google.auth.transport.requests.Request())
-        return creds.token
-    except Exception as e:
-        print(f"google.auth failed: {e}")
-
-    print("ERROR: No credentials found.")
-    print("Run: python -m teledigest.scripts.auth  OR  set GOOGLE_APPLICATION_CREDENTIALS")
-    sys.exit(1)
+    print(f"Using credentials from {creds_file}")
+    print("A browser window will open for Google auth (one-time)...")
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
+    creds = flow.run_local_server(port=0)
+    return creds.token
 
 
-def create_vector_index(token: str, collection: str, field: str, dimension: int) -> None:
+def create_vector_index(
+    token: str, collection: str, field: str, dimension: int
+) -> None:
     url = (
         f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
         f"/databases/{DATABASE}/collectionGroups/{collection}/indexes"
@@ -89,7 +86,9 @@ def create_vector_index(token: str, collection: str, field: str, dimension: int)
     if resp.status_code in (200, 201):
         op = resp.json().get("name", "")
         print(f"  OK — operation: {op}")
-        print(f"  Index is building async, check: https://console.firebase.google.com/project/{PROJECT_ID}/firestore/indexes")
+        print(
+            f"  Index is building async, check: https://console.firebase.google.com/project/{PROJECT_ID}/firestore/indexes"
+        )
     elif resp.status_code == 409:
         print(f"  ALREADY EXISTS — skipped")
     else:
