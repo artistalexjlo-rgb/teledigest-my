@@ -68,18 +68,133 @@ def _build_firestore_client():
     return build_firestore_client()
 
 
-def _fetch_wisdom_and_wiki(wisdom_limit: int = 150, wiki_limit: int = 50) -> list[dict]:
+# ---------------------------------------------------------------------------
+# Embeddings
+# ---------------------------------------------------------------------------
+
+_EMBEDDING_MODEL = "models/text-embedding-004"
+_EMBEDDING_DIM = 768
+
+
+def _compute_embedding(text: str) -> list[float] | None:
+    """Compute text-embedding-004 vector for a single text. Returns None on error."""
+    try:
+        import google.generativeai as genai
+
+        cfg = get_config()
+        api_key = (
+            cfg.google.gemini_api_key if hasattr(cfg.google, "gemini_api_key") else None
+        )
+        if not api_key:
+            # try env
+            import os
+
+            api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
+            return None
+        genai.configure(api_key=api_key)
+        result = genai.embed_content(
+            model=_EMBEDDING_MODEL,
+            content=text,
+            task_type="retrieval_document",
+        )
+        return result["embedding"]
+    except Exception as e:
+        log.warning("МОЗГ: embed_content failed: %s", e)
+        return None
+
+
+def compute_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
+    """Compute embeddings for up to 100 texts in one API call."""
+    if not texts:
+        return []
+    try:
+        import google.generativeai as genai
+        import os
+
+        cfg = get_config()
+        api_key = getattr(cfg.google, "gemini_api_key", None) or os.environ.get(
+            "GEMINI_API_KEY", ""
+        )
+        if not api_key:
+            return [None] * len(texts)
+        genai.configure(api_key=api_key)
+        result = genai.embed_content(
+            model=_EMBEDDING_MODEL,
+            content=texts,
+            task_type="retrieval_document",
+        )
+        embeddings = result["embedding"]
+        return embeddings
+    except Exception as e:
+        log.warning("МОЗГ: batch embed failed: %s", e)
+        return [None] * len(texts)
+
+
+def _fetch_by_vector(
+    db,
+    collection: str,
+    query_vector: list[float],
+    limit: int,
+    source_label: str,
+) -> list[dict]:
+    """Vector search via Firestore find_nearest. Falls back to recency on error."""
+    try:
+        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+        from google.cloud.firestore_v1.vector import Vector
+
+        docs = (
+            db.collection(collection)
+            .find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_vector),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=limit,
+            )
+            .stream()
+        )
+        results = []
+        for d in docs:
+            data = d.to_dict()
+            if not data:
+                continue
+            data["_source"] = source_label
+            results.append(data)
+        return results
+    except Exception as e:
+        log.warning(
+            "МОЗГ: vector search on %s failed (%s) — falling back to recency",
+            collection,
+            e,
+        )
+        return []
+
+
+def _fetch_wisdom_and_wiki(
+    query: str = "",
+    wisdom_limit: int = 150,
+    wiki_limit: int = 50,
+) -> list[dict]:
     """
-    Fetch top-N most recent docs from BOTH wisdom_base (chat-mined facts)
-    and wikivoyage_base (wiki-imported facts). Each doc is tagged with a
-    `_source` field — "База данных" for wisdom, "WikiVoyage" for wiki — so
+    Fetch top-N docs from BOTH wisdom_base (chat-mined facts) and
+    wikivoyage_base (wiki-imported facts).
+
+    When `query` is provided (non-empty) AND an embedding can be computed,
+    uses vector search (find_nearest COSINE) — returns semantically relevant
+    docs regardless of insertion time.
+
+    Falls back to recency sort (order_by createdAt/importedAt) when:
+    - query is empty string
+    - GEMINI_API_KEY is missing
+    - embedding API call fails
+    - Firestore vector index not yet deployed
+
+    Each doc is tagged with `_source` ("База данных" or "WikiVoyage") so
     the formatter can mark its origin in the context Gemini sees.
 
-    No country filter on either query. Gemini picks relevance from the
-    [country/tag/source] headers.
-
-    Token math: ~200 wisdom + ~50 wiki = ~250 docs × ~200 chars = ~50K chars
-    ≈ ~15K tokens of context. Fits Live API 65K TPM budget with headroom.
+    Token math: ~150 wisdom + ~50 wiki = ~200 docs × ~200 chars ≈ 40K chars
+    ≈ ~12K tokens. Fits Live API 65K TPM budget with headroom.
     """
     from google.cloud import firestore as fs
 
@@ -94,51 +209,86 @@ def _fetch_wisdom_and_wiki(wisdom_limit: int = 150, wiki_limit: int = 50) -> lis
         log.error("Gemini МОЗГ: Firestore init failed: %s", e)
         return []
 
+    # Try to compute embedding for vector search.
+    query_vector: list[float] | None = None
+    if query:
+        query_vector = _compute_embedding(query)
+        if query_vector:
+            log.info("МОЗГ: using vector search for query %r", query[:60])
+        else:
+            log.info("МОЗГ: embedding failed — falling back to recency sort")
+
     results: list[dict] = []
 
-    # 1. wisdom_base — chat-mined facts, sorted by createdAt
-    try:
-        docs = (
-            db.collection(cfg.google.assistant_collection)
-            .order_by("createdAt", direction=fs.Query.DESCENDING)
-            .limit(wisdom_limit)
-            .stream()
+    # 1. wisdom_base — chat-mined facts
+    if query_vector:
+        results.extend(
+            _fetch_by_vector(
+                db,
+                cfg.google.assistant_collection,
+                query_vector,
+                wisdom_limit,
+                "База данных",
+            )
         )
-        for d in docs:
-            data = d.to_dict()
-            if not data:
-                continue
-            data["_source"] = "База данных"
-            results.append(data)
-    except Exception as e:
-        log.error("Gemini МОЗГ: wisdom_base query failed: %s", e)
+        # If vector search returned nothing (e.g. index not ready), fall back
+        if not results:
+            log.info("МОЗГ: vector search returned 0 wisdom docs — recency fallback")
+            query_vector = None  # triggers recency path below for both collections
 
-    # 2. wikivoyage_base — wiki-imported facts, sorted by importedAt
+    if not query_vector:
+        try:
+            docs = (
+                db.collection(cfg.google.assistant_collection)
+                .order_by("createdAt", direction=fs.Query.DESCENDING)
+                .limit(wisdom_limit)
+                .stream()
+            )
+            for d in docs:
+                data = d.to_dict()
+                if not data:
+                    continue
+                data["_source"] = "База данных"
+                results.append(data)
+        except Exception as e:
+            log.error("Gemini МОЗГ: wisdom_base query failed: %s", e)
+
+    # 2. wikivoyage_base — wiki-imported facts
     # Optional: if collection name is configurable add to GoogleConfig later.
-    try:
-        docs = (
-            db.collection("wikivoyage_base")
-            .order_by("importedAt", direction=fs.Query.DESCENDING)
-            .limit(wiki_limit)
-            .stream()
+    if query_vector:
+        wiki_results = _fetch_by_vector(
+            db,
+            "wikivoyage_base",
+            query_vector,
+            wiki_limit,
+            "WikiVoyage",
         )
-        for d in docs:
-            data = d.to_dict()
-            if not data:
-                continue
-            data["_source"] = "WikiVoyage"
-            results.append(data)
-    except Exception as e:
-        # Wiki collection may not exist yet / index missing. Soft fail —
-        # wisdom_base alone still works.
-        log.warning("Gemini МОЗГ: wikivoyage_base query skipped (%s)", e)
+        results.extend(wiki_results)
+    else:
+        try:
+            docs = (
+                db.collection("wikivoyage_base")
+                .order_by("importedAt", direction=fs.Query.DESCENDING)
+                .limit(wiki_limit)
+                .stream()
+            )
+            for d in docs:
+                data = d.to_dict()
+                if not data:
+                    continue
+                data["_source"] = "WikiVoyage"
+                results.append(data)
+        except Exception as e:
+            # Wiki collection may not exist yet / index missing. Soft fail —
+            # wisdom_base alone still works.
+            log.warning("Gemini МОЗГ: wikivoyage_base query skipped (%s)", e)
 
     return results
 
 
 # Back-compat alias for callers that still expect the old name.
 def _fetch_wisdom(limit: int = 200) -> list[dict]:
-    return _fetch_wisdom_and_wiki(wisdom_limit=limit, wiki_limit=0)
+    return _fetch_wisdom_and_wiki(query="", wisdom_limit=limit, wiki_limit=0)
 
 
 def _format_context(docs: list[dict]) -> str:
@@ -307,7 +457,7 @@ async def search_and_format(
     """
     cfg = get_config()
 
-    docs = _fetch_wisdom_and_wiki()
+    docs = _fetch_wisdom_and_wiki(query=query)
     if not docs:
         return (
             "🧠 Не нашёл ничего по этому запросу. "

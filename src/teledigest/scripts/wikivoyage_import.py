@@ -515,33 +515,62 @@ def _doc_id(country: str, page_title: str, idx: int) -> str:
 def write_patterns(
     db, country: str, page_title: str, patterns: list[dict]
 ) -> tuple[int, int]:
-    """Returns (written, skipped). Skipped = already-exists (idempotent)."""
+    """Returns (written, skipped). Skipped = already-exists (idempotent).
+
+    Computes text-embedding-004 vectors for new docs in batches so vector
+    search works immediately after import (no separate backfill needed).
+    Falls back gracefully if embedding API is unavailable.
+    """
     if not patterns:
         return 0, 0
     coll = db.collection("wikivoyage_base")
     now = dt.datetime.now(dt.timezone.utc)
     url = WIKI_PAGE_BASE + page_title.replace(" ", "_")
-    written = 0
+
+    # --- Phase 1: determine which docs are new (need write) ---
+    new_docs: list[tuple[str, dict]] = []  # (doc_id, pattern)
     skipped = 0
     for p in patterns:
         idx = p.pop("_seed_index")
         doc_id = _doc_id(country, page_title, idx)
         ref = coll.document(doc_id)
-        # Conditional create to keep idempotency. Firestore client lacks a
-        # native "create if not exists" so we read first.
         snap = ref.get()
         if snap.exists:
             skipped += 1
             continue
-        payload = {
+        new_docs.append((doc_id, p))
+
+    if not new_docs:
+        return 0, skipped
+
+    # --- Phase 2: batch compute embeddings for new docs ---
+    try:
+        from teledigest.gemini_brain import compute_embeddings_batch
+
+        texts = [(nd.get("instruction") or "") for _, nd in new_docs]
+        embeddings = compute_embeddings_batch(texts)
+    except Exception as emb_err:
+        log.warning(
+            "write_patterns: embedding batch failed (%s) — writing without vectors",
+            emb_err,
+        )
+        embeddings = [None] * len(new_docs)
+
+    # --- Phase 3: write new docs with embeddings ---
+    written = 0
+    for (doc_id, p), emb in zip(new_docs, embeddings):
+        payload: dict = {
             **p,
             "source": "wikivoyage",
             "sourceTitle": page_title,
             "sourceUrl": url,
             "importedAt": now,
         }
-        ref.set(payload)
+        if emb is not None:
+            payload["embedding"] = emb
+        coll.document(doc_id).set(payload)
         written += 1
+
     return written, skipped
 
 
