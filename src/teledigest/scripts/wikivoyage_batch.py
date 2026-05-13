@@ -251,13 +251,11 @@ def count_in_firestore(db, country: str, collection: str = "wikivoyage_base") ->
 
 def import_country(country: str, db, session) -> int:
     """Import one country. Returns total patterns in Firestore after import."""
-    from teledigest.scripts.wikivoyage_import import (
-        COUNTRY_WIKI_NAME,
-        list_category_members,
-        fetch_wikitext,
-        parse_page,
-        write_patterns,
-    )
+    from teledigest.scripts.wikivoyage_import import (COUNTRY_WIKI_NAME,
+                                                      fetch_wikitext,
+                                                      list_category_members,
+                                                      parse_page,
+                                                      write_patterns)
 
     wiki_name = COUNTRY_WIKI_NAME[country]
     log.info("=== WikiVoyage batch: starting %s (%s) ===", country, wiki_name)
@@ -399,13 +397,12 @@ def main() -> int:
         return 0
 
     if args.sync:
+        from collections import Counter
         from pathlib import Path as _Path
+
         from teledigest.config import init_config
         from teledigest.scripts.wikivoyage_import import (
-            _build_firestore_client,
-            COUNTRY_WIKI_NAME,
-        )
-        from collections import Counter
+            COUNTRY_WIKI_NAME, _build_firestore_client)
 
         init_config(_Path(args.config))
         db = _build_firestore_client()
@@ -447,9 +444,11 @@ def main() -> int:
     )
 
     from pathlib import Path as _Path
+
+    import requests
+
     from teledigest.config import init_config
     from teledigest.scripts.wikivoyage_import import _build_firestore_client
-    import requests
 
     init_config(_Path(args.config))
     db = _build_firestore_client()

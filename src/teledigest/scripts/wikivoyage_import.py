@@ -57,7 +57,6 @@ import requests
 
 from teledigest.config import init_config, log
 
-
 WIKI_API = "https://en.wikivoyage.org/w/api.php"
 WIKI_PAGE_BASE = "https://en.wikivoyage.org/wiki/"
 USER_AGENT = "teledigest-bot/0.1 (https://github.com/artistalexjlo-rgb/teledigest-my)"

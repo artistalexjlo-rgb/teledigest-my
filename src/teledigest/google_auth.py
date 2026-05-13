@@ -10,7 +10,6 @@ Default:       /home/teledigest/data/service-account.json
 
 from __future__ import annotations
 
-
 from .config import get_config
 
 

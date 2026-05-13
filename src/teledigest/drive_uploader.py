@@ -29,9 +29,9 @@ DRIVE_SCOPES: tuple[str, ...] = (
 
 def _load_drive_credentials(token_path: Path):
     """Load and refresh OAuth credentials from disk."""
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
     from google.auth.exceptions import RefreshError
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
 
     if not token_path.exists():
         raise FileNotFoundError(

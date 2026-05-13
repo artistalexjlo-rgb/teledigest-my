@@ -10,8 +10,8 @@ Based on Codex's build_daily_memory_artifact.py, ported into the bot.
 
 from __future__ import annotations
 
-import re
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from typing import Any
 

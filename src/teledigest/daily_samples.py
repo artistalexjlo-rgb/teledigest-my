@@ -31,7 +31,6 @@ from pathlib import Path
 from .config import get_config, log
 from .db import get_db_connection
 
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -74,7 +73,7 @@ def get_sample_targets() -> list[SampleTarget]:
         3. sources.name fallback — only when both above are unavailable.
     Sources without any usable identifier are skipped with a warning.
     """
-    from .sources_db import get_active_sources, _normalize_url_handle
+    from .sources_db import _normalize_url_handle, get_active_sources
 
     targets: list[SampleTarget] = []
     for src in get_active_sources():

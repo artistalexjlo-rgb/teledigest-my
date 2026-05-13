@@ -21,7 +21,6 @@ import pytest
 
 from teledigest.gemini_brain import _format_context, is_enabled
 
-
 # --- Unit: _format_context ---------------------------------------------------
 
 

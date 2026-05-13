@@ -12,8 +12,9 @@ import sqlite3
 from typing import Any
 
 from .config import log
+from .country_codes import COUNTRIES
+from .country_codes import resolve_country as _resolve
 from .db import get_db_connection
-from .country_codes import resolve_country as _resolve, COUNTRIES
 
 # Display names from country_codes.py
 COUNTRY_NAMES: dict[str, str] = {

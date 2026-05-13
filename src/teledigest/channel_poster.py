@@ -403,6 +403,7 @@ async def channel_poster_loop():
     picks one story, posts it, updates Firestore, sleeps until next slot.
     """
     from zoneinfo import ZoneInfo
+
     from .telegram_client import get_bot_client
 
     cfg = get_config()

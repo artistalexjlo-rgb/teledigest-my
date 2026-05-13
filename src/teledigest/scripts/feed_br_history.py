@@ -42,15 +42,9 @@ import sys
 from pathlib import Path
 
 from teledigest.config import init_config, log
-from teledigest.daily_samples import (
-    SampleTarget,
-    _channel_slug,
-    _fetch_messages,
-    _format_line,
-    get_sample_targets,
-    get_samples_dir,
-)
-
+from teledigest.daily_samples import (SampleTarget, _channel_slug,
+                                      _fetch_messages, _format_line,
+                                      get_sample_targets, get_samples_dir)
 
 # 80K chars ≈ 25-30K tokens, safely under 3.1-flash-lite-preview's 250K TPM
 # and well within any per-request size limit. Headroom for retries.

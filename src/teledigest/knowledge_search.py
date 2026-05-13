@@ -18,7 +18,6 @@ from openai import OpenAI
 from .config import get_config, log
 from .knowledge_db import search_knowledge
 
-
 _BRAIN_SYSTEM = """
 Ты — бот «МОЗГ» в чате экспатов. Отвечаешь на вопросы по базе знаний сообщества.
 

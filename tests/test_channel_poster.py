@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from teledigest import config as cfg
 from teledigest import channel_poster as cp
+from teledigest import config as cfg
 
 
 def _make_app_config(

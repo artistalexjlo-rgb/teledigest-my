@@ -11,16 +11,14 @@ some noise (bot messages, other countries). Run dump_all_targets. Assert:
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-import sqlite3
-
 from teledigest import config as cfg
-from teledigest import db
 from teledigest import daily_samples as ds
-from teledigest import sources_db
+from teledigest import db, sources_db
 
 
 def _make_app_config(db_path: Path) -> cfg.AppConfig:
