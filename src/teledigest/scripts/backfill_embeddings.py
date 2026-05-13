@@ -89,8 +89,10 @@ def _backfill_collection(
                     "backfill_embeddings: no embedding for doc %s — skip", doc_id
                 )
                 continue
+            from google.cloud.firestore_v1.vector import Vector
+
             ref = db.collection(collection_name).document(doc_id)
-            batch.update(ref, {"embedding": emb})
+            batch.update(ref, {"embedding": Vector(emb)})
             written += 1
 
         try:

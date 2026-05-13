@@ -567,7 +567,9 @@ def write_patterns(
             "importedAt": now,
         }
         if emb is not None:
-            payload["embedding"] = emb
+            from google.cloud.firestore_v1.vector import Vector
+
+            payload["embedding"] = Vector(emb)
         coll.document(doc_id).set(payload)
         written += 1
 
