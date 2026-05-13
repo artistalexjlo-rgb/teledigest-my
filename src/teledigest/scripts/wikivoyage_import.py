@@ -159,12 +159,21 @@ LISTING_TAG_MAP: dict[str, str] = {
 # --- Wiki API ---------------------------------------------------------------
 
 def _api(session: requests.Session, **params) -> dict:
-    """One MediaWiki API call. JSON format, polite pause after."""
+    """One MediaWiki API call. JSON format, polite pause after.
+    Retries on 429 with exponential backoff (30s, 60s, 120s)."""
     params.setdefault("format", "json")
     params.setdefault("formatversion", "2")
-    resp = session.get(WIKI_API, params=params, timeout=30)
-    resp.raise_for_status()
-    time.sleep(REQUEST_PAUSE_S)
+    for attempt in range(4):
+        resp = session.get(WIKI_API, params=params, timeout=30)
+        if resp.status_code == 429:
+            wait = 30 * (2 ** attempt)
+            log.warning("WikiVoyage 429 rate limit — waiting %ds (attempt %d/4)", wait, attempt + 1)
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        time.sleep(REQUEST_PAUSE_S)
+        return resp.json()
+    resp.raise_for_status()  # raise after exhausting retries
     return resp.json()
 
 

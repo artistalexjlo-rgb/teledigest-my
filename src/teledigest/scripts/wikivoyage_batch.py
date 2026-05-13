@@ -275,7 +275,10 @@ def main() -> int:
     session = requests.Session()
     session.headers["User-Agent"] = "teledigest-wikivoyage-bot/1.0 (teledigest project)"
 
-    for cc in batch:
+    for i, cc in enumerate(batch):
+        if i > 0:
+            log.info("Pausing 60s between countries to respect WikiVoyage rate limits...")
+            time.sleep(60)
         try:
             # Check Firestore first — skip if already has data (imported manually)
             existing = count_in_firestore(db, cc)
