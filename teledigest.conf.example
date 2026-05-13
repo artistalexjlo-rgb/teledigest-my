@@ -71,3 +71,11 @@ br = "@Digest_Br"
 # [gemini]
 # live_model = "gemini-3.1-flash-live-preview"  # для МОЗГ-ответов через Live API
 # model = "gemini-3.1-flash-lite-preview"       # sync fallback модель
+
+[google]
+# Service account key file (JSON). Download from GCP → IAM & Admin → Service Accounts.
+# The Drive folder must be shared with the SA email (Editor).
+service_account_path = "/home/teledigest/data/service-account.json"
+drive_folder_id = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf"
+firestore_project_id = "project-56cb62a9-8914-4ae3-b44"
+firestore_database = "default"

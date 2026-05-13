@@ -1,26 +1,16 @@
 """
 drive_uploader.py — Push local files to a Google Drive folder.
 
-Auth: OAuth 2.0 user credentials (Desktop App flow). The bot is NOT able to
-create service account keys — they are blocked by an org policy on this GCP
-account. Instead, the user authorizes once locally with `scripts/drive_oauth_init.py`,
-which produces `google-token.json` containing a refresh token. Both
-`google-credentials.json` (the OAuth client config) and `google-token.json`
-are then placed alongside the SQLite DB on the VPS, where the bot reads them.
+Auth: Service Account (JSON key file). No OAuth dance, no token expiry.
+Key file path: [google] service_account_path in teledigest.conf.
+Default:       /home/teledigest/data/service-account.json
+
+The Drive folder must be shared with the service account email (Editor role).
 
 Idempotency: when uploading a file whose name already exists in the target
 folder, the existing file's content is replaced (revision update). This makes
 re-runs safe — the same daily sample file overwrites itself instead of
 accumulating duplicates.
-
-Scopes:
-- `drive.file` — for create/upload/update of bot-owned files.
-- `drive`     — for files.list() with `q=` query in a folder that wasn't
-                created by this OAuth flow (the target folder is created
-                manually by the user in Drive). `drive.file` alone returns
-                403 insufficientPermissions on the listing call.
-We deliberately list both so credentials.refresh() can carry whatever
-the user actually granted at OAuth time without dropping scopes.
 """
 
 from __future__ import annotations
@@ -30,64 +20,22 @@ from typing import Any, Iterable
 
 from .config import get_config, log
 
-# OAuth scopes. Token must be minted with both via scripts/drive_oauth_init.py.
 DRIVE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/drive.file",
 )
 
 
-# ---------------------------------------------------------------------------
-# Lazy auth: import google libs only when actually needed
-# ---------------------------------------------------------------------------
-
-def _load_credentials(token_path: Path):
-    """Load and refresh OAuth credentials from disk."""
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-    from google.auth.exceptions import RefreshError
-
-    if not token_path.exists():
-        raise FileNotFoundError(
-            f"OAuth token not found at {token_path}. Run scripts/drive_oauth_init.py "
-            "locally and copy the resulting google-token.json to this path."
-        )
-
-    creds = Credentials.from_authorized_user_file(str(token_path), list(DRIVE_SCOPES))
-
-    if creds.valid:
-        return creds
-
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except RefreshError as e:
-            raise RuntimeError(
-                f"Failed to refresh OAuth token at {token_path}: {e}. "
-                "The refresh token may have been revoked. Re-run drive_oauth_init.py."
-            ) from e
-        # Persist refreshed token for next run
-        token_path.write_text(creds.to_json(), encoding="utf-8")
-        return creds
-
-    raise RuntimeError(
-        f"OAuth credentials at {token_path} are invalid and cannot be refreshed."
-    )
-
-
 def get_drive_service():
-    """Build an authenticated Drive v3 service.
-
-    Reads paths and folder id from config (`[google]` section). Returns the
-    service object that exposes `files()` API; raises if not configured.
-    """
+    """Build an authenticated Drive v3 service using service account."""
     from googleapiclient.discovery import build
+    from .google_auth import load_service_account_credentials
 
     cfg = get_config()
     if not cfg.google.enabled:
         raise RuntimeError("Drive upload is disabled (no [google] config).")
 
-    creds = _load_credentials(cfg.google.token_path)
+    creds = load_service_account_credentials(list(DRIVE_SCOPES))
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
