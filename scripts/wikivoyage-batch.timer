@@ -1,0 +1,12 @@
+[Unit]
+Description=Teledigest — daily timer for WikiVoyage batch import
+Requires=wikivoyage-batch.service
+
+[Timer]
+# 12:00 UTC — midday, away from digest (23:30 local) and BR feed (03:17 UTC)
+OnCalendar=*-*-* 12:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

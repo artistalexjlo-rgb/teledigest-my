@@ -70,11 +70,43 @@ REQUEST_PAUSE_S = 0.2
 # names verbatim as category roots (Category:Thailand, Category:Brazil).
 # This map is the only iso2 → wiki-name source we need.
 COUNTRY_WIKI_NAME = {
+    # Tier 0 — active user chats (import first)
     "ar": "Argentina", "at": "Austria", "be": "Belgium", "bg": "Bulgaria",
     "br": "Brazil", "de": "Germany", "fr": "France", "id": "Indonesia",
     "lk": "Sri Lanka", "mu": "Mauritius", "ph": "Philippines",
     "th": "Thailand", "tr": "Turkey", "vn": "Vietnam",
-    # Add more as needed. Easy to extend without touching code.
+    # Tier 1 — popular expat/digital-nomad destinations
+    "ae": "United Arab Emirates", "am": "Armenia", "az": "Azerbaijan",
+    "ba": "Bosnia and Herzegovina", "by": "Belarus", "ca": "Canada",
+    "cl": "Chile", "cn": "China", "co": "Colombia", "cr": "Costa Rica",
+    "cy": "Cyprus", "cz": "Czech Republic", "dk": "Denmark", "ec": "Ecuador",
+    "ee": "Estonia", "eg": "Egypt", "es": "Spain", "fi": "Finland",
+    "gb": "United Kingdom", "ge": "Georgia", "gr": "Greece", "hr": "Croatia",
+    "hu": "Hungary", "ie": "Ireland", "il": "Israel", "in": "India",
+    "it": "Italy", "jo": "Jordan", "jp": "Japan", "ke": "Kenya",
+    "kg": "Kyrgyzstan", "kh": "Cambodia", "kr": "South Korea",
+    "kz": "Kazakhstan", "la": "Laos", "lb": "Lebanon", "lt": "Lithuania",
+    "lv": "Latvia", "ma": "Morocco", "md": "Moldova", "me": "Montenegro",
+    "mk": "North Macedonia", "mm": "Myanmar", "mn": "Mongolia",
+    "mx": "Mexico", "my": "Malaysia", "nl": "Netherlands", "no": "Norway",
+    "np": "Nepal", "nz": "New Zealand", "pe": "Peru", "pk": "Pakistan",
+    "pl": "Poland", "pt": "Portugal", "py": "Paraguay", "ro": "Romania",
+    "rs": "Serbia", "ru": "Russia", "sa": "Saudi Arabia", "se": "Sweden",
+    "sg": "Singapore", "si": "Slovenia", "sk": "Slovakia", "tn": "Tunisia",
+    "tw": "Taiwan", "ua": "Ukraine", "us": "United States of America",
+    "uy": "Uruguay", "uz": "Uzbekistan", "za": "South Africa",
+    # Tier 2 — extended coverage
+    "bd": "Bangladesh", "bo": "Bolivia", "cd": "Democratic Republic of Congo",
+    "ci": "Ivory Coast", "cm": "Cameroon", "cu": "Cuba", "do": "Dominican Republic",
+    "dz": "Algeria", "et": "Ethiopia", "gh": "Ghana", "gt": "Guatemala",
+    "hn": "Honduras", "ht": "Haiti", "li": "Liechtenstein", "lu": "Luxembourg",
+    "ly": "Libya", "mg": "Madagascar", "mk": "North Macedonia",
+    "ml": "Mali", "mm": "Myanmar", "mw": "Malawi", "mz": "Mozambique",
+    "na": "Namibia", "ng": "Nigeria", "ni": "Nicaragua", "om": "Oman",
+    "pa": "Panama", "qa": "Qatar", "rw": "Rwanda", "sd": "Sudan",
+    "sn": "Senegal", "sv": "El Salvador", "sy": "Syria",
+    "tz": "Tanzania", "ug": "Uganda", "ve": "Venezuela",
+    "xk": "Kosovo", "ye": "Yemen", "zm": "Zambia", "zw": "Zimbabwe",
 }
 
 # Wiki section heading -> our chat-мух tag vocabulary. Keeps wisdom_base
