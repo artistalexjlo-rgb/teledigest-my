@@ -12,6 +12,7 @@ from enum import Enum, auto
 from telethon import TelegramClient, events, functions, types
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
 
 from .config import AppConfig, get_config, log
 from .db import (
@@ -1162,13 +1163,16 @@ async def subscribe_channel(url: str, country: str | None = None) -> str | None:
     try:
         is_invite = url.startswith("https://t.me/+") or url.startswith("http://t.me/+")
         if is_invite:
-            # For invite links: join first, then get_entity — otherwise Telegram
-            # raises "not part of channel" before we even have the entity.
+            # Invite links require ImportChatInviteRequest (not JoinChannelRequest).
+            # Join first, then get_entity — otherwise Telegram raises
+            # "not part of channel" before we even have the entity.
+            invite_hash = url.rsplit("+", 1)[-1].rstrip("/")
             try:
-                await grabber(JoinChannelRequest(url))
+                await grabber(ImportChatInviteRequest(invite_hash))
                 log.info("Account%d joined via invite: %s", acct, url)
             except Exception as e:
-                log.warning("Join attempt for %s: %s (may already be member)", url, e)
+                # UserAlreadyParticipantError means we are already in — that's fine.
+                log.warning("Invite join for %s: %s (may already be member)", url, e)
 
         ent = await grabber.get_entity(url)
         peer_id = await grabber.get_peer_id(ent)
