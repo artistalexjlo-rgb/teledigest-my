@@ -9,20 +9,17 @@
 ### 1. Залей unit-файлы
 
 ```bash
-cp /home/teledigest/repo/scripts/wikivoyage-batch.service /etc/systemd/system/
-cp /home/teledigest/repo/scripts/wikivoyage-batch.timer   /etc/systemd/system/
+curl -o /etc/systemd/system/wikivoyage-batch.service https://raw.githubusercontent.com/artistalexjlo-rgb/teledigest-my/main/scripts/wikivoyage-batch.service
+curl -o /etc/systemd/system/wikivoyage-batch.timer https://raw.githubusercontent.com/artistalexjlo-rgb/teledigest-my/main/scripts/wikivoyage-batch.timer
 systemctl daemon-reload
 systemctl enable --now wikivoyage-batch.timer
-```
-
-Проверь что встал:
-```bash
 systemctl list-timers wikivoyage-batch.timer
 ```
 
 ### 2. Посмотри статус
 
 ```bash
+CID=$(docker ps --format '{{.ID}} {{.Names}}' | grep bots-grab | awk '{print $1}' | head -1)
 docker exec "$CID" python -m teledigest.scripts.wikivoyage_batch --status
 ```
 
