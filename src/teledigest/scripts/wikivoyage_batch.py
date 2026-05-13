@@ -195,6 +195,32 @@ log = logging.getLogger("teledigest")
 
 
 # ---------------------------------------------------------------------------
+# Telegram notifications
+# ---------------------------------------------------------------------------
+
+
+def _tg_notify(text: str) -> None:
+    """Send a message via Bot API to summary_target. Best-effort, never raises."""
+    try:
+        import requests as _req
+
+        from teledigest.config import get_config
+
+        cfg = get_config()
+        token = cfg.telegram.bot_token
+        target = cfg.bot.summary_target
+        if not token or not target:
+            return
+        _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": target, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning("tg_notify failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # State file helpers
 # ---------------------------------------------------------------------------
 
@@ -222,6 +248,9 @@ def mark_done(state: dict, country: str, patterns: int, state_path: Path) -> Non
         "finished_at": datetime.now(timezone.utc).isoformat(),
     }
     save_state(state, state_path)
+    _tg_notify(
+        f"✅ WikiVoyage <b>{country.upper()}</b> — импорт завершён ({patterns} паттернов)"
+    )
 
 
 def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None:
@@ -231,6 +260,9 @@ def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None
         "failed_at": datetime.now(timezone.utc).isoformat(),
     }
     save_state(state, state_path)
+    _tg_notify(
+        f"❌ WikiVoyage <b>{country.upper()}</b> — ошибка импорта:\n<code>{error[:200]}</code>"
+    )
 
 
 # ---------------------------------------------------------------------------
