@@ -10,8 +10,8 @@ backfill_embeddings.py — Вычисляет и записывает эмбед
 
 Автоматически вызывается из wikivoyage_batch.py после импорта страны.
 
-Quota: text-embedding-004 free tier = 1500 RPM, batch=100 → 15 rps.
-При 10K документов = ~100 батчей = <7 секунд (если quota позволяет).
+Quota: gemini-embedding-001 free tier = 100 RPM (per document).
+Батч 50 + пауза 35с = ~85 doc/min, чуть ниже лимита.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ import time
 from ..config import get_config, log
 from ..gemini_brain import _build_firestore_client, compute_embeddings_batch
 
-_BATCH_SIZE = 100
-_INTER_BATCH_SLEEP = 0.5  # sec — stay well under 1500 RPM
+_BATCH_SIZE = 50
+_INTER_BATCH_SLEEP = 35  # sec — two models × 50 docs = 100/min total, within free tier
 
 
 def _backfill_collection(
@@ -77,7 +77,8 @@ def _backfill_collection(
         ids = [row[0] for row in batch_slice]
         texts = [row[1] for row in batch_slice]
 
-        embeddings = compute_embeddings_batch(texts)
+        batch_num = i // _BATCH_SIZE
+        embeddings = compute_embeddings_batch(texts, model_idx=batch_num)
 
         # Firestore batch write
         batch = db.batch()
