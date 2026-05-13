@@ -41,7 +41,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from teledigest.config import init_config, log
+from teledigest.config import get_config, init_config, log
 from teledigest.daily_samples import (
     SampleTarget,
     _channel_slug,
@@ -50,6 +50,25 @@ from teledigest.daily_samples import (
     get_sample_targets,
     get_samples_dir,
 )
+
+def _tg_notify(text: str) -> None:
+    """Best-effort Telegram notification to summary_target."""
+    try:
+        import requests as _req
+
+        cfg = get_config()
+        token = cfg.telegram.bot_token
+        target = cfg.bot.summary_target
+        if not token or not target:
+            return
+        _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": target, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning("tg_notify failed: %s", e)
+
 
 # 80K chars ≈ 25-30K tokens, safely under 3.1-flash-lite-preview's 250K TPM
 # and well within any per-request size limit. Headroom for retries.
@@ -182,6 +201,7 @@ def main() -> int:
 
     if not pending:
         log.info("Country=%s: no pending pairs — archive fully fed.", args.country)
+        _tg_notify(f"✅ BR backfill: архив полностью обработан, новых пар нет.")
         return 0
 
     take = pending[: args.batch]
@@ -224,6 +244,16 @@ def main() -> int:
         eta_runs,
         args.batch,
     )
+    if dumped_files == 0 and len(take) > 0:
+        _tg_notify(
+            f"⚠️ BR backfill: запустился, но 0 файлов записано из {len(take)} пар — проверь логи."
+        )
+    else:
+        eta_str = f"~{eta_runs} дн." if eta_runs else "финиш!"
+        _tg_notify(
+            f"📦 BR backfill: <b>{dumped_files} файлов</b> из {len(take)} пар.\n"
+            f"Осталось: {remaining} пар ({eta_str})"
+        )
     return 0
 
 
