@@ -1364,11 +1364,14 @@ async def start_clients(auth_only: bool = False) -> None:
 
     # Non-interactive startup
     await user_client.connect()
+    global user2_auth_state
     if user2_client is not None:
         await user2_client.connect()
         if await user2_client.is_user_authorized():
+            user2_auth_state = UserAuthState.OK
             log.info("user2_client authorized.")
         else:
+            user2_auth_state = UserAuthState.REQUIRED
             log.warning(
                 "user2_client not authorized — account 2 sources will be skipped."
             )
