@@ -72,7 +72,7 @@ def _build_firestore_client():
 # Embeddings
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_MODELS = ["gemini-embedding-001", "gemini-embedding-2"]
+_EMBEDDING_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
 _EMBEDDING_DIM = 768
 
 
@@ -87,28 +87,41 @@ def _get_embedding_api_key() -> str:
 
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
-    """Compute embedding vector for a single text. Returns None on error."""
-    try:
-        from google import genai
+    """Compute embedding vector for a single text. On 429 falls back to the
+    sibling embedding model so a single retrieval doesn't fail just because
+    one model's daily quota is exhausted."""
+    from google import genai
 
-        api_key = _get_embedding_api_key()
-        if not api_key:
-            log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
-            return None
-        model = _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)]
-        client = genai.Client(api_key=api_key)
-        result = client.models.embed_content(
-            model=model,
-            contents=text,
-            config={"output_dimensionality": _EMBEDDING_DIM},
-        )
-        embeddings = result.embeddings
-        if not embeddings:
-            return None
-        return list(embeddings[0].values or [])
-    except Exception as e:
-        log.warning("МОЗГ: embed_content failed: %s", e)
+    api_key = _get_embedding_api_key()
+    if not api_key:
+        log.warning("МОЗГ embeddings: no GEMINI_API_KEY")
         return None
+    client = genai.Client(api_key=api_key)
+
+    models_to_try = [
+        _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)],
+        _EMBEDDING_MODELS[(model_idx + 1) % len(_EMBEDDING_MODELS)],
+    ]
+    for model in models_to_try:
+        try:
+            result = client.models.embed_content(
+                model=model,
+                contents=text,
+                config={"output_dimensionality": _EMBEDDING_DIM},
+            )
+            embeddings = result.embeddings
+            if not embeddings:
+                return None
+            return list(embeddings[0].values or [])
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                log.warning("МОЗГ: %s quota exhausted — trying next", model)
+                continue
+            log.warning("МОЗГ: embed_content failed: %s", e)
+            return None
+    log.warning("МОЗГ: all embedding models exhausted")
+    return None
 
 
 def compute_embeddings_batch(
