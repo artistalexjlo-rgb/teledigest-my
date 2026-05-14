@@ -27,7 +27,6 @@ import re
 import sys
 from pathlib import Path
 
-
 # Country ISO → English name. Only the ones we actually have in the base.
 # Add more as countries get imported; missing codes fall back to uppercase ISO.
 _COUNTRY_NAMES: dict[str, str] = {
