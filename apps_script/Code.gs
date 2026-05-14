@@ -40,22 +40,33 @@ var MODELS = [
 var _modelCallTimes = {};  // model name → [ts1, ts2, ...] within last 60s
 
 function pickModelWithCapacity_() {
+  // Pick the model with the LOWEST current load (ratio of calls/RPM).
+  // This spreads work across all 3 models evenly instead of saturating
+  // the first model in the list before touching the others.
   var now = Date.now();
+  var best = null;
+  var bestLoad = Infinity;
   var soonestFreeAt = Infinity;
   for (var i = 0; i < MODELS.length; i++) {
     var m = MODELS[i];
-    var ts = _modelCallTimes[m.name] || [];
-    // Drop timestamps older than 60s.
-    ts = ts.filter(function(t) { return now - t < 60000; });
+    var ts = (_modelCallTimes[m.name] || []).filter(function(t) {
+      return now - t < 60000;
+    });
     _modelCallTimes[m.name] = ts;
     if (ts.length < m.rpm) {
-      ts.push(now);
-      return m.name;
+      var load = ts.length / m.rpm;
+      if (load < bestLoad) {
+        bestLoad = load;
+        best = m;
+      }
+    } else {
+      soonestFreeAt = Math.min(soonestFreeAt, ts[0] + 60000);
     }
-    // Earliest ts in this bucket expires at ts[0] + 60s.
-    soonestFreeAt = Math.min(soonestFreeAt, ts[0] + 60000);
   }
-  // All models at RPM cap → wait for the soonest slot to free up.
+  if (best) {
+    _modelCallTimes[best.name].push(now);
+    return best.name;
+  }
   var waitMs = Math.max(0, soonestFreeAt - now) + 100;
   console.log("All models at RPM cap, sleeping " + waitMs + "ms");
   Utilities.sleep(waitMs);
