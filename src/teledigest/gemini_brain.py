@@ -72,7 +72,7 @@ def _build_firestore_client():
 # Embeddings
 # ---------------------------------------------------------------------------
 
-_EMBEDDING_MODELS = ["gemini-embedding-001", "gemini-embedding-2"]
+_EMBEDDING_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
 _EMBEDDING_DIM = 768
 
 
