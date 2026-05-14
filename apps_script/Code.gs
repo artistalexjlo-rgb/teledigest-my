@@ -32,7 +32,8 @@ var DEFAULT_FOLDER_ID = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf";
 // Each runMining_ call picks the next model via _modelCallCounter.
 var MODELS = [
   "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite"
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash"
 ];
 var _modelCallCounter = 0;
 var COLLECTION_AI = "wisdom_base";
