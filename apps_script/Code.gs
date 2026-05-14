@@ -32,14 +32,9 @@ var DEFAULT_FOLDER_ID = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf";
 // Each runMining_ call picks the next model via _modelCallCounter.
 var MODELS = [
   "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite-preview"
+  "gemini-2.5-flash-lite"
 ];
 var _modelCallCounter = 0;
-function pickModel_() {
-  var m = MODELS[_modelCallCounter % MODELS.length];
-  _modelCallCounter++;
-  return m;
-}
 var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 var FORCE_REPROCESS = false;
@@ -169,10 +164,8 @@ function runMining_(file, cfg) {
   try {
     var content = file.getBlob().getDataAsString();
     var sourceDateISO = parseFileNameDate_(file.getName());
-    var model = pickModel_();
-    console.log("Mining " + file.getName() + " with " + model);
-    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
-              ":generateContent?key=" + cfg.apiKey;
+    var modelIdx = _modelCallCounter % MODELS.length;
+    _modelCallCounter++;
 
     var systemPrompt =
       "Ты — главный архитектор данных MultySpeak. Фильтрация и маршрутизация опыта из чатов.\n" +
@@ -218,7 +211,7 @@ function runMining_(file, cfg) {
       "generationConfig": { "responseMimeType": "application/json" }
     };
 
-    var response = fetchGeminiWithRetry_(url, payload, file.getName());
+    var response = fetchGeminiWithRetry_(payload, file.getName(), cfg, modelIdx);
     if (!response) return false;
 
     var result = JSON.parse(response.getContentText());
@@ -397,9 +390,18 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
  * free tier — backoff lets capacity recover. Other HTTP errors (4xx, 5xx)
  * are not retried, just logged.
  */
-function fetchGeminiWithRetry_(url, payload, fileName) {
+function fetchGeminiWithRetry_(payload, fileName, cfg, startModelIdx) {
+  // 429 (rate limit) → switch model immediately, don't wait.
+  // 503/500 → backoff, same model (server-side overload, model change won't help).
   var maxAttempts = GEMINI_RETRY_DELAYS_MS.length + 1;
+  var modelIdx = startModelIdx;
+  var triedModels = {};
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    var model = MODELS[modelIdx % MODELS.length];
+    triedModels[model] = true;
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
+              ":generateContent?key=" + cfg.apiKey;
+    console.log(fileName + " → " + model + " (attempt " + attempt + ")");
     var response = UrlFetchApp.fetch(url, {
       "method": "post",
       "contentType": "application/json",
@@ -407,21 +409,35 @@ function fetchGeminiWithRetry_(url, payload, fileName) {
       "muteHttpExceptions": true
     });
     var code = response.getResponseCode();
-
     if (code === 200) return response;
 
     var body = response.getContentText().slice(0, 500);
+
     var transient = (code === 503 || code === 429 || code === 500);
-    if (transient && attempt < maxAttempts) {
-      var waitMs = GEMINI_RETRY_DELAYS_MS[attempt - 1];
-      console.warn(fileName + ": Gemini HTTP " + code +
-                   ", retrying in " + (waitMs / 1000) + "s " +
-                   "(attempt " + attempt + "/" + maxAttempts + "). " + body);
-      Utilities.sleep(waitMs);
+
+    // Any transient error → try the other model FIRST before sleeping.
+    // 429 = our RPM bucket, 503 = Google's capacity for this model — both
+    // are likely solved by switching to the sibling model with its own
+    // bucket and capacity pool.
+    if (transient && Object.keys(triedModels).length < MODELS.length) {
+      modelIdx = (modelIdx + 1) % MODELS.length;
+      console.warn(fileName + ": HTTP " + code + " on " + model +
+                   " — switching to sibling model. " + body);
       continue;
     }
 
-    console.error(fileName + ": Gemini HTTP " + code +
+    // Both models tried and still failing — back off and retry.
+    if (transient && attempt < maxAttempts) {
+      var waitMs = GEMINI_RETRY_DELAYS_MS[attempt - 1];
+      console.warn(fileName + ": HTTP " + code + ", both models busy, " +
+                   "backing off " + (waitMs / 1000) + "s. " + body);
+      Utilities.sleep(waitMs);
+      // Reset triedModels so after the sleep we try fresh.
+      triedModels = {};
+      continue;
+    }
+
+    console.error(fileName + ": Gemini HTTP " + code + " on " + model +
                   " (attempt " + attempt + "/" + maxAttempts + "): " + body);
     return null;
   }
