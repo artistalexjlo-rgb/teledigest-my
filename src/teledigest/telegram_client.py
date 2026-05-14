@@ -214,6 +214,15 @@ async def channel_message_handler(event):
         country=country,
     )
 
+    # Radar: ping admin if this looks like a translator question.
+    try:
+        from .question_radar import is_translator_question, notify_translator_question
+
+        if is_translator_question(text):
+            notify_translator_question(chat_id, chat_name, msg.id, text, country)
+    except Exception as e:
+        log.warning("question_radar failed: %s", e)
+
 
 async def is_user_allowed(event) -> bool:
     cfg = get_config()
