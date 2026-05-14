@@ -72,8 +72,43 @@ function pickModelWithCapacity_() {
   Utilities.sleep(waitMs);
   return pickModelWithCapacity_();
 }
-var COLLECTION_AI = "wisdom_base";
+// Wisdom is written to v2 (cipher-fix). Old wisdom_base is no longer written
+// to from Apps Script — bot still reads it during migration, then will switch.
+var COLLECTION_AI = "wisdom_v2";
 var COLLECTION_TG = "telegram_queue";
+
+// v2 embedder config (must match Python side in gemini_brain.py).
+var EMBEDDING_MODEL_V2 = "gemini-embedding-2";
+var EMBEDDING_DIM_V2 = 1536;
+var EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-1536";
+
+// ISO → full English country name. Falls back to uppercase ISO if missing.
+// Mirrors the table in scripts/pilot_cipher_v2.py.
+var COUNTRY_NAMES = {
+  "th": "Thailand", "br": "Brazil", "ar": "Argentina", "id": "Indonesia",
+  "lk": "Sri Lanka", "tr": "Turkey", "vn": "Vietnam", "fr": "France",
+  "ph": "Philippines", "bg": "Bulgaria"
+};
+
+function countryFullName_(code) {
+  var c = (code || "").toLowerCase();
+  return COUNTRY_NAMES[c] || (c ? c.toUpperCase() : "");
+}
+
+/**
+ * The unified text we embed. Format: "Country. Title. Tag. Instruction".
+ * Country first — wiki instructions mostly mention cities, not country name,
+ * so we prepend it for a strong country signal in the vector.
+ */
+function buildEmbedText_(country, title, tag, instruction) {
+  var parts = [];
+  var c = countryFullName_(country);
+  if (c) parts.push(c);
+  if (title) parts.push(String(title).trim());
+  if (tag) parts.push(String(tag).trim());
+  if (instruction) parts.push(String(instruction).trim());
+  return parts.join(". ");
+}
 var FORCE_REPROCESS = false;
 
 // --- Runtime tuning ---
@@ -116,10 +151,12 @@ function getConfig_() {
 function computeEmbedding_(text, cfg) {
   if (!text || !text.trim()) return null;
   var url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-            "gemini-embedding-001:embedContent?key=" + encodeURIComponent(cfg.apiKey);
+            EMBEDDING_MODEL_V2 + ":embedContent?key=" +
+            encodeURIComponent(cfg.apiKey);
   var payload = {
     "content": { "parts": [{ "text": String(text) }] },
-    "outputDimensionality": 768
+    "outputDimensionality": EMBEDDING_DIM_V2,
+    "taskType": "RETRIEVAL_DOCUMENT"
   };
   try {
     var resp = UrlFetchApp.fetch(url, {
@@ -373,15 +410,19 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
   } else {
     var instruction = item.ai_lesson || "";
     fields["instruction"] = { "stringValue": instruction };
-    // Compute embedding for wisdom — without this МОЗГ's find_nearest can't
-    // retrieve the entry. Backfill exists as a safety net, but doing it inline
-    // means new wisdom is searchable immediately.
-    var emb = computeEmbedding_(instruction, cfg);
+
+    // v2 cipher-fix: embed unified text (country + title + tag + instruction)
+    // so the vector carries country and topic signal, not just raw fact text.
+    var embedText = buildEmbedText_(item.country, item.title, item.tag, instruction);
+    fields["embedded_text"] = { "stringValue": embedText };
+    fields["embedding_model"] = { "stringValue": EMBEDDING_MODEL_TAG_V2 };
+    fields["text_length"] = { "integerValue": instruction.length };
+    fields["needs_chunking"] = { "booleanValue": instruction.length > 500 };
+
+    var emb = computeEmbedding_(embedText, cfg);
     if (emb && emb.length) {
       // Firestore Vector type — required for find_nearest. Plain arrayValue
-      // is stored but is invisible to vector search (same trap we hit with
-      // wikivoyage_base earlier). The {__type__: __vector__, value: [...]}
-      // map is the REST-API equivalent of Python's google.cloud Vector().
+      // is stored but is invisible to vector search.
       fields["embedding"] = {
         "mapValue": {
           "fields": {
