@@ -207,20 +207,32 @@ def _embed_v2(
         log.warning("v2 embed: GEMINI_API_KEY missing")
         return [None] * len(texts)
     client = genai.Client(api_key=api_key)
-    try:
-        result = client.models.embed_content(
-            model=_EMBEDDING_MODEL_V2,
-            contents=texts,  # type: ignore[arg-type]
-            config={
-                "task_type": task_type,
-                "output_dimensionality": dim,
-            },
-        )
-        embeddings = result.embeddings or []
-        return [list(e.values or []) for e in embeddings]
-    except Exception as e:
-        log.warning("v2 embed failed (task=%s, n=%d): %s", task_type, len(texts), e)
-        return [None] * len(texts)
+
+    # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
+    # is interpreted as a single multi-part document, not a batch — it returns
+    # one vector regardless of list size. So call per-text individually.
+    out: list[list[float] | None] = []
+    for text in texts:
+        try:
+            result = client.models.embed_content(
+                model=_EMBEDDING_MODEL_V2,
+                contents=text,
+                config={
+                    "task_type": task_type,
+                    "output_dimensionality": dim,
+                },
+            )
+            embeddings = result.embeddings or []
+            out.append(list(embeddings[0].values or []) if embeddings else None)
+        except Exception as e:
+            log.warning(
+                "v2 embed failed (task=%s, text_len=%d): %s",
+                task_type,
+                len(text),
+                e,
+            )
+            out.append(None)
+    return out
 
 
 def compute_query_embedding_v2(

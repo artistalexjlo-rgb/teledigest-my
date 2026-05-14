@@ -25,11 +25,14 @@ from teledigest.gemini_brain import (
 
 
 def _fake_client_returning(vectors: list[list[float]]):
-    """Build a fake genai.Client whose embed_content returns given vectors."""
-    fake_embeddings = [MagicMock(values=v) for v in vectors]
-    fake_result = MagicMock(embeddings=fake_embeddings)
+    """Build a fake genai.Client whose embed_content returns vectors one-by-one.
+
+    Each call returns a result with `embeddings=[<next-vector>]` so the v2
+    code (which calls per-text) gets one vector per call.
+    """
     fake_models = MagicMock()
-    fake_models.embed_content = MagicMock(return_value=fake_result)
+    fake_results = [MagicMock(embeddings=[MagicMock(values=v)]) for v in vectors]
+    fake_models.embed_content = MagicMock(side_effect=fake_results)
     fake_client = MagicMock()
     fake_client.models = fake_models
     return fake_client
@@ -98,6 +101,7 @@ def test_no_api_key_returns_nones_for_documents():
 
 
 def test_api_failure_returns_nones():
+    """If every per-text call raises, every slot in the result is None."""
     fake_models = MagicMock()
     fake_models.embed_content = MagicMock(side_effect=RuntimeError("api down"))
     fake_client = MagicMock()
@@ -110,6 +114,27 @@ def test_api_failure_returns_nones():
     ):
         result = compute_document_embeddings_v2(["a", "b"])
     assert result == [None, None]
+
+
+def test_partial_failure_other_texts_succeed():
+    """One text raising doesn't poison the rest of the batch."""
+    fake_models = MagicMock()
+    good = MagicMock(embeddings=[MagicMock(values=[0.1] * 3072)])
+    fake_models.embed_content = MagicMock(
+        side_effect=[good, RuntimeError("transient"), good]
+    )
+    fake_client = MagicMock()
+    fake_client.models = fake_models
+    with (
+        patch("google.genai.Client", return_value=fake_client),
+        patch(
+            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+        ),
+    ):
+        result = compute_document_embeddings_v2(["a", "b", "c"])
+    assert result[0] is not None
+    assert result[1] is None
+    assert result[2] is not None
 
 
 def test_custom_dim_passed_through():
