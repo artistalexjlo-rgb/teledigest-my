@@ -75,6 +75,13 @@ def _build_firestore_client():
 _EMBEDDING_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
 _EMBEDDING_DIM = 768
 
+# --- v2 (cipher-fix) ---
+# Single canonical model + native 3072 dim + task_type asymmetric.
+# See roadmap_embedding_cipher_fix.md for why these constants matter.
+_EMBEDDING_MODEL_V2 = "gemini-embedding-2"
+_EMBEDDING_DIM_V2 = 3072
+_EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-3072"
+
 
 def _get_embedding_api_key() -> str:
     """Return Gemini API key from config or env."""
@@ -166,6 +173,71 @@ def compute_embeddings_batch(
 
     log.warning("МОЗГ: all embedding models exhausted quota")
     return [None] * len(texts)
+
+
+# ---------------------------------------------------------------------------
+# Embeddings v2 — single canonical model + task_type asymmetric (cipher fix)
+# ---------------------------------------------------------------------------
+
+
+def _embed_v2(
+    texts: list[str],
+    task_type: str,
+    dim: int = _EMBEDDING_DIM_V2,
+) -> list[list[float] | None]:
+    """Compute embeddings via the canonical v2 setup.
+
+    task_type: "RETRIEVAL_QUERY" for user queries,
+               "RETRIEVAL_DOCUMENT" for indexed documents.
+    Asymmetric task_type is what makes short queries land near long structured
+    docs — without it the embedder treats both sides symmetrically and recall
+    on short-query / long-doc pairs collapses.
+    """
+    if not texts:
+        return []
+    if task_type not in ("RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT"):
+        raise ValueError(
+            f"task_type must be RETRIEVAL_QUERY or RETRIEVAL_DOCUMENT, got {task_type!r}"
+        )
+
+    from google import genai
+
+    api_key = _get_embedding_api_key()
+    if not api_key:
+        log.warning("v2 embed: GEMINI_API_KEY missing")
+        return [None] * len(texts)
+    client = genai.Client(api_key=api_key)
+    try:
+        result = client.models.embed_content(
+            model=_EMBEDDING_MODEL_V2,
+            contents=texts,  # type: ignore[arg-type]
+            config={
+                "task_type": task_type,
+                "output_dimensionality": dim,
+            },
+        )
+        embeddings = result.embeddings or []
+        return [list(e.values or []) for e in embeddings]
+    except Exception as e:
+        log.warning("v2 embed failed (task=%s, n=%d): %s", task_type, len(texts), e)
+        return [None] * len(texts)
+
+
+def compute_query_embedding_v2(
+    text: str, dim: int = _EMBEDDING_DIM_V2
+) -> list[float] | None:
+    """Embed a single user query for retrieval (task_type=RETRIEVAL_QUERY)."""
+    if not text or not text.strip():
+        return None
+    results = _embed_v2([text], "RETRIEVAL_QUERY", dim)
+    return results[0] if results else None
+
+
+def compute_document_embeddings_v2(
+    texts: list[str], dim: int = _EMBEDDING_DIM_V2
+) -> list[list[float] | None]:
+    """Embed a batch of documents for indexing (task_type=RETRIEVAL_DOCUMENT)."""
+    return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
 
 
 def _fetch_by_vector(
