@@ -79,8 +79,11 @@ _EMBEDDING_DIM = 768
 # Single canonical model + native 3072 dim + task_type asymmetric.
 # See roadmap_embedding_cipher_fix.md for why these constants matter.
 _EMBEDDING_MODEL_V2 = "gemini-embedding-2"
-_EMBEDDING_DIM_V2 = 3072
-_EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-3072"
+# Firestore vector index hard-caps at 2048 dim. embedding-2 native is 3072
+# but supports MRL truncation to 1536 (or 768) without retraining. 1536 is
+# the largest supported MRL point that fits Firestore.
+_EMBEDDING_DIM_V2 = 1536
+_EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-1536"
 
 
 def _get_embedding_api_key() -> str:
