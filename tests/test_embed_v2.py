@@ -68,8 +68,10 @@ def test_query_uses_retrieval_query_task_type():
     assert len(result) == _EMBEDDING_DIM_V2
     call_kwargs = fake.models.embed_content.call_args.kwargs
     assert call_kwargs["model"] == _EMBEDDING_MODEL_V2
-    assert call_kwargs["config"]["task_type"] == "RETRIEVAL_QUERY"
-    assert call_kwargs["config"]["output_dimensionality"] == _EMBEDDING_DIM_V2
+    # config is a typed EmbedContentConfig object, not a dict.
+    cfg = call_kwargs["config"]
+    assert cfg.task_type == "RETRIEVAL_QUERY"
+    assert cfg.output_dimensionality == _EMBEDDING_DIM_V2
 
 
 def test_document_uses_retrieval_document_task_type():
@@ -85,8 +87,8 @@ def test_document_uses_retrieval_document_task_type():
         result = compute_document_embeddings_v2(["doc one", "doc two"])
 
     assert len(result) == 2
-    call_kwargs = fake.models.embed_content.call_args.kwargs
-    assert call_kwargs["config"]["task_type"] == "RETRIEVAL_DOCUMENT"
+    cfg = fake.models.embed_content.call_args.kwargs["config"]
+    assert cfg.task_type == "RETRIEVAL_DOCUMENT"
 
 
 def test_no_api_key_returns_none_for_query():
@@ -146,7 +148,5 @@ def test_custom_dim_passed_through():
         ),
     ):
         compute_query_embedding_v2("x", dim=1536)
-    assert (
-        fake.models.embed_content.call_args.kwargs["config"]["output_dimensionality"]
-        == 1536
-    )
+    cfg = fake.models.embed_content.call_args.kwargs["config"]
+    assert cfg.output_dimensionality == 1536

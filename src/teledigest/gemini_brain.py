@@ -201,12 +201,21 @@ def _embed_v2(
         )
 
     from google import genai
+    from google.genai import types as genai_types
 
     api_key = _get_embedding_api_key()
     if not api_key:
         log.warning("v2 embed: GEMINI_API_KEY missing")
         return [None] * len(texts)
     client = genai.Client(api_key=api_key)
+
+    # Config MUST be the typed EmbedContentConfig — passing a dict silently
+    # drops `task_type` (verified on VPS: cos(same text as QUERY vs DOCUMENT)
+    # returned 1.0000, meaning task_type was ignored). Known SDK quirk.
+    cfg = genai_types.EmbedContentConfig(
+        task_type=task_type,
+        output_dimensionality=dim,
+    )
 
     # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
     # is interpreted as a single multi-part document, not a batch — it returns
@@ -217,10 +226,7 @@ def _embed_v2(
             result = client.models.embed_content(
                 model=_EMBEDDING_MODEL_V2,
                 contents=text,
-                config={
-                    "task_type": task_type,
-                    "output_dimensionality": dim,
-                },
+                config=cfg,
             )
             embeddings = result.embeddings or []
             out.append(list(embeddings[0].values or []) if embeddings else None)
