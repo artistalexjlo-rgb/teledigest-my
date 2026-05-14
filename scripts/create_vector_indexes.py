@@ -22,8 +22,13 @@ PROJECT_ID = "project-56cb62a9-8914-4ae3-b44"
 DATABASE = "default"
 
 VECTOR_INDEXES = [
+    # Legacy 768-dim indexes (kept for backward compat during migration).
     {"collection": "wisdom_base", "field": "embedding", "dimension": 768},
     {"collection": "wikivoyage_base", "field": "embedding", "dimension": 768},
+    # v2: cipher-fix collections, native gemini-embedding-2 dimensionality.
+    # See roadmap_embedding_cipher_fix.md.
+    {"collection": "wisdom_v2", "field": "embedding", "dimension": 3072},
+    {"collection": "wikivoyage_v2", "field": "embedding", "dimension": 3072},
 ]
 
 
