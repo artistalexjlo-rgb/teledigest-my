@@ -28,7 +28,50 @@
 // --- Defaults (override via Script Properties if needed) ---
 var DEFAULT_FIREBASE_PROJECT_ID = "project-56cb62a9-8914-4ae3-b44";
 var DEFAULT_FOLDER_ID = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf";
-var MODEL = "gemini-3.1-flash-lite-preview";
+// Alternated to spread load — preview tiers throw 503 under burst.
+// Each runMining_ call picks the next model via _modelCallCounter.
+// Each entry: name + free-tier RPM. Picker uses a sliding 60s window of
+// timestamps per model to find one with an available slot.
+var MODELS = [
+  { name: "gemini-3.1-flash-lite-preview", rpm: 15 },
+  { name: "gemini-2.5-flash-lite",         rpm: 10 },
+  { name: "gemini-2.5-flash",              rpm: 5  }
+];
+var _modelCallTimes = {};  // model name → [ts1, ts2, ...] within last 60s
+
+function pickModelWithCapacity_() {
+  // Pick the model with the LOWEST current load (ratio of calls/RPM).
+  // This spreads work across all 3 models evenly instead of saturating
+  // the first model in the list before touching the others.
+  var now = Date.now();
+  var best = null;
+  var bestLoad = Infinity;
+  var soonestFreeAt = Infinity;
+  for (var i = 0; i < MODELS.length; i++) {
+    var m = MODELS[i];
+    var ts = (_modelCallTimes[m.name] || []).filter(function(t) {
+      return now - t < 60000;
+    });
+    _modelCallTimes[m.name] = ts;
+    if (ts.length < m.rpm) {
+      var load = ts.length / m.rpm;
+      if (load < bestLoad) {
+        bestLoad = load;
+        best = m;
+      }
+    } else {
+      soonestFreeAt = Math.min(soonestFreeAt, ts[0] + 60000);
+    }
+  }
+  if (best) {
+    _modelCallTimes[best.name].push(now);
+    return best.name;
+  }
+  var waitMs = Math.max(0, soonestFreeAt - now) + 100;
+  console.log("All models at RPM cap, sleeping " + waitMs + "ms");
+  Utilities.sleep(waitMs);
+  return pickModelWithCapacity_();
+}
 var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 var FORCE_REPROCESS = false;
@@ -62,6 +105,46 @@ function getConfig_() {
     summaryFolderId:  props.getProperty("SUMMARY_FOLDER_ID")   || null,
     timezone:         props.getProperty("SUMMARY_TZ")          || "Europe/Moscow"
   };
+}
+
+
+/**
+ * Compute a 768-dim embedding for `text` using gemini-embedding-001.
+ * Returns array of floats, or null on failure (we still save the doc — backfill
+ * can fill missing embeddings later).
+ */
+function computeEmbedding_(text, cfg) {
+  if (!text || !text.trim()) return null;
+  var url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+            "gemini-embedding-001:embedContent?key=" + encodeURIComponent(cfg.apiKey);
+  var payload = {
+    "content": { "parts": [{ "text": String(text) }] },
+    "outputDimensionality": 768
+  };
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      "method": "post",
+      "contentType": "application/json",
+      "payload": JSON.stringify(payload),
+      "muteHttpExceptions": true
+    });
+    var code = resp.getResponseCode();
+    if (code !== 200) {
+      console.warn("embedContent HTTP " + code + ": " + resp.getContentText().slice(0, 300));
+      return null;
+    }
+    var data = JSON.parse(resp.getContentText());
+    var vals = data && data.embedding && data.embedding.values;
+    if (Array.isArray(vals) && vals.length) {
+      console.log("embedding ok: dims=" + vals.length + " text_len=" + text.length);
+      return vals;
+    }
+    console.warn("embedContent returned empty vector for text_len=" + text.length);
+    return null;
+  } catch (e) {
+    console.warn("embedContent failed: " + e);
+    return null;
+  }
 }
 
 
@@ -118,8 +201,6 @@ function runMining_(file, cfg) {
   try {
     var content = file.getBlob().getDataAsString();
     var sourceDateISO = parseFileNameDate_(file.getName());
-    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL +
-              ":generateContent?key=" + cfg.apiKey;
 
     var systemPrompt =
       "Ты — главный архитектор данных MultySpeak. Фильтрация и маршрутизация опыта из чатов.\n" +
@@ -165,7 +246,7 @@ function runMining_(file, cfg) {
       "generationConfig": { "responseMimeType": "application/json" }
     };
 
-    var response = fetchGeminiWithRetry_(url, payload, file.getName());
+    var response = fetchGeminiWithRetry_(payload, file.getName(), cfg);
     if (!response) return false;
 
     var result = JSON.parse(response.getContentText());
@@ -290,7 +371,30 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
     // Kept empty here so Apps Script doesn't need to know channel inventory.
     fields["postedTo"] = { "mapValue": { "fields": {} } };
   } else {
-    fields["instruction"] = { "stringValue": item.ai_lesson || "" };
+    var instruction = item.ai_lesson || "";
+    fields["instruction"] = { "stringValue": instruction };
+    // Compute embedding for wisdom — without this МОЗГ's find_nearest can't
+    // retrieve the entry. Backfill exists as a safety net, but doing it inline
+    // means new wisdom is searchable immediately.
+    var emb = computeEmbedding_(instruction, cfg);
+    if (emb && emb.length) {
+      // Firestore Vector type — required for find_nearest. Plain arrayValue
+      // is stored but is invisible to vector search (same trap we hit with
+      // wikivoyage_base earlier). The {__type__: __vector__, value: [...]}
+      // map is the REST-API equivalent of Python's google.cloud Vector().
+      fields["embedding"] = {
+        "mapValue": {
+          "fields": {
+            "__type__": { "stringValue": "__vector__" },
+            "value": {
+              "arrayValue": {
+                "values": emb.map(function(v) { return { "doubleValue": v }; })
+              }
+            }
+          }
+        }
+      };
+    }
   }
 
   var response = UrlFetchApp.fetch(url, {
@@ -321,9 +425,17 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
  * free tier — backoff lets capacity recover. Other HTTP errors (4xx, 5xx)
  * are not retried, just logged.
  */
-function fetchGeminiWithRetry_(url, payload, fileName) {
+function fetchGeminiWithRetry_(payload, fileName, cfg) {
+  // Pick a model with a free RPM slot (waits if all are saturated, so no
+  // pre-emptive 429s from our side). Retry on 503/500 (server overload) by
+  // picking again — picker will naturally choose a different model if this
+  // one is now hot, or wait if the bucket caught up.
   var maxAttempts = GEMINI_RETRY_DELAYS_MS.length + 1;
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    var model = pickModelWithCapacity_();
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
+              ":generateContent?key=" + cfg.apiKey;
+    console.log(fileName + " → " + model + " (attempt " + attempt + ")");
     var response = UrlFetchApp.fetch(url, {
       "method": "post",
       "contentType": "application/json",
@@ -331,21 +443,20 @@ function fetchGeminiWithRetry_(url, payload, fileName) {
       "muteHttpExceptions": true
     });
     var code = response.getResponseCode();
-
     if (code === 200) return response;
 
     var body = response.getContentText().slice(0, 500);
     var transient = (code === 503 || code === 429 || code === 500);
+
     if (transient && attempt < maxAttempts) {
       var waitMs = GEMINI_RETRY_DELAYS_MS[attempt - 1];
-      console.warn(fileName + ": Gemini HTTP " + code +
-                   ", retrying in " + (waitMs / 1000) + "s " +
-                   "(attempt " + attempt + "/" + maxAttempts + "). " + body);
+      console.warn(fileName + ": HTTP " + code + " on " + model +
+                   ", backoff " + (waitMs / 1000) + "s. " + body);
       Utilities.sleep(waitMs);
       continue;
     }
 
-    console.error(fileName + ": Gemini HTTP " + code +
+    console.error(fileName + ": Gemini HTTP " + code + " on " + model +
                   " (attempt " + attempt + "/" + maxAttempts + "): " + body);
     return null;
   }
