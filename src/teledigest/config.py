@@ -520,4 +520,7 @@ def _configure_logging(logging_cfg: LoggingConfig) -> None:
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     )
+    # Silence noisy third-party loggers that emit INFO on every HTTP call.
+    for noisy in ("httpx", "httpcore", "urllib3", "google.auth.transport"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     log.info("Logging configured at %s level", logging_cfg.level.upper())
