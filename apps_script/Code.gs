@@ -30,12 +30,37 @@ var DEFAULT_FIREBASE_PROJECT_ID = "project-56cb62a9-8914-4ae3-b44";
 var DEFAULT_FOLDER_ID = "16cEzGQy0ThTmTm_U3yoLi8uDURqHiFJf";
 // Alternated to spread load — preview tiers throw 503 under burst.
 // Each runMining_ call picks the next model via _modelCallCounter.
+// Each entry: name + free-tier RPM. Picker uses a sliding 60s window of
+// timestamps per model to find one with an available slot.
 var MODELS = [
-  "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash"
+  { name: "gemini-3.1-flash-lite-preview", rpm: 15 },
+  { name: "gemini-2.5-flash-lite",         rpm: 10 },
+  { name: "gemini-2.5-flash",              rpm: 5  }
 ];
-var _modelCallCounter = 0;
+var _modelCallTimes = {};  // model name → [ts1, ts2, ...] within last 60s
+
+function pickModelWithCapacity_() {
+  var now = Date.now();
+  var soonestFreeAt = Infinity;
+  for (var i = 0; i < MODELS.length; i++) {
+    var m = MODELS[i];
+    var ts = _modelCallTimes[m.name] || [];
+    // Drop timestamps older than 60s.
+    ts = ts.filter(function(t) { return now - t < 60000; });
+    _modelCallTimes[m.name] = ts;
+    if (ts.length < m.rpm) {
+      ts.push(now);
+      return m.name;
+    }
+    // Earliest ts in this bucket expires at ts[0] + 60s.
+    soonestFreeAt = Math.min(soonestFreeAt, ts[0] + 60000);
+  }
+  // All models at RPM cap → wait for the soonest slot to free up.
+  var waitMs = Math.max(0, soonestFreeAt - now) + 100;
+  console.log("All models at RPM cap, sleeping " + waitMs + "ms");
+  Utilities.sleep(waitMs);
+  return pickModelWithCapacity_();
+}
 var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 var FORCE_REPROCESS = false;
@@ -165,8 +190,6 @@ function runMining_(file, cfg) {
   try {
     var content = file.getBlob().getDataAsString();
     var sourceDateISO = parseFileNameDate_(file.getName());
-    var modelIdx = _modelCallCounter % MODELS.length;
-    _modelCallCounter++;
 
     var systemPrompt =
       "Ты — главный архитектор данных MultySpeak. Фильтрация и маршрутизация опыта из чатов.\n" +
@@ -212,7 +235,7 @@ function runMining_(file, cfg) {
       "generationConfig": { "responseMimeType": "application/json" }
     };
 
-    var response = fetchGeminiWithRetry_(payload, file.getName(), cfg, modelIdx);
+    var response = fetchGeminiWithRetry_(payload, file.getName(), cfg);
     if (!response) return false;
 
     var result = JSON.parse(response.getContentText());
@@ -391,15 +414,14 @@ function saveToFirestore_(item, collectionName, isPost, fileId, idx, cfg, source
  * free tier — backoff lets capacity recover. Other HTTP errors (4xx, 5xx)
  * are not retried, just logged.
  */
-function fetchGeminiWithRetry_(payload, fileName, cfg, startModelIdx) {
-  // 429 (rate limit) → switch model immediately, don't wait.
-  // 503/500 → backoff, same model (server-side overload, model change won't help).
+function fetchGeminiWithRetry_(payload, fileName, cfg) {
+  // Pick a model with a free RPM slot (waits if all are saturated, so no
+  // pre-emptive 429s from our side). Retry on 503/500 (server overload) by
+  // picking again — picker will naturally choose a different model if this
+  // one is now hot, or wait if the bucket caught up.
   var maxAttempts = GEMINI_RETRY_DELAYS_MS.length + 1;
-  var modelIdx = startModelIdx;
-  var triedModels = {};
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-    var model = MODELS[modelIdx % MODELS.length];
-    triedModels[model] = true;
+    var model = pickModelWithCapacity_();
     var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
               ":generateContent?key=" + cfg.apiKey;
     console.log(fileName + " → " + model + " (attempt " + attempt + ")");
@@ -413,28 +435,13 @@ function fetchGeminiWithRetry_(payload, fileName, cfg, startModelIdx) {
     if (code === 200) return response;
 
     var body = response.getContentText().slice(0, 500);
-
     var transient = (code === 503 || code === 429 || code === 500);
 
-    // Any transient error → try the other model FIRST before sleeping.
-    // 429 = our RPM bucket, 503 = Google's capacity for this model — both
-    // are likely solved by switching to the sibling model with its own
-    // bucket and capacity pool.
-    if (transient && Object.keys(triedModels).length < MODELS.length) {
-      modelIdx = (modelIdx + 1) % MODELS.length;
-      console.warn(fileName + ": HTTP " + code + " on " + model +
-                   " — switching to sibling model. " + body);
-      continue;
-    }
-
-    // Both models tried and still failing — back off and retry.
     if (transient && attempt < maxAttempts) {
       var waitMs = GEMINI_RETRY_DELAYS_MS[attempt - 1];
-      console.warn(fileName + ": HTTP " + code + ", both models busy, " +
-                   "backing off " + (waitMs / 1000) + "s. " + body);
+      console.warn(fileName + ": HTTP " + code + " on " + model +
+                   ", backoff " + (waitMs / 1000) + "s. " + body);
       Utilities.sleep(waitMs);
-      // Reset triedModels so after the sleep we try fresh.
-      triedModels = {};
       continue;
     }
 
