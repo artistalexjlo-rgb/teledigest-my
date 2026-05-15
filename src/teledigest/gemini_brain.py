@@ -395,17 +395,9 @@ def _embed_v2_rest_batch(
 def compute_document_embeddings_v2_batch(
     texts: list[str],
     dim: int = _EMBEDDING_DIM_V2,
-    chunk_size: int = 20,
+    chunk_size: int = 15,  # Снижаем до железно безопасных 15
 ) -> list[list[float] | None]:
-    """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
-
-    Uses the multi-key pool: each REST call goes to the next key, on per-key
-    429/4xx switches to the next key (full sweep), preserves input ordering.
-
-    chunk_size: texts per single REST call. Default 100 is a safe ratio of
-    TPM headroom (30K tokens/min ~ 300 tokens × 100 texts) to RPM (1 call/min
-    burst is well under 100 RPM cap). Tune down for very long texts.
-    """
+    """Bulk-embed documents via :batchEmbedContents REST."""
     if not texts:
         return []
 
@@ -418,30 +410,34 @@ def compute_document_embeddings_v2_batch(
 
     global _key_rr_idx
     out: list[list[float] | None] = []
+    
     for start in range(0, len(texts), chunk_size):
         chunk = texts[start : start + chunk_size]
         chunk_result: list[list[float] | None] | None = None
-        # Up to 3 full sweeps. If every key is in RPM cooldown, wait the
-        # shortest retry-after hint and sweep again. Most 429s clear in <60s.
+        
         for sweep in range(3):
             min_retry_after: float | None = None
             last_status: int | None = None
+            
             for offset in range(len(keys)):
                 idx = (_key_rr_idx + offset) % len(keys)
                 status, result, retry_after = _embed_v2_rest_batch(
                     chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
                 )
                 last_status = status
+                
+                # Гарантированно сдвигаем указатель на следующий ключ для СЛЕДУЮЩЕГО запроса,
+                # независимо от того, был ли этот запрос успешен или упал с 429.
+                _key_rr_idx = (idx + 1) % len(keys)
+                
                 if status == 200 and result is not None:
                     chunk_result = result
-                    _key_rr_idx = (idx + 1) % len(keys)
                     break
+                    
                 if status in (400, 401, 403, 429) or status == -1:
                     log.warning(
                         "v2 batch: key #%d status=%s retry_after=%s",
-                        idx,
-                        status,
-                        retry_after,
+                        idx, status, retry_after,
                     )
                     if retry_after is not None:
                         min_retry_after = (
@@ -450,29 +446,36 @@ def compute_document_embeddings_v2_batch(
                             else min(min_retry_after, retry_after)
                         )
                     continue
-                log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
                 break
+                
             if chunk_result is not None:
                 break
+                
             if min_retry_after is None:
-                # No retry hint → permanent failure (likely 400/403) → don't loop.
                 break
+                
             wait = min(min_retry_after + 1.0, 90.0)
             log.warning(
                 "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
-                sweep + 1,
-                wait,
+                sweep + 1, wait,
             )
             _time.sleep(wait)
+            
         if chunk_result is None:
             log.warning(
-                "v2 batch: chunk %d-%d failed after sweeps (last status=%s)",
-                start,
-                start + len(chunk),
-                last_status,
+                "v2 batch: chunk %d-%d failed after sweeps",
+                start, start + len(chunk),
             )
             chunk_result = [None] * len(chunk)
+            
         out.extend(chunk_result)
+        
+        # --- ВОТ ЭТОТ СЛИП СПАСЕТ ОТ 429 ---
+        # Профилактическая микро-пауза между УСПЕШНЫМИ чанками.
+        # Дает серверу Gemini перевести дух и долить токены в ведро.
+        if start + chunk_size < len(texts):
+            _time.sleep(1.5)
+
     return out
 
 
