@@ -404,6 +404,21 @@ async def handle_text_in_conversation(event) -> bool:
             )
             return True
         code, name = result
+
+        # Catch the "added same chat under a different country" typo.
+        from .sources_db import find_url_country
+
+        existing = find_url_country(url)
+        if existing and existing != code:
+            existing_name = COUNTRY_NAMES.get(existing, existing.upper())
+            conv.reset()
+            await event.reply(
+                f"⚠️ Эта ссылка уже подключена для {existing_name}.\n"
+                f"Если хочешь её под {name}, сначала удали из {existing_name} "
+                "через 📡 Источники → список → ❌."
+            )
+            return True
+
         conv.reset()
         from .telegram_client import subscribe_channel
 
