@@ -16,12 +16,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from teledigest import gemini_brain
 from teledigest.gemini_brain import (
     _EMBEDDING_DIM_V2,
     _EMBEDDING_MODEL_V2,
     compute_document_embeddings_v2,
     compute_query_embedding_v2,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_rr_idx():
+    """Round-robin pointer is module-level — reset between tests."""
+    gemini_brain._key_rr_idx = 0
+    yield
+    gemini_brain._key_rr_idx = 0
 
 
 def _fake_client_returning(vectors: list[list[float]]):
@@ -59,7 +68,7 @@ def test_query_uses_retrieval_query_task_type():
     with (
         patch("google.genai.Client", return_value=fake),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         result = compute_query_embedding_v2("rent a car")
@@ -81,7 +90,7 @@ def test_document_uses_retrieval_document_task_type():
     with (
         patch("google.genai.Client", return_value=fake),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         result = compute_document_embeddings_v2(["doc one", "doc two"])
@@ -92,12 +101,12 @@ def test_document_uses_retrieval_document_task_type():
 
 
 def test_no_api_key_returns_none_for_query():
-    with patch("teledigest.gemini_brain._get_embedding_api_key", return_value=""):
+    with patch("teledigest.gemini_brain._get_embedding_api_keys", return_value=[]):
         assert compute_query_embedding_v2("hello") is None
 
 
 def test_no_api_key_returns_nones_for_documents():
-    with patch("teledigest.gemini_brain._get_embedding_api_key", return_value=""):
+    with patch("teledigest.gemini_brain._get_embedding_api_keys", return_value=[]):
         result = compute_document_embeddings_v2(["a", "b", "c"])
     assert result == [None, None, None]
 
@@ -111,7 +120,7 @@ def test_api_failure_returns_nones():
     with (
         patch("google.genai.Client", return_value=fake_client),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         result = compute_document_embeddings_v2(["a", "b"])
@@ -130,7 +139,7 @@ def test_partial_failure_other_texts_succeed():
     with (
         patch("google.genai.Client", return_value=fake_client),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         result = compute_document_embeddings_v2(["a", "b", "c"])
@@ -144,7 +153,7 @@ def test_custom_dim_passed_through():
     with (
         patch("google.genai.Client", return_value=fake),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_key", return_value="fake-key"
+            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         compute_query_embedding_v2("x", dim=1536)
