@@ -117,20 +117,32 @@ def migrate_collection(
         pending.clear()
 
     print(f"\n=== Migrating {collection_name} ===")
-    for snap in coll.stream():
-        data = snap.to_dict() or {}
-        if data.get("embedding_model") == model_tag:
-            skipped += 1
-            continue
-        pending.append((snap.id, data, build_embed_text(data)))
-        if len(pending) >= batch_size:
-            flush_batch()
-            print(
-                f"  {collection_name}: migrated={migrated} "
-                f"skipped(already-v2)={skipped} failed={failed}"
-            )
-            if sleep_between_batches > 0:
-                time.sleep(sleep_between_batches)
+    PAGE_SIZE = 500
+    last_doc_id: str | None = None
+    while True:
+        q = coll.order_by("__name__").limit(PAGE_SIZE)
+        if last_doc_id is not None:
+            q = q.start_after(coll.document(last_doc_id).get())
+        page = list(q.stream())
+        if not page:
+            break
+        for snap in page:
+            data = snap.to_dict() or {}
+            if data.get("embedding_model") == model_tag:
+                skipped += 1
+                continue
+            pending.append((snap.id, data, build_embed_text(data)))
+            if len(pending) >= batch_size:
+                flush_batch()
+                print(
+                    f"  {collection_name}: migrated={migrated} "
+                    f"skipped(already-v2)={skipped} failed={failed}"
+                )
+                if sleep_between_batches > 0:
+                    time.sleep(sleep_between_batches)
+        last_doc_id = page[-1].id
+        if len(page) < PAGE_SIZE:
+            break
 
     flush_batch()
     print(
