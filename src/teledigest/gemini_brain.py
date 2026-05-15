@@ -321,6 +321,122 @@ def compute_document_embeddings_v2(
     return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
 
 
+def _embed_v2_rest_batch(
+    texts: list[str],
+    task_type: str,
+    dim: int,
+    api_key: str,
+    model: str = _EMBEDDING_MODEL_V2,
+    timeout: int = 60,
+) -> tuple[int, list[list[float] | None] | None]:
+    """Single :batchEmbedContents REST call carrying N texts.
+
+    Why direct REST: google-genai SDK's embed_content with contents=[t1, t2]
+    silently concatenates into ONE multi-part doc and returns ONE vector
+    (verified on VPS). The real "N texts → N vectors in one HTTP call" lives
+    only on the batchEmbedContents REST endpoint. One such call costs 1 RPD,
+    so batching 100 texts per call effectively multiplies free-tier capacity
+    by 100x.
+
+    Returns (http_status, list-of-vectors-or-None-per-text). status<0 on
+    network failure with vectors=None.
+    """
+    import requests as _req
+
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+        f":batchEmbedContents?key={api_key}"
+    )
+    body = {
+        "requests": [
+            {
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": t}]},
+                "taskType": task_type,
+                "outputDimensionality": dim,
+            }
+            for t in texts
+        ]
+    }
+    try:
+        resp = _req.post(url, json=body, timeout=timeout)  # type: ignore[arg-type]
+    except Exception as exc:
+        log.warning("v2 batch REST: network error: %s", exc)
+        return -1, None
+    if resp.status_code != 200:
+        return resp.status_code, None
+    data = resp.json()
+    embeds = data.get("embeddings", [])
+    out: list[list[float] | None] = []
+    for emb in embeds:
+        vals = emb.get("values") or []
+        out.append(list(vals) if vals else None)
+    # Defend against mismatched length — pad/truncate to match input.
+    while len(out) < len(texts):
+        out.append(None)
+    return 200, out[: len(texts)]
+
+
+def compute_document_embeddings_v2_batch(
+    texts: list[str],
+    dim: int = _EMBEDDING_DIM_V2,
+    chunk_size: int = 100,
+) -> list[list[float] | None]:
+    """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
+
+    Uses the multi-key pool: each REST call goes to the next key, on per-key
+    429/4xx switches to the next key (full sweep), preserves input ordering.
+
+    chunk_size: texts per single REST call. Default 100 is a safe ratio of
+    TPM headroom (30K tokens/min ~ 300 tokens × 100 texts) to RPM (1 call/min
+    burst is well under 100 RPM cap). Tune down for very long texts.
+    """
+    if not texts:
+        return []
+
+    keys = _get_embedding_api_keys()
+    if not keys:
+        log.warning("v2 batch: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
+        return [None] * len(texts)
+
+    global _key_rr_idx
+    out: list[list[float] | None] = []
+    for start in range(0, len(texts), chunk_size):
+        chunk = texts[start : start + chunk_size]
+        chunk_result: list[list[float] | None] | None = None
+        last_status: int | None = None
+        for offset in range(len(keys)):
+            idx = (_key_rr_idx + offset) % len(keys)
+            status, result = _embed_v2_rest_batch(
+                chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
+            )
+            last_status = status
+            if status == 200 and result is not None:
+                chunk_result = result
+                _key_rr_idx = (idx + 1) % len(keys)
+                break
+            if status in (400, 401, 403, 429) or status == -1:
+                log.warning(
+                    "v2 batch: key #%d status=%s, trying next of %d",
+                    idx,
+                    status,
+                    len(keys),
+                )
+                continue
+            log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
+            break
+        if chunk_result is None:
+            log.warning(
+                "v2 batch: all keys exhausted on chunk %d-%d (last status=%s)",
+                start,
+                start + len(chunk),
+                last_status,
+            )
+            chunk_result = [None] * len(chunk)
+        out.extend(chunk_result)
+    return out
+
+
 def _fetch_by_vector(
     db,
     collection: str,
