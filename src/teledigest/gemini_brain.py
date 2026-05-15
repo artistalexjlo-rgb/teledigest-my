@@ -359,17 +359,17 @@ def _embed_v2_rest_batch(
         ]
     }
     try:
-        resp = _req.post(url, json=body, timeout=timeout)
-    except Exception as e:
-        log.warning("v2 batch REST: network error: %s", e)
+        resp = _req.post(url, json=body, timeout=timeout)  # type: ignore[arg-type]
+    except Exception as exc:
+        log.warning("v2 batch REST: network error: %s", exc)
         return -1, None
     if resp.status_code != 200:
         return resp.status_code, None
     data = resp.json()
     embeds = data.get("embeddings", [])
     out: list[list[float] | None] = []
-    for e in embeds:
-        vals = e.get("values") or []
+    for emb in embeds:
+        vals = emb.get("values") or []
         out.append(list(vals) if vals else None)
     # Defend against mismatched length — pad/truncate to match input.
     while len(out) < len(texts):
