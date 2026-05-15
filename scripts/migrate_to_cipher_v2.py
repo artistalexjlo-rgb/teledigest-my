@@ -84,7 +84,7 @@ def migrate_collection(
     """Returns (migrated, skipped_already_v2, failed)."""
     from google.cloud.firestore_v1.vector import Vector
 
-    from teledigest.gemini_brain import compute_document_embeddings_v2
+    from teledigest.gemini_brain import compute_document_embeddings_v2_batch
 
     coll = db.collection(collection_name)
     migrated = 0
@@ -98,7 +98,9 @@ def migrate_collection(
         if not pending:
             return
         texts = [t for _, _, t in pending]
-        vectors = compute_document_embeddings_v2(texts)
+        # batchEmbedContents: 1 HTTP call → N vectors → 1 RPD for whole batch.
+        # Free tier 1K RPD per key × 100 texts/call × 7 keys = 700K embeds/day.
+        vectors = compute_document_embeddings_v2_batch(texts, chunk_size=100)
         for (doc_id, src, text), vec in zip(pending, vectors):
             if vec is None:
                 failed += 1
@@ -163,16 +165,15 @@ def main() -> int:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=20,
-        help="Texts per embedding call group (default 20 — keeps RPM well under "
-        "100 per key even if multiple keys share a Google project)",
+        default=100,
+        help="Texts per batchEmbedContents call (default 100 = 1 RPD for 100 "
+        "embeddings). TPM budget ≈ 30K/min, ~100 short texts comfortably fit.",
     )
     parser.add_argument(
         "--sleep",
         type=float,
-        default=5.0,
-        help="Seconds to sleep between batches (default 5s — there is no rush, "
-        "and free-tier RPM is the real bottleneck)",
+        default=2.0,
+        help="Sleep between batches (default 2s — keeps RPM at ~30/min per key)",
     )
     args = parser.parse_args()
 
