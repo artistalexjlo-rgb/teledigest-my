@@ -395,7 +395,7 @@ def _embed_v2_rest_batch(
 def compute_document_embeddings_v2_batch(
     texts: list[str],
     dim: int = _EMBEDDING_DIM_V2,
-    chunk_size: int = 100,
+    chunk_size: int = 20,
 ) -> list[list[float] | None]:
     """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
 
