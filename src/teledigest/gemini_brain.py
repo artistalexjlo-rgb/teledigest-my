@@ -321,6 +321,19 @@ def compute_document_embeddings_v2(
     return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
 
 
+def _parse_retry_after_seconds(body_text: str) -> float | None:
+    """Extract 'Please retry in N.Ns' hint from Gemini 429 error body."""
+    import re
+
+    m = re.search(r"retry in ([\d.]+)s", body_text or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
 def _embed_v2_rest_batch(
     texts: list[str],
     task_type: str,
@@ -328,7 +341,7 @@ def _embed_v2_rest_batch(
     api_key: str,
     model: str = _EMBEDDING_MODEL_V2,
     timeout: int = 60,
-) -> tuple[int, list[list[float] | None] | None]:
+) -> tuple[int, list[list[float] | None] | None, float | None]:
     """Single :batchEmbedContents REST call carrying N texts.
 
     Why direct REST: google-genai SDK's embed_content with contents=[t1, t2]
@@ -338,8 +351,9 @@ def _embed_v2_rest_batch(
     so batching 100 texts per call effectively multiplies free-tier capacity
     by 100x.
 
-    Returns (http_status, list-of-vectors-or-None-per-text). status<0 on
-    network failure with vectors=None.
+    Returns (http_status, list-of-vectors-or-None-per-text, retry_after_seconds).
+    status<0 on network failure with vectors=None. retry_after_seconds is set
+    when Gemini's 429 body carries 'Please retry in N.Ns' (RPM bucket refill).
     """
     import requests as _req
 
@@ -362,9 +376,10 @@ def _embed_v2_rest_batch(
         resp = _req.post(url, json=body, timeout=timeout)  # type: ignore[arg-type]
     except Exception as exc:
         log.warning("v2 batch REST: network error: %s", exc)
-        return -1, None
+        return -1, None, None
     if resp.status_code != 200:
-        return resp.status_code, None
+        retry_after = _parse_retry_after_seconds(resp.text)
+        return resp.status_code, None, retry_after
     data = resp.json()
     embeds = data.get("embeddings", [])
     out: list[list[float] | None] = []
@@ -374,7 +389,7 @@ def _embed_v2_rest_batch(
     # Defend against mismatched length — pad/truncate to match input.
     while len(out) < len(texts):
         out.append(None)
-    return 200, out[: len(texts)]
+    return 200, out[: len(texts)], None
 
 
 def compute_document_embeddings_v2_batch(
@@ -399,35 +414,59 @@ def compute_document_embeddings_v2_batch(
         log.warning("v2 batch: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
         return [None] * len(texts)
 
+    import time as _time
+
     global _key_rr_idx
     out: list[list[float] | None] = []
     for start in range(0, len(texts), chunk_size):
         chunk = texts[start : start + chunk_size]
         chunk_result: list[list[float] | None] | None = None
-        last_status: int | None = None
-        for offset in range(len(keys)):
-            idx = (_key_rr_idx + offset) % len(keys)
-            status, result = _embed_v2_rest_batch(
-                chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
-            )
-            last_status = status
-            if status == 200 and result is not None:
-                chunk_result = result
-                _key_rr_idx = (idx + 1) % len(keys)
-                break
-            if status in (400, 401, 403, 429) or status == -1:
-                log.warning(
-                    "v2 batch: key #%d status=%s, trying next of %d",
-                    idx,
-                    status,
-                    len(keys),
+        # Up to 3 full sweeps. If every key is in RPM cooldown, wait the
+        # shortest retry-after hint and sweep again. Most 429s clear in <60s.
+        for sweep in range(3):
+            min_retry_after: float | None = None
+            last_status: int | None = None
+            for offset in range(len(keys)):
+                idx = (_key_rr_idx + offset) % len(keys)
+                status, result, retry_after = _embed_v2_rest_batch(
+                    chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
                 )
-                continue
-            log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
-            break
+                last_status = status
+                if status == 200 and result is not None:
+                    chunk_result = result
+                    _key_rr_idx = (idx + 1) % len(keys)
+                    break
+                if status in (400, 401, 403, 429) or status == -1:
+                    log.warning(
+                        "v2 batch: key #%d status=%s retry_after=%s",
+                        idx,
+                        status,
+                        retry_after,
+                    )
+                    if retry_after is not None:
+                        min_retry_after = (
+                            retry_after
+                            if min_retry_after is None
+                            else min(min_retry_after, retry_after)
+                        )
+                    continue
+                log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
+                break
+            if chunk_result is not None:
+                break
+            if min_retry_after is None:
+                # No retry hint → permanent failure (likely 400/403) → don't loop.
+                break
+            wait = min(min_retry_after + 1.0, 90.0)
+            log.warning(
+                "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
+                sweep + 1,
+                wait,
+            )
+            _time.sleep(wait)
         if chunk_result is None:
             log.warning(
-                "v2 batch: all keys exhausted on chunk %d-%d (last status=%s)",
+                "v2 batch: chunk %d-%d failed after sweeps (last status=%s)",
                 start,
                 start + len(chunk),
                 last_status,
