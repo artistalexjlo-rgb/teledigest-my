@@ -276,14 +276,22 @@ def _embed_v2(
             except Exception as e:
                 last_err = e
                 err = str(e)
-                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                # Move on to the next key for any transient/per-key error:
+                # 429 (quota), 400/403 (invalid/revoked key), 401 (unauth).
+                # Only stop for genuinely non-key errors (network, 5xx that
+                # repeated on multiple keys — caught by sweep exhaustion).
+                if any(
+                    code in err
+                    for code in ("429", "RESOURCE_EXHAUSTED", "400", "401", "403")
+                ):
                     log.warning(
-                        "v2 embed: key #%d hit quota, trying next of %d keys",
+                        "v2 embed: key #%d failed (%s), trying next of %d",
                         idx,
+                        err.split("\n")[0][:120],
                         len(keys),
                     )
                     continue
-                # Non-quota error — don't waste other keys on it.
+                # Different kind of error (5xx, network). Don't waste sweep.
                 break
         if vec is None and last_err is not None:
             log.warning(
