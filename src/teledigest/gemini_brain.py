@@ -87,13 +87,39 @@ _EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-1536"
 
 
 def _get_embedding_api_key() -> str:
-    """Return Gemini API key from config or env."""
+    """Return Gemini API key from config or env (single-key path, legacy)."""
     import os
 
     cfg = get_config()
     return str(
         getattr(cfg.gemini, "api_key", None) or os.environ.get("GEMINI_API_KEY", "")
     )
+
+
+def _get_embedding_api_keys() -> list[str]:
+    """Return all available Gemini API keys for embedding.
+
+    Sources, in order of preference:
+      1. GEMINI_API_KEYS env var (comma-separated) — for multi-key migration
+      2. GEMINI_API_KEY env var or [gemini] api_key in config — single key
+
+    Each free-tier key has its own daily quota on gemini-embedding-2 (~30K RPD),
+    so rotating across N keys multiplies throughput linearly during bulk
+    re-embedding without paid tier.
+    """
+    import os
+
+    raw_multi = os.environ.get("GEMINI_API_KEYS", "")
+    if raw_multi:
+        keys = [k.strip() for k in raw_multi.split(",") if k.strip()]
+        if keys:
+            return keys
+    single = _get_embedding_api_key()
+    return [single] if single else []
+
+
+# Round-robin pointer for the multi-key pool. Reset on every process start.
+_key_rr_idx = 0
 
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
@@ -206,11 +232,10 @@ def _embed_v2(
     from google import genai
     from google.genai import types as genai_types
 
-    api_key = _get_embedding_api_key()
-    if not api_key:
-        log.warning("v2 embed: GEMINI_API_KEY missing")
+    keys = _get_embedding_api_keys()
+    if not keys:
+        log.warning("v2 embed: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
         return [None] * len(texts)
-    client = genai.Client(api_key=api_key)
 
     # Config MUST be the typed EmbedContentConfig — passing a dict silently
     # drops `task_type` (verified on VPS: cos(same text as QUERY vs DOCUMENT)
@@ -220,27 +245,54 @@ def _embed_v2(
         output_dimensionality=dim,
     )
 
+    # Lazily build one Client per key (round-robin across calls).
+    clients = {k: genai.Client(api_key=k) for k in keys}
+    global _key_rr_idx
+
     # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
     # is interpreted as a single multi-part document, not a batch — it returns
     # one vector regardless of list size. So call per-text individually.
     out: list[list[float] | None] = []
     for text in texts:
-        try:
-            result = client.models.embed_content(
-                model=_EMBEDDING_MODEL_V2,
-                contents=text,
-                config=cfg,
-            )
-            embeddings = result.embeddings or []
-            out.append(list(embeddings[0].values or []) if embeddings else None)
-        except Exception as e:
+        vec: list[float] | None = None
+        # Try every key in order starting from current round-robin index. On
+        # 429/RESOURCE_EXHAUSTED move to the next key — that key still has
+        # its own daily quota. Stop after one full sweep.
+        last_err: Exception | None = None
+        for offset in range(len(keys)):
+            idx = (_key_rr_idx + offset) % len(keys)
+            try:
+                result = clients[keys[idx]].models.embed_content(
+                    model=_EMBEDDING_MODEL_V2,
+                    contents=text,
+                    config=cfg,
+                )
+                embeddings = result.embeddings or []
+                vec = list(embeddings[0].values or []) if embeddings else None
+                # Advance pointer past the successful key so next text starts
+                # on the next key — spreads load across keys evenly.
+                _key_rr_idx = (idx + 1) % len(keys)
+                break
+            except Exception as e:
+                last_err = e
+                err = str(e)
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    log.warning(
+                        "v2 embed: key #%d hit quota, trying next of %d keys",
+                        idx,
+                        len(keys),
+                    )
+                    continue
+                # Non-quota error — don't waste other keys on it.
+                break
+        if vec is None and last_err is not None:
             log.warning(
                 "v2 embed failed (task=%s, text_len=%d): %s",
                 task_type,
                 len(text),
-                e,
+                last_err,
             )
-            out.append(None)
+        out.append(vec)
     return out
 
 
