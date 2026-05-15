@@ -20,24 +20,40 @@ import sys
 from pathlib import Path
 
 
-def copy_collection(db, src_name: str, dst_name: str) -> int:
+def copy_collection(db, src_name: str, dst_name: str, page_size: int = 500) -> int:
+    """Paginated copy — large collections (wikivoyage_base has ~9K+ docs)
+    time out if streamed in a single query. Walk via order_by(__name__) +
+    start_after cursor, page_size docs at a time."""
     src = db.collection(src_name)
     dst = db.collection(dst_name)
     n = 0
-    batch = db.batch()
-    batch_n = 0
+    last_doc_id: str | None = None
     BATCH_LIMIT = 400  # Firestore batch hard limit is 500 ops
-    for snap in src.stream():
-        batch.set(dst.document(snap.id), snap.to_dict() or {})
-        batch_n += 1
-        n += 1
-        if batch_n >= BATCH_LIMIT:
+    while True:
+        q = src.order_by("__name__").limit(page_size)
+        if last_doc_id is not None:
+            # start_after expects a document snapshot or matching field values;
+            # for __name__ we pass the doc reference.
+            q = q.start_after(src.document(last_doc_id).get())
+        page = list(q.stream())
+        if not page:
+            break
+        batch = db.batch()
+        batch_n = 0
+        for snap in page:
+            batch.set(dst.document(snap.id), snap.to_dict() or {})
+            batch_n += 1
+            n += 1
+            if batch_n >= BATCH_LIMIT:
+                batch.commit()
+                batch = db.batch()
+                batch_n = 0
+        if batch_n:
             batch.commit()
-            batch = db.batch()
-            batch_n = 0
-            print(f"  {src_name} → {dst_name}: {n} copied so far...")
-    if batch_n:
-        batch.commit()
+        last_doc_id = page[-1].id
+        print(f"  {src_name} → {dst_name}: {n} copied so far...")
+        if len(page) < page_size:
+            break
     return n
 
 
