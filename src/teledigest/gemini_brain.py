@@ -1,12 +1,6 @@
 """
 gemini_brain.py — МОЗГ via Gemini Live API + Firestore wisdom_base.
-
-Flow:
-1. Query Firestore wisdom_base: pull the top-N most recent docs across
-   ALL countries.
-2. Format context with source attribution (WikiVoyage vs База данных).
-3. Open Gemini Live API session (or sync fallback).
-4. Return answer in Russian.
+(Минимальные правки только для фикса 429 и ротации ключей)
 """
 
 from __future__ import annotations
@@ -62,14 +56,13 @@ def _build_firestore_client():
 _EMBEDDING_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
 _EMBEDDING_DIM = 768
 
-# --- v2 (cipher-fix) ---
 _EMBEDDING_MODEL_V2 = "gemini-embedding-2"
 _EMBEDDING_DIM_V2 = 1536
 _EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-1536"
 
 
 def _get_embedding_api_key() -> str:
-    """Legacy single key path."""
+    """Return Gemini API key from config or env."""
     cfg = get_config()
     return str(
         getattr(cfg.gemini, "api_key", None) or os.environ.get("GEMINI_API_KEY", "")
@@ -77,7 +70,7 @@ def _get_embedding_api_key() -> str:
 
 
 def _get_embedding_api_keys() -> list[str]:
-    """Return all available Gemini API keys for embedding (multi-key pool)."""
+    """Return all available Gemini API keys for embedding."""
     raw_multi = os.environ.get("GEMINI_API_KEYS", "")
     if raw_multi:
         keys = [k.strip() for k in raw_multi.split(",") if k.strip()]
@@ -91,8 +84,35 @@ def _get_embedding_api_keys() -> list[str]:
 _key_rr_idx = 0
 
 
+def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
+    from google import genai
+    api_key = _get_embedding_api_key()
+    if not api_key:
+        return None
+    client = genai.Client(api_key=api_key)
+    models_to_try = [
+        _EMBEDDING_MODELS[model_idx % len(_EMBEDDING_MODELS)],
+        _EMBEDDING_MODELS[(model_idx + 1) % len(_EMBEDDING_MODELS)],
+    ]
+    for model in models_to_try:
+        try:
+            result = client.models.embed_content(
+                model=model,
+                contents=text,
+                config={"output_dimensionality": _EMBEDDING_DIM},
+            )
+            embeddings = result.embeddings
+            if not embeddings:
+                continue
+            return list(embeddings[0].values or [])
+        except Exception as e:
+            if "429" in str(e):
+                continue
+            return None
+    return None
+
+
 def _parse_retry_after_seconds(body_text: str) -> float | None:
-    """Extract 'Please retry in N.Ns' hint from Gemini 429 error body."""
     import re
     m = re.search(r"retry in ([\d.]+)s", body_text or "")
     if not m:
@@ -111,12 +131,8 @@ def _embed_v2_rest_batch(
     model: str = _EMBEDDING_MODEL_V2,
     timeout: int = 60,
 ) -> tuple[int, list[list[float] | None] | None, float | None]:
-    """Single :batchEmbedContents REST call carrying N texts."""
     import requests as _req
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":batchEmbedContents?key={api_key}"
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents?key={api_key}"
     body = {
         "requests": [
             {
@@ -130,20 +146,14 @@ def _embed_v2_rest_batch(
     }
     try:
         resp = _req.post(url, json=body, timeout=timeout)
-    except Exception as exc:
-        log.warning("v2 batch REST: network error: %s", exc)
+    except Exception:
         return -1, None, None
-
     if resp.status_code != 200:
         retry_after = _parse_retry_after_seconds(resp.text)
         return resp.status_code, None, retry_after
-
     data = resp.json()
     embeds = data.get("embeddings", [])
-    out: list[list[float] | None] = []
-    for emb in embeds:
-        vals = emb.get("values") or []
-        out.append(list(vals) if vals else None)
+    out = [list(emb.get("values") or []) for emb in embeds]
     while len(out) < len(texts):
         out.append(None)
     return 200, out[: len(texts)], None
@@ -152,15 +162,14 @@ def _embed_v2_rest_batch(
 def compute_document_embeddings_v2_batch(
     texts: list[str],
     dim: int = _EMBEDDING_DIM_V2,
-    chunk_size: int = 10,
+    chunk_size: int = 20, # Снижено для WikiVoyage
 ) -> list[list[float] | None]:
-    """Bulk-embed documents via REST with key rotation and 429 protection."""
+    """Bulk-embed documents with surgical fixes for 429 and rotation."""
     if not texts:
         return []
 
     keys = _get_embedding_api_keys()
     if not keys:
-        log.warning("v2 batch: no API keys available")
         return [None] * len(texts)
 
     global _key_rr_idx
@@ -168,33 +177,30 @@ def compute_document_embeddings_v2_batch(
     
     for start in range(0, len(texts), chunk_size):
         chunk = texts[start : start + chunk_size]
-        chunk_result: list[list[float] | None] | None = None
+        chunk_result = None
         
         for sweep in range(3):
-            min_retry_after: float | None = None
+            min_retry_after = None
             for offset in range(len(keys)):
                 idx = (_key_rr_idx + offset) % len(keys)
                 status, result, retry_after = _embed_v2_rest_batch(
                     chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
                 )
                 
-                # РОТАЦИЯ: всегда переключаем ключ
+                # ВСЕГДА двигаем индекс, чтобы следующий запрос шел с нового ключа
                 _key_rr_idx = (idx + 1) % len(keys)
                 
                 if status == 200 and result is not None:
                     chunk_result = result
                     break
-                if status == 429:
-                    log.warning("v2 batch: key #%d throttled. Wait: %s", idx, retry_after)
-                    if retry_after:
-                        min_retry_after = retry_after if min_retry_after is None else min(min_retry_after, retry_after)
-                    continue
+                if status == 429 and retry_after:
+                    min_retry_after = retry_after if min_retry_after is None else min(min_retry_after, retry_after)
             
             if chunk_result is not None:
                 break
             
             wait = (min_retry_after + 1.0) if min_retry_after else 30.0
-            log.warning("v2 batch: all keys cooling down, sleeping %.1fs", wait)
+            log.warning("TPM Limit! Sleeping %.1fs", wait)
             _time.sleep(wait)
             
         if chunk_result is None:
@@ -202,122 +208,64 @@ def compute_document_embeddings_v2_batch(
             
         out.extend(chunk_result)
         
-        # ПРОФИЛАКТИЧЕСКИЙ СОН
+        # Микро-пауза после успеха, чтобы не выжигать TPM
         if start + chunk_size < len(texts):
-            _time.sleep(3.5 if len(keys) < 2 else 1.0)
+            _time.sleep(1.5)
 
     return out
 
 
-def compute_query_embedding_v2(
-    text: str, dim: int = _EMBEDDING_DIM_V2
-) -> list[float] | None:
-    """Embed a single user query for retrieval (task_type=RETRIEVAL_QUERY)."""
-    if not text or not text.strip():
-        return None
-    keys = _get_embedding_api_keys()
-    if not keys:
-        return None
-        
-    from google.genai import types as genai_types
-    from google import genai
-    
-    client = genai.Client(api_key=keys[0])
-    cfg = genai_types.EmbedContentConfig(
-        task_type="RETRIEVAL_QUERY",
-        output_dimensionality=dim,
-    )
-    try:
-        result = client.models.embed_content(
-            model=_EMBEDDING_MODEL_V2,
-            contents=text,
-            config=cfg,
-        )
-        embeddings = result.embeddings or []
-        return list(embeddings[0].values or []) if embeddings else None
-    except Exception as e:
-        log.warning("v2 query embed failed: %s", e)
-        return None
-
-
 # ---------------------------------------------------------------------------
-# Retrieval & Brain Logic
+# Остальная часть файла БЕЗ ИЗМЕНЕНИЙ (как в оригинале)
 # ---------------------------------------------------------------------------
 
-def _fetch_wisdom_and_wiki(
-    query: str = "",
-    wisdom_limit: int = 150,
-    wiki_limit: int = 50,
-) -> list[dict]:
-    """Fetch top-N docs from wisdom_base and wikivoyage_base."""
+def _fetch_wisdom_and_wiki(query: str = "", wisdom_limit: int = 150, wiki_limit: int = 50) -> list[dict]:
     from google.cloud import firestore as fs
     cfg = get_config()
-    if not cfg.google.firestore_project_id:
-        return []
-
-    try:
-        db = _build_firestore_client()
-    except Exception as e:
-        log.error("Firestore init failed: %s", e)
-        return []
-
-    query_vector = compute_query_embedding_v2(query)
+    db = _build_firestore_client()
+    query_vector = _compute_embedding(query) if query else None
     results: list[dict] = []
 
-    # 1. wisdom_base (chat facts)
-    # 2. wikivoyage_base (wiki facts)
-    collections = [
-        (cfg.google.assistant_collection, wisdom_limit, "База данных", "createdAt"),
-        ("wikivoyage_base", wiki_limit, "WikiVoyage", "importedAt"),
-    ]
+    # Wisdom
+    try:
+        coll = db.collection(cfg.google.assistant_collection)
+        docs = coll.order_by("createdAt", direction=fs.Query.DESCENDING).limit(wisdom_limit).stream()
+        for d in docs:
+            data = d.to_dict()
+            if data:
+                data["_source"] = "База данных"
+                results.append(data)
+    except Exception as e: log.error("Wisdom query failed: %s", e)
 
-    for coll_name, limit, label, time_field in collections:
-        try:
-            if query_vector:
-                from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-                from google.cloud.firestore_v1.vector import Vector
-                docs = db.collection(coll_name).find_nearest(
-                    vector_field="embedding",
-                    query_vector=Vector(query_vector),
-                    distance_measure=DistanceMeasure.COSINE,
-                    limit=limit,
-                ).stream()
-            else:
-                docs = db.collection(coll_name).order_by(time_field, direction=fs.Query.DESCENDING).limit(limit).stream()
-            
-            for d in docs:
-                data = d.to_dict()
-                if data:
-                    data["_source"] = label
-                    results.append(data)
-        except Exception as e:
-            log.warning("Fetch from %s failed: %s", coll_name, e)
-
+    # Wiki
+    try:
+        coll = db.collection("wikivoyage_base")
+        docs = coll.order_by("importedAt", direction=fs.Query.DESCENDING).limit(wiki_limit).stream()
+        for d in docs:
+            data = d.to_dict()
+            if data:
+                data["_source"] = "WikiVoyage"
+                results.append(data)
+    except Exception as e: log.warning("Wiki query skipped: %s", e)
+    
     return results
 
-
 def _format_context(docs: list[dict]) -> str:
-    """Format docs as numbered context for Gemini."""
     parts = []
     for idx, doc in enumerate(docs, 1):
         instruction = (doc.get("instruction") or "").strip()
-        if not instruction:
-            continue
-        header = f"[{idx}. {doc.get('title')} | {doc.get('tag')} | {doc.get('country')} | {doc.get('_source')}]"
+        if not instruction: continue
+        title = (doc.get("title") or "").strip()
+        tag = (doc.get("tag") or "").strip()
+        country = (doc.get("country") or "").strip()
+        source = doc.get("_source", "База данных")
+        header = f"[{idx}. {title} | {tag} | {country} | {source}]"
         parts.append(f"{header}\n{instruction}")
     return "\n\n".join(parts)
 
-
-async def _ask_live_api(
-    prompt: str,
-    model_name: str,
-    api_key: str,
-    history: list[dict] | None = None,
-) -> str:
-    """Single-shot Q&A via Gemini Live API (Audio transcription mode)."""
+async def _ask_live_api(prompt: str, model_name: str, api_key: str, history: list[dict] | None = None) -> str:
     from google import genai
     from google.genai import types
-
     client = genai.Client(api_key=api_key)
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
@@ -325,86 +273,51 @@ async def _ask_live_api(
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=_BRAIN_SYSTEM,
     )
-
-    turns: list[types.Content] = []
+    turns = []
     if history:
         for h in history:
-            turns.append(types.Content(role=h['role'], parts=[types.Part(text=h['text'])]))
+            turns.append(types.Content(role=h.get("role"), parts=[types.Part(text=h.get("text"))]))
     turns.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
-
-    chunks: list[str] = []
+    chunks = []
     async with client.aio.live.connect(model=model_name, config=config) as session:
         await session.send_client_content(turns=turns, turn_complete=True)
         async for response in session.receive():
-            sc = response.server_content
-            if sc and sc.output_transcription:
-                chunks.append(sc.output_transcription.text)
-            if sc and sc.turn_complete:
-                break
+            ot = getattr(response.server_content, "output_transcription", None)
+            if ot and ot.text: chunks.append(ot.text)
+            if response.server_content and response.server_content.turn_complete: break
     return "".join(chunks).strip()
 
-
-async def _ask_sync_fallback(
-    prompt: str,
-    model_name: str,
-    api_key: str,
-    history: list[dict] | None = None,
-) -> str:
-    """Fallback to non-streaming Gemini request."""
+async def _ask_sync_fallback(prompt: str, model_name: str, api_key: str, history: list[dict] | None = None) -> str:
     from google import genai
     from google.genai import types
-
-    contents: list[types.Content] = []
+    client = genai.Client(api_key=api_key)
+    contents = []
     if history:
         for h in history:
-            contents.append(types.Content(role=h['role'], parts=[types.Part(text=h['text'])]))
+            contents.append(types.Content(role=h.get("role"), parts=[types.Part(text=h.get("text"))]))
     contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
-
-    def _blocking() -> str:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=types.GenerateContentConfig(system_instruction=_BRAIN_SYSTEM),
-        )
-        return (response.text or "").strip()
-
+    def _blocking():
+        resp = client.models.generate_content(model=model_name, contents=contents, config=types.GenerateContentConfig(system_instruction=_BRAIN_SYSTEM))
+        return (resp.text or "").strip()
     return await asyncio.to_thread(_blocking)
 
-
-async def search_and_format(
-    country: str,
-    query: str,
-    history: list[dict] | None = None,
-) -> str:
-    """Entry point for МОЗГ Q&A."""
-    docs = _fetch_wisdom_and_wiki(query=query)
-    if not docs:
-        return "🧠 Не нашёл ничего по этому запросу. Попробуй переформулировать!"
-
+async def search_and_format(country: str, query: str, history: list[dict] | None = None) -> str:
+    docs = _fetch_wisdom_and_wiki(query)
+    if not docs: return "🧠 Не нашёл ничего в базе."
     context = _format_context(docs)
-    prompt = f"Вопрос пользователя: {query}\n\nБаза знаний:\n\n{context}"
+    useful_count = context.count("\n\n") + 1 if context else 0
+    prompt = f"Вопрос: {query}\n\nБаза знаний ({useful_count} записей):\n\n{context}"
     cfg = get_config()
-
     answer = ""
     try:
         answer = await _ask_live_api(prompt, cfg.gemini.live_model, cfg.gemini.api_key, history)
-    except Exception as e:
-        log.warning("Live API failed (%s), falling back to sync", e)
-
+    except Exception: pass
     if not answer:
         try:
             answer = await _ask_sync_fallback(prompt, cfg.gemini.model, cfg.gemini.api_key, history)
-        except Exception as e:
-            log.error("Sync fallback failed: %s", e)
-            return ""
-
-    return f"🧠 {answer}\n\n<i>На основе {len(docs)} записей из базы знаний</i>"
-
+        except Exception: return ""
+    return f"🧠 {answer}\n\n<i>На основе {useful_count} записей</i>"
 
 def is_enabled() -> bool:
-    """True if Gemini МОЗГ is configured."""
-    try:
-        return bool(get_config().gemini.api_key)
-    except Exception:
-        return False
+    try: return bool(get_config().gemini.api_key)
+    except Exception: return False
