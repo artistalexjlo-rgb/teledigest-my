@@ -151,6 +151,23 @@ def migrate_from_config(
 # ---------------------------------------------------------------------------
 
 
+def find_url_country(url: str) -> str | None:
+    """If `url` is already registered under any country, return that code.
+
+    Helps catch typos like adding the same Telegram chat to Korea by mistake
+    when it's already in Japan. The UNIQUE constraint only blocks the exact
+    (country, url) pair, not the URL globally.
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT country FROM sources WHERE url = ? AND active = 1 LIMIT 1",
+            (url,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
 def add_source(
     country: str, url: str, name: str = "", language: str = "ru", account: int = 2
 ) -> int:
