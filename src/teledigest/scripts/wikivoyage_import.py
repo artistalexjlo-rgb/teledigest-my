@@ -523,9 +523,10 @@ def write_patterns(
     """
     if not patterns:
         return 0, 0
-    # v2 cipher-fix: write to wikivoyage_v2 with unified text embedding.
-    # Bot still reads wikivoyage_base during migration (will switch later).
-    coll = db.collection("wikivoyage_v2")
+    # Cipher-fix: write to wikivoyage_base with v2 unified-text embedding.
+    # Bot reads same collection. Backup of pre-migration state lives in
+    # wikivoyage_v1_backup.
+    coll = db.collection("wikivoyage_base")
     now = dt.datetime.now(dt.timezone.utc)
     url = WIKI_PAGE_BASE + page_title.replace(" ", "_")
 

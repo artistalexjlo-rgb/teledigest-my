@@ -22,14 +22,13 @@ PROJECT_ID = "project-56cb62a9-8914-4ae3-b44"
 DATABASE = "default"
 
 VECTOR_INDEXES = [
-    # Legacy 768-dim indexes (kept for backward compat during migration).
-    {"collection": "wisdom_base", "field": "embedding", "dimension": 768},
-    {"collection": "wikivoyage_base", "field": "embedding", "dimension": 768},
-    # v2: cipher-fix collections. embedding-2 native is 3072 but Firestore
-    # vector index caps at 2048 — using MRL truncation to 1536 (largest
-    # supported MRL point that fits Firestore).
-    {"collection": "wisdom_v2", "field": "embedding", "dimension": 1536},
-    {"collection": "wikivoyage_v2", "field": "embedding", "dimension": 1536},
+    # Cipher-fix uses gemini-embedding-2 truncated to 1536 (Firestore vector
+    # index caps at 2048; 1536 is the largest MRL-supported point).
+    # Old 768-dim indexes on these same collections must be DROPPED first via
+    # console / API — Firestore won't accept a second vector index on the
+    # same field-path. See roadmap_embedding_cipher_fix.md Phase 1.6.
+    {"collection": "wisdom_base", "field": "embedding", "dimension": 1536},
+    {"collection": "wikivoyage_base", "field": "embedding", "dimension": 1536},
 ]
 
 

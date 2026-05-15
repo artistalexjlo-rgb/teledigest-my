@@ -72,9 +72,10 @@ function pickModelWithCapacity_() {
   Utilities.sleep(waitMs);
   return pickModelWithCapacity_();
 }
-// Wisdom is written to v2 (cipher-fix). Old wisdom_base is no longer written
-// to from Apps Script — bot still reads it during migration, then will switch.
-var COLLECTION_AI = "wisdom_v2";
+// Wisdom collection. Bot reads this same name — migration overwrites in place
+// (old vectors get rebuilt with new cipher). Backup of pre-migration state
+// lives in wisdom_v1_backup.
+var COLLECTION_AI = "wisdom_base";
 var COLLECTION_TG = "telegram_queue";
 
 // v2 embedder config (must match Python side in gemini_brain.py).
