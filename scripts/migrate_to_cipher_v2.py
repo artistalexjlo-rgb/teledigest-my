@@ -161,13 +161,18 @@ def main() -> int:
         help="Comma-separated collection names to migrate",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=50, help="Texts per embedding call group"
+        "--batch-size",
+        type=int,
+        default=20,
+        help="Texts per embedding call group (default 20 — keeps RPM well under "
+        "100 per key even if multiple keys share a Google project)",
     )
     parser.add_argument(
         "--sleep",
         type=float,
-        default=1.0,
-        help="Seconds to sleep between batches (rate-limit cushion)",
+        default=5.0,
+        help="Seconds to sleep between batches (default 5s — there is no rush, "
+        "and free-tier RPM is the real bottleneck)",
     )
     args = parser.parse_args()
 
