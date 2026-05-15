@@ -90,7 +90,11 @@ def main() -> int:
     parser.add_argument(
         "--source-collection", default="wikivoyage_base", help="Read from"
     )
-    parser.add_argument("--target-collection", default="wikivoyage_v2", help="Write to")
+    parser.add_argument(
+        "--target-collection",
+        default="wikivoyage_base",
+        help="Write to (same name as source = in-place test)",
+    )
     parser.add_argument(
         "--eval-query",
         default="rent a car in Thailand",

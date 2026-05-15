@@ -523,6 +523,9 @@ def write_patterns(
     """
     if not patterns:
         return 0, 0
+    # Cipher-fix: write to wikivoyage_base with v2 unified-text embedding.
+    # Bot reads same collection. Backup of pre-migration state lives in
+    # wikivoyage_v1_backup.
     coll = db.collection("wikivoyage_base")
     now = dt.datetime.now(dt.timezone.utc)
     url = WIKI_PAGE_BASE + page_title.replace(" ", "_")
@@ -543,12 +546,43 @@ def write_patterns(
     if not new_docs:
         return 0, skipped
 
-    # --- Phase 2: batch compute embeddings for new docs ---
-    try:
-        from teledigest.gemini_brain import compute_embeddings_batch
+    # --- Phase 2: compute embeddings for new docs (v2 cipher) ---
+    from teledigest.gemini_brain import (
+        _EMBEDDING_MODEL_TAG_V2,
+        compute_document_embeddings_v2,
+    )
 
-        texts = [(nd.get("instruction") or "") for _, nd in new_docs]
-        embeddings = compute_embeddings_batch(texts)
+    # Country full-name lookup mirrors scripts/pilot_cipher_v2.py.
+    country_names = {
+        "th": "Thailand",
+        "br": "Brazil",
+        "ar": "Argentina",
+        "id": "Indonesia",
+        "lk": "Sri Lanka",
+        "tr": "Turkey",
+        "vn": "Vietnam",
+        "fr": "France",
+        "ph": "Philippines",
+        "bg": "Bulgaria",
+    }
+    country_full = country_names.get(country, country.upper())
+
+    def _embed_text(p: dict) -> str:
+        parts = [country_full]
+        title = (p.get("title") or "").strip()
+        tag = (p.get("tag") or "").strip()
+        instr = (p.get("instruction") or "").strip()
+        if title:
+            parts.append(title)
+        if tag:
+            parts.append(tag)
+        if instr:
+            parts.append(instr)
+        return ". ".join(parts)
+
+    texts = [_embed_text(nd) for _, nd in new_docs]
+    try:
+        embeddings = compute_document_embeddings_v2(texts)
     except Exception as emb_err:
         log.warning(
             "write_patterns: embedding batch failed (%s) — writing without vectors",
@@ -558,13 +592,18 @@ def write_patterns(
 
     # --- Phase 3: write new docs with embeddings ---
     written = 0
-    for (doc_id, p), emb in zip(new_docs, embeddings):
+    for (doc_id, p), emb, text in zip(new_docs, embeddings, texts):
+        instr = p.get("instruction") or ""
         payload: dict = {
             **p,
             "source": "wikivoyage",
             "sourceTitle": page_title,
             "sourceUrl": url,
             "importedAt": now,
+            "embedded_text": text,
+            "embedding_model": _EMBEDDING_MODEL_TAG_V2,
+            "text_length": len(instr),
+            "needs_chunking": len(instr) > 500,
         }
         if emb is not None:
             from google.cloud.firestore_v1.vector import Vector
