@@ -99,8 +99,10 @@ def migrate_collection(
             return
         texts = [t for _, _, t in pending]
         # batchEmbedContents: 1 HTTP call → N vectors → 1 RPD for whole batch.
-        # Free tier 1K RPD per key × 100 texts/call × 7 keys = 700K embeds/day.
-        vectors = compute_document_embeddings_v2_batch(texts, chunk_size=100)
+        # Chunking happens INSIDE compute_document_embeddings_v2_batch by
+        # token budget (8000), not by count — long wiki docs would otherwise
+        # blow past the 30K TPM cap on the first call.
+        vectors = compute_document_embeddings_v2_batch(texts)
         for (doc_id, src, text), vec in zip(pending, vectors):
             if vec is None:
                 failed += 1

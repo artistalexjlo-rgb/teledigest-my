@@ -392,19 +392,124 @@ def _embed_v2_rest_batch(
     return 200, out[: len(texts)], None
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token count for a text. Gemini's tokenizer averages ~4 chars
+    per token on mixed text; we divide by 3 to overestimate so a chunk
+    stays under TPM rather than burst over it. False positives (chunk
+    smaller than necessary) cost a bit of throughput; false negatives
+    (chunk over TPM cap) cost the whole chunk via 429."""
+    return max(1, len(text) // 3)
+
+
+def _split_by_token_budget(
+    texts: list[str],
+    token_budget: int,
+    max_count: int,
+) -> list[list[str]]:
+    """Pack `texts` into chunks where sum(tokens) <= token_budget and
+    len(chunk) <= max_count. Documents that alone exceed budget go in
+    their own single-element chunk (Gemini will either accept or reject,
+    but won't poison other texts)."""
+    chunks: list[list[str]] = []
+    cur: list[str] = []
+    cur_tokens = 0
+    for t in texts:
+        tk = _estimate_tokens(t)
+        if tk >= token_budget:
+            if cur:
+                chunks.append(cur)
+                cur, cur_tokens = [], 0
+            chunks.append([t])
+            continue
+        if cur_tokens + tk > token_budget or len(cur) >= max_count:
+            chunks.append(cur)
+            cur, cur_tokens = [], 0
+        cur.append(t)
+        cur_tokens += tk
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _process_one_chunk(
+    chunk: list[str],
+    dim: int,
+    keys: list[str],
+) -> list[list[float] | None] | None:
+    """Send one chunk through the multi-key pool with retry-after handling.
+
+    Returns the embedding list on success, or None if every key failed
+    every sweep (caller can then split-half retry)."""
+    import time as _time
+
+    global _key_rr_idx
+    for sweep in range(3):
+        min_retry_after: float | None = None
+        last_status: int | None = None
+        for offset in range(len(keys)):
+            idx = (_key_rr_idx + offset) % len(keys)
+            status, result, retry_after = _embed_v2_rest_batch(
+                chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
+            )
+            last_status = status
+            if status == 200 and result is not None:
+                _key_rr_idx = (idx + 1) % len(keys)
+                return result
+            if status in (400, 401, 403, 429) or status == -1:
+                log.warning(
+                    "v2 batch: key #%d status=%s retry_after=%s",
+                    idx,
+                    status,
+                    retry_after,
+                )
+                if retry_after is not None:
+                    min_retry_after = (
+                        retry_after
+                        if min_retry_after is None
+                        else min(min_retry_after, retry_after)
+                    )
+                continue
+            log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
+            return None
+        if min_retry_after is None:
+            # No retry hint → permanent failure (likely 400/403). Don't loop.
+            log.warning(
+                "v2 batch: chunk failed, no retry hint (status=%s)", last_status
+            )
+            return None
+        wait = min(min_retry_after + 1.0, 90.0)
+        log.warning(
+            "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
+            sweep + 1,
+            wait,
+        )
+        _time.sleep(wait)
+    return None
+
+
 def compute_document_embeddings_v2_batch(
     texts: list[str],
     dim: int = _EMBEDDING_DIM_V2,
-    chunk_size: int = 100,
+    token_budget: int = 8000,
+    max_count: int = 30,
+    inter_chunk_sleep: float = 4.0,
 ) -> list[list[float] | None]:
     """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
 
-    Uses the multi-key pool: each REST call goes to the next key, on per-key
-    429/4xx switches to the next key (full sweep), preserves input ordering.
+    Chunks are sized by **token budget**, not document count — wiki docs
+    vary 200..2000 chars and a flat count-based limit blows past the 30K
+    TPM cap on long-doc-heavy batches. Token budget 8000 leaves room for
+    transient bursts and stays well under TPM.
 
-    chunk_size: texts per single REST call. Default 100 is a safe ratio of
-    TPM headroom (30K tokens/min ~ 300 tokens × 100 texts) to RPM (1 call/min
-    burst is well under 100 RPM cap). Tune down for very long texts.
+    Pacing: inter_chunk_sleep seconds between chunks keeps total
+    throughput well under 100 RPM per key even on a single-key pool.
+
+    Resilience: if a chunk fails its full sweep budget, retried as two
+    halves recursively. A single bad document gets isolated and skipped,
+    rest of the batch continues.
+
+    Returns embeddings in input order; None for any text that could not
+    be embedded (typically the bad-doc case after split-half).
     """
     if not texts:
         return []
@@ -416,63 +521,43 @@ def compute_document_embeddings_v2_batch(
 
     import time as _time
 
-    global _key_rr_idx
+    chunks = _split_by_token_budget(texts, token_budget, max_count)
+    log.info(
+        "v2 batch: %d texts → %d chunks (budget=%d tokens, max=%d count)",
+        len(texts),
+        len(chunks),
+        token_budget,
+        max_count,
+    )
+
     out: list[list[float] | None] = []
-    for start in range(0, len(texts), chunk_size):
-        chunk = texts[start : start + chunk_size]
-        chunk_result: list[list[float] | None] | None = None
-        # Up to 3 full sweeps. If every key is in RPM cooldown, wait the
-        # shortest retry-after hint and sweep again. Most 429s clear in <60s.
-        for sweep in range(3):
-            min_retry_after: float | None = None
-            last_status: int | None = None
-            for offset in range(len(keys)):
-                idx = (_key_rr_idx + offset) % len(keys)
-                status, result, retry_after = _embed_v2_rest_batch(
-                    chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
-                )
-                last_status = status
-                if status == 200 and result is not None:
-                    chunk_result = result
-                    _key_rr_idx = (idx + 1) % len(keys)
-                    break
-                if status in (400, 401, 403, 429) or status == -1:
-                    log.warning(
-                        "v2 batch: key #%d status=%s retry_after=%s",
-                        idx,
-                        status,
-                        retry_after,
-                    )
-                    if retry_after is not None:
-                        min_retry_after = (
-                            retry_after
-                            if min_retry_after is None
-                            else min(min_retry_after, retry_after)
-                        )
-                    continue
-                log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
-                break
-            if chunk_result is not None:
-                break
-            if min_retry_after is None:
-                # No retry hint → permanent failure (likely 400/403) → don't loop.
-                break
-            wait = min(min_retry_after + 1.0, 90.0)
+    for chunk_idx, chunk in enumerate(chunks):
+        result = _process_one_chunk(chunk, dim, keys)
+
+        if result is None and len(chunk) > 1:
+            # Split-half rescue: maybe one doc poisons the batch.
             log.warning(
-                "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
-                sweep + 1,
-                wait,
+                "v2 batch: chunk %d/%d (%d texts) failed, splitting in half",
+                chunk_idx + 1,
+                len(chunks),
+                len(chunk),
             )
-            _time.sleep(wait)
-        if chunk_result is None:
-            log.warning(
-                "v2 batch: chunk %d-%d failed after sweeps (last status=%s)",
-                start,
-                start + len(chunk),
-                last_status,
+            mid = len(chunk) // 2
+            left = compute_document_embeddings_v2_batch(
+                chunk[:mid], dim, token_budget, max_count, inter_chunk_sleep
             )
-            chunk_result = [None] * len(chunk)
-        out.extend(chunk_result)
+            right = compute_document_embeddings_v2_batch(
+                chunk[mid:], dim, token_budget, max_count, inter_chunk_sleep
+            )
+            result = left + right
+
+        if result is None:
+            result = [None] * len(chunk)
+        out.extend(result)
+
+        if chunk_idx < len(chunks) - 1 and inter_chunk_sleep > 0:
+            _time.sleep(inter_chunk_sleep)
+
     return out
 
 
@@ -554,9 +639,15 @@ def _fetch_wisdom_and_wiki(
         return []
 
     # Try to compute embedding for vector search.
+    # Must use the v2 query embedder (1536 dim, task_type=RETRIEVAL_QUERY) —
+    # the Firestore vector indexes are built for 1536-dim vectors, and the
+    # legacy _compute_embedding returned 768-dim symmetric vectors. Calling
+    # the legacy path against the new index threw silent dim-mismatch
+    # exceptions that fell back to recency sort — MOZG looked like it
+    # "worked" but was returning the newest 200 docs regardless of relevance.
     query_vector: list[float] | None = None
     if query:
-        query_vector = _compute_embedding(query)
+        query_vector = compute_query_embedding_v2(query)
         if query_vector:
             log.info("МОЗГ: using vector search for query %r", query[:60])
         else:
