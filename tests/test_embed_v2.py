@@ -3,11 +3,8 @@
 Verifies the surface contract without hitting the live API:
 - task_type validation
 - empty input handling
-- passes task_type and dim to the SDK correctly
-- separates query vs document calls
-
-Live API verification (vectors actually differ for QUERY vs DOCUMENT on same
-text) is in scripts/verify_embed_v2.py — kept out of CI because it costs quota.
+- passes task_type and dim to the REST endpoint correctly
+- 429 → falls over to next key; non-quota error → abandons text
 """
 
 from __future__ import annotations
@@ -33,18 +30,12 @@ def _reset_pool_state():
     gemini_brain._key_rr_idx = 0
 
 
-def _fake_client_returning(vectors: list[list[float]]):
-    """Build a fake genai.Client whose embed_content returns vectors one-by-one.
-
-    Each call returns a result with `embeddings=[<next-vector>]` so the v2
-    code (which calls per-text) gets one vector per call.
-    """
-    fake_models = MagicMock()
-    fake_results = [MagicMock(embeddings=[MagicMock(values=v)]) for v in vectors]
-    fake_models.embed_content = MagicMock(side_effect=fake_results)
-    fake_client = MagicMock()
-    fake_client.models = fake_models
-    return fake_client
+def _fake_resp(status: int, json_body: dict | None = None, text: str = "") -> MagicMock:
+    r = MagicMock()
+    r.status_code = status
+    r.json = MagicMock(return_value=json_body or {})
+    r.text = text
+    return r
 
 
 def test_query_embed_empty_returns_none():
@@ -64,9 +55,10 @@ def test_invalid_task_type_raises():
 
 
 def test_query_uses_retrieval_query_task_type():
-    fake = _fake_client_returning([[0.1] * _EMBEDDING_DIM_V2])
+    vec = [0.1] * _EMBEDDING_DIM_V2
+    fake_post = MagicMock(return_value=_fake_resp(200, {"embedding": {"values": vec}}))
     with (
-        patch("google.genai.Client", return_value=fake),
+        patch("requests.post", fake_post),
         patch(
             "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
@@ -75,20 +67,19 @@ def test_query_uses_retrieval_query_task_type():
 
     assert result is not None
     assert len(result) == _EMBEDDING_DIM_V2
-    call_kwargs = fake.models.embed_content.call_args.kwargs
-    assert call_kwargs["model"] == _EMBEDDING_MODEL_V2
-    # config is a typed EmbedContentConfig object, not a dict.
-    cfg = call_kwargs["config"]
-    assert cfg.task_type == "RETRIEVAL_QUERY"
-    assert cfg.output_dimensionality == _EMBEDDING_DIM_V2
+    call = fake_post.call_args
+    assert _EMBEDDING_MODEL_V2 in call.args[0]
+    assert ":embedContent" in call.args[0]
+    body = call.kwargs["json"]
+    assert body["taskType"] == "RETRIEVAL_QUERY"
+    assert body["outputDimensionality"] == _EMBEDDING_DIM_V2
 
 
 def test_document_uses_retrieval_document_task_type():
-    fake = _fake_client_returning(
-        [[0.2] * _EMBEDDING_DIM_V2, [0.3] * _EMBEDDING_DIM_V2]
-    )
+    vec = [0.2] * _EMBEDDING_DIM_V2
+    fake_post = MagicMock(return_value=_fake_resp(200, {"embedding": {"values": vec}}))
     with (
-        patch("google.genai.Client", return_value=fake),
+        patch("requests.post", fake_post),
         patch(
             "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
@@ -96,8 +87,8 @@ def test_document_uses_retrieval_document_task_type():
         result = compute_document_embeddings_v2(["doc one", "doc two"])
 
     assert len(result) == 2
-    cfg = fake.models.embed_content.call_args.kwargs["config"]
-    assert cfg.task_type == "RETRIEVAL_DOCUMENT"
+    body = fake_post.call_args.kwargs["json"]
+    assert body["taskType"] == "RETRIEVAL_DOCUMENT"
 
 
 def test_no_api_key_returns_none_for_query():
@@ -111,51 +102,69 @@ def test_no_api_key_returns_nones_for_documents():
     assert result == [None, None, None]
 
 
-def test_api_failure_returns_nones():
-    """If every per-text call raises, every slot in the result is None."""
-    fake_models = MagicMock()
-    fake_models.embed_content = MagicMock(side_effect=RuntimeError("api down"))
-    fake_client = MagicMock()
-    fake_client.models = fake_models
+def test_429_falls_over_to_next_key():
+    """First key returns 429, second key succeeds — text gets vector from #1."""
+    good_vec = [0.3] * _EMBEDDING_DIM_V2
+    fake_post = MagicMock(
+        side_effect=[
+            _fake_resp(429, text="RESOURCE_EXHAUSTED limit 1000"),
+            _fake_resp(200, {"embedding": {"values": good_vec}}),
+        ]
+    )
     with (
-        patch("google.genai.Client", return_value=fake_client),
+        patch("requests.post", fake_post),
         patch(
-            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
+            "teledigest.gemini_brain._get_embedding_api_keys",
+            return_value=["k0", "k1"],
+        ),
+    ):
+        result = compute_document_embeddings_v2(["a"])
+    assert result == [good_vec]
+    assert fake_post.call_count == 2
+
+
+def test_all_keys_429_returns_none():
+    fake_post = MagicMock(
+        return_value=_fake_resp(429, text="RESOURCE_EXHAUSTED limit 1000")
+    )
+    with (
+        patch("requests.post", fake_post),
+        patch(
+            "teledigest.gemini_brain._get_embedding_api_keys",
+            return_value=["k0", "k1"],
+        ),
+    ):
+        result = compute_document_embeddings_v2(["a"])
+    assert result == [None]
+    assert fake_post.call_count == 2
+
+
+def test_non_quota_error_abandons_text_without_burning_other_keys():
+    """500 on first key → don't try the second; just record None for that text."""
+    fake_post = MagicMock(return_value=_fake_resp(500, text="oops"))
+    with (
+        patch("requests.post", fake_post),
+        patch(
+            "teledigest.gemini_brain._get_embedding_api_keys",
+            return_value=["k0", "k1", "k2"],
         ),
     ):
         result = compute_document_embeddings_v2(["a", "b"])
     assert result == [None, None]
-
-
-def test_partial_failure_other_texts_succeed():
-    """One text raising doesn't poison the rest of the batch."""
-    fake_models = MagicMock()
-    good = MagicMock(embeddings=[MagicMock(values=[0.1] * 3072)])
-    fake_models.embed_content = MagicMock(
-        side_effect=[good, RuntimeError("transient"), good]
-    )
-    fake_client = MagicMock()
-    fake_client.models = fake_models
-    with (
-        patch("google.genai.Client", return_value=fake_client),
-        patch(
-            "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
-        ),
-    ):
-        result = compute_document_embeddings_v2(["a", "b", "c"])
-    assert result[0] is not None
-    assert result[1] is None
-    assert result[2] is not None
+    # Two texts × one HTTP call each (first key only, then abandon).
+    assert fake_post.call_count == 2
 
 
 def test_custom_dim_passed_through():
-    fake = _fake_client_returning([[0.1] * 1536])
+    fake_post = MagicMock(
+        return_value=_fake_resp(200, {"embedding": {"values": [0.1] * 1536}})
+    )
     with (
-        patch("google.genai.Client", return_value=fake),
+        patch("requests.post", fake_post),
         patch(
             "teledigest.gemini_brain._get_embedding_api_keys", return_value=["fake-key"]
         ),
     ):
         compute_query_embedding_v2("x", dim=1536)
-    cfg = fake.models.embed_content.call_args.kwargs["config"]
-    assert cfg.output_dimensionality == 1536
+    body = fake_post.call_args.kwargs["json"]
+    assert body["outputDimensionality"] == 1536

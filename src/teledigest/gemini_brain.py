@@ -216,13 +216,16 @@ def _embed_v2(
     task_type: str,
     dim: int = _EMBEDDING_DIM_V2,
 ) -> list[list[float] | None]:
-    """Compute embeddings via the canonical v2 setup.
+    """Compute embeddings via direct REST on :embedContent.
 
     task_type: "RETRIEVAL_QUERY" for user queries,
                "RETRIEVAL_DOCUMENT" for indexed documents.
-    Asymmetric task_type is what makes short queries land near long structured
-    docs — without it the embedder treats both sides symmetrically and recall
-    on short-query / long-doc pairs collapses.
+
+    Why direct REST and not the SDK: google-genai's `client.models.embed_content`
+    transports every call to the `:batchEmbedContents` endpoint, which on
+    gemini-embedding-2 free-tier returns 429 immediately even on fresh keys.
+    Apps Script writes embeddings via REST `:embedContent` on the same model
+    every day without issue, so we mirror its call shape exactly.
     """
     if not texts:
         return []
@@ -231,67 +234,64 @@ def _embed_v2(
             f"task_type must be RETRIEVAL_QUERY or RETRIEVAL_DOCUMENT, got {task_type!r}"
         )
 
-    from google import genai
-    from google.genai import types as genai_types
+    import requests as _req
 
     keys = _get_embedding_api_keys()
     if not keys:
         log.warning("v2 embed: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
         return [None] * len(texts)
 
-    # Config MUST be the typed EmbedContentConfig — passing a dict silently
-    # drops `task_type` (verified on VPS: cos(same text as QUERY vs DOCUMENT)
-    # returned 1.0000, meaning task_type was ignored). Known SDK quirk.
-    cfg = genai_types.EmbedContentConfig(
-        task_type=task_type,
-        output_dimensionality=dim,
-    )
-
-    # One Client per key (round-robin across calls).
-    clients = {k: genai.Client(api_key=k) for k in keys}
     global _key_rr_idx
     if _key_rr_idx is None:
         import random
 
         _key_rr_idx = random.randint(0, len(keys) - 1)
 
-    # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
-    # is interpreted as a single multi-part document, not a batch — it returns
-    # one vector regardless of list size. So call per-text individually.
+    url_tpl = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{_EMBEDDING_MODEL_V2}:embedContent?key={{key}}"
+    )
+
     out: list[list[float] | None] = []
     for text in texts:
         vec: list[float] | None = None
-        # Try every key in order starting from current round-robin index. On
-        # 429/RESOURCE_EXHAUSTED move to the next key — that key still has
-        # its own daily quota. Stop after one full sweep.
-        last_err: Exception | None = None
+        last_err: str | None = None
+        # One full sweep across keys; on 429 move to next key, on any other
+        # error (4xx/5xx/network) abandon this text.
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
             try:
-                result = clients[keys[idx]].models.embed_content(
-                    model=_EMBEDDING_MODEL_V2,
-                    contents=text,
-                    config=cfg,
+                resp = _req.post(
+                    url_tpl.format(key=keys[idx]),
+                    json={
+                        "content": {"parts": [{"text": text}]},
+                        "outputDimensionality": dim,
+                        "taskType": task_type,
+                    },
+                    timeout=60,
                 )
-                embeddings = result.embeddings or []
-                vec = list(embeddings[0].values or []) if embeddings else None
-                # Advance pointer past the successful key so next text starts
-                # on the next key — spreads load across keys evenly.
+            except Exception as e:
+                last_err = f"network: {e}"
+                break
+            if resp.status_code == 200:
+                data = resp.json()
+                vals = (data.get("embedding") or {}).get("values") or []
+                vec = list(vals) if vals else None
+                if vec is None:
+                    last_err = "200 OK but empty embedding"
                 _key_rr_idx = (idx + 1) % len(keys)
                 break
-            except Exception as e:
-                last_err = e
-                err = str(e)
-                if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                    log.warning(
-                        "v2 embed: key #%d hit quota, trying next of %d keys",
-                        idx,
-                        len(keys),
-                    )
-                    continue
-                # Non-quota error — don't waste other keys on it.
-                break
-        if vec is None and last_err is not None:
+            if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp.text:
+                log.warning(
+                    "v2 embed: key #%d hit quota, trying next of %d keys",
+                    idx,
+                    len(keys),
+                )
+                continue
+            # Non-quota HTTP error — abandon this text.
+            last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            break
+        if vec is None:
             log.warning(
                 "v2 embed failed (task=%s, text_len=%d): %s",
                 task_type,
