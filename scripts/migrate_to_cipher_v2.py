@@ -102,7 +102,7 @@ def migrate_collection(
         # Chunking happens INSIDE compute_document_embeddings_v2_batch by
         # token budget (8000), not by count — long wiki docs would otherwise
         # blow past the 30K TPM cap on the first call.
-        vectors = compute_document_embeddings_v2_batch(texts, chunk_size=5, token_budget=2000)
+        vectors = compute_document_embeddings_v2_batch(texts)
         for (doc_id, src, text), vec in zip(pending, vectors):
             if vec is None:
                 failed += 1
