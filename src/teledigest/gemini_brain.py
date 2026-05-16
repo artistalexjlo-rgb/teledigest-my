@@ -554,9 +554,15 @@ def _fetch_wisdom_and_wiki(
         return []
 
     # Try to compute embedding for vector search.
+    # Must use the v2 query embedder (1536 dim, task_type=RETRIEVAL_QUERY) —
+    # the Firestore vector indexes are built for 1536-dim vectors, and the
+    # legacy _compute_embedding returned 768-dim symmetric vectors. Calling
+    # the legacy path against the new index threw silent dim-mismatch
+    # exceptions that fell back to recency sort — MOZG looked like it
+    # "worked" but was returning the newest 200 docs regardless of relevance.
     query_vector: list[float] | None = None
     if query:
-        query_vector = _compute_embedding(query)
+        query_vector = compute_query_embedding_v2(query)
         if query_vector:
             log.info("МОЗГ: using vector search for query %r", query[:60])
         else:
