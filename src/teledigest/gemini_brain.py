@@ -130,15 +130,21 @@ _key_rr_idx: int | None = None
 _key_cooldown_until: dict[int, float] = {}
 
 
-def _ensure_rr_idx_initialized(pool_size: int) -> None:
-    """Pick a random starting index on first call. Idempotent."""
-    global _key_rr_idx
-    if _key_rr_idx is None and pool_size > 0:
-        import random
+def _ensure_rr_idx_initialized(pool_size: int) -> int:
+    """Pick a random starting index on first call. Idempotent.
 
-        _key_rr_idx = random.randint(0, pool_size - 1)
-    elif _key_rr_idx is None:
-        _key_rr_idx = 0
+    Returns the current pointer value, guaranteed non-None — lets callers
+    use it directly without further narrowing.
+    """
+    global _key_rr_idx
+    if _key_rr_idx is None:
+        if pool_size > 0:
+            import random
+
+            _key_rr_idx = random.randint(0, pool_size - 1)
+        else:
+            _key_rr_idx = 0
+    return _key_rr_idx
 
 
 def _is_key_available(idx: int) -> bool:
@@ -360,6 +366,7 @@ def _embed_v2(
     clients = {k: genai.Client(api_key=k) for k in keys}
     _ensure_rr_idx_initialized(len(keys))
     global _key_rr_idx
+    assert _key_rr_idx is not None  # invariant from ensure, for mypy
 
     import re as _re
     import time as _time
@@ -606,6 +613,7 @@ def _process_one_chunk(
 
     _ensure_rr_idx_initialized(len(keys))
     global _key_rr_idx
+    assert _key_rr_idx is not None  # invariant from ensure, for mypy
 
     # Hard cap on total wait inside one chunk. Without this, a fully
     # exhausted pool would loop indefinitely.
