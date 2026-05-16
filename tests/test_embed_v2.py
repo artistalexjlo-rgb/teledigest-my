@@ -26,11 +26,19 @@ from teledigest.gemini_brain import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_rr_idx():
-    """Round-robin pointer is module-level — reset between tests."""
+def _reset_pool_state(monkeypatch):
+    """Reset module-level key-pool state between tests for determinism.
+
+    - _key_rr_idx: round-robin pointer (None → triggers random init)
+    - _key_cooldown_until: per-key cooldown timestamps
+    - _INTRA_SWEEP_GAP_S: silence the 1s sleep within sweep in tests
+    """
     gemini_brain._key_rr_idx = 0
+    gemini_brain._key_cooldown_until = {}
+    monkeypatch.setattr(gemini_brain, "_INTRA_SWEEP_GAP_S", 0.0)
     yield
     gemini_brain._key_rr_idx = 0
+    gemini_brain._key_cooldown_until = {}
 
 
 def _fake_client_returning(vectors: list[list[float]]):
