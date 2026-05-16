@@ -118,8 +118,119 @@ def _get_embedding_api_keys() -> list[str]:
     return [single] if single else []
 
 
-# Round-robin pointer for the multi-key pool. Reset on every process start.
-_key_rr_idx = 0
+# Round-robin pointer for the multi-key pool. Initialized lazily on first
+# use to a random index, so concurrent instances (e.g. live bot + migration
+# script) don't collide on the same key at start.
+_key_rr_idx: int | None = None
+
+# Per-key cooldown bookkeeping. When Gemini responds with retry_after we
+# remember the wake-time and skip the key (no HTTP call) until then. Avoids
+# the self-inflicted pulemyot where each 429 ticks the RPM counter and
+# *extends* the cooldown that Gemini already set.
+_key_cooldown_until: dict[int, float] = {}
+
+
+def _ensure_rr_idx_initialized(pool_size: int) -> None:
+    """Pick a random starting index on first call. Idempotent."""
+    global _key_rr_idx
+    if _key_rr_idx is None and pool_size > 0:
+        import random
+
+        _key_rr_idx = random.randint(0, pool_size - 1)
+    elif _key_rr_idx is None:
+        _key_rr_idx = 0
+
+
+def _is_key_available(idx: int) -> bool:
+    """True if key is not in a known cooldown window."""
+    import time as _time
+
+    return _time.time() >= _key_cooldown_until.get(idx, 0.0)
+
+
+def _cool_key(idx: int, seconds: float) -> None:
+    """Mark a key as cooling for the next `seconds`. Adds a small buffer
+    so we don't try exactly at expiry and re-trigger another 429."""
+    import time as _time
+
+    _key_cooldown_until[idx] = _time.time() + max(seconds + 1.0, 2.0)
+
+
+def _soonest_wake() -> float:
+    """Seconds until the earliest-cooling key becomes available. 0 if any
+    key is already available or none are tracked."""
+    import time as _time
+
+    if not _key_cooldown_until:
+        return 0.0
+    now = _time.time()
+    return max(0.0, min(_key_cooldown_until.values()) - now)
+
+
+# How long to sleep between attempts within ONE sweep so a burst of 7 keys
+# doesn't fire in 1.2 seconds and ping-pong RPM counters.
+_INTRA_SWEEP_GAP_S = 1.0
+# When Gemini returns 429 without an explicit retry_after, assume RPM
+# bucket needs ~30s to drain. Conservative default.
+_DEFAULT_COOLDOWN_S = 30.0
+
+
+class PoolDailyExhaustedError(RuntimeError):
+    """Raised when every key in the pool is at/beyond its soft RPD limit for
+    the current UTC day. Caller (e.g. migration script) should exit cleanly
+    and retry after 00:00 UTC."""
+
+
+# Free-tier RPD cap per key for gemini-embedding-2. We don't actually count
+# every Gemini request perfectly (only successful HTTP 200 batches), but it
+# gives an early warning: when a key has issued >= _RPD_SOFT_LIMIT successful
+# batches in the current UTC day, we stop sending it traffic and let the
+# day roll over.
+_RPD_HARD_LIMIT = 1000
+_RPD_SOFT_LIMIT = 950  # safety margin — stop ~50 calls before hard cap
+
+# Per-key successful-call counter, scoped to a single UTC day. Reset when
+# the day rolls over.
+_key_success_count: dict[int, int] = {}
+_success_count_utc_day: str | None = None
+
+
+def _utc_day_str() -> str:
+    """Current UTC date as YYYY-MM-DD — natural reset boundary for RPD."""
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _reset_success_counters_if_day_changed() -> None:
+    """If we've crossed the UTC midnight boundary, wipe per-key counters."""
+    global _success_count_utc_day, _key_success_count
+    today = _utc_day_str()
+    if _success_count_utc_day != today:
+        _success_count_utc_day = today
+        _key_success_count = {}
+
+
+def _record_key_success(idx: int) -> None:
+    """Bump the daily success counter for key idx."""
+    _reset_success_counters_if_day_changed()
+    _key_success_count[idx] = _key_success_count.get(idx, 0) + 1
+
+
+def _key_rpd_exhausted(idx: int) -> bool:
+    """True if this key has hit the soft RPD limit today."""
+    _reset_success_counters_if_day_changed()
+    return _key_success_count.get(idx, 0) >= _RPD_SOFT_LIMIT
+
+
+def _all_keys_rpd_exhausted(pool_size: int) -> bool:
+    """True if every key in the pool is at or beyond the soft RPD limit."""
+    if pool_size <= 0:
+        return True
+    _reset_success_counters_if_day_changed()
+    return all(
+        _key_success_count.get(i, 0) >= _RPD_SOFT_LIMIT for i in range(pool_size)
+    )
 
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
@@ -247,7 +358,15 @@ def _embed_v2(
 
     # Lazily build one Client per key (round-robin across calls).
     clients = {k: genai.Client(api_key=k) for k in keys}
+    _ensure_rr_idx_initialized(len(keys))
     global _key_rr_idx
+
+    import re as _re
+    import time as _time
+
+    _CODE_RE = _re.compile(r"\b(429|400|401|403)\b|RESOURCE_EXHAUSTED")
+    # Parse "retry in N.Ns" hint embedded in SDK exception message.
+    _RETRY_RE = _re.compile(r"retry in ([\d.]+)s", _re.I)
 
     # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
     # is interpreted as a single multi-part document, not a batch — it returns
@@ -255,43 +374,74 @@ def _embed_v2(
     out: list[list[float] | None] = []
     for text in texts:
         vec: list[float] | None = None
-        # Try every key in order starting from current round-robin index. On
-        # 429/RESOURCE_EXHAUSTED move to the next key — that key still has
-        # its own daily quota. Stop after one full sweep.
         last_err: Exception | None = None
-        for offset in range(len(keys)):
-            idx = (_key_rr_idx + offset) % len(keys)
-            try:
-                result = clients[keys[idx]].models.embed_content(
-                    model=_EMBEDDING_MODEL_V2,
-                    contents=text,
-                    config=cfg,
-                )
-                embeddings = result.embeddings or []
-                vec = list(embeddings[0].values or []) if embeddings else None
-                # Advance pointer past the successful key so next text starts
-                # on the next key — spreads load across keys evenly.
-                _key_rr_idx = (idx + 1) % len(keys)
-                break
-            except Exception as e:
-                last_err = e
-                err = str(e)
-                # Move on to the next key for any transient/per-key error:
-                # 429 (quota), 400/403 (invalid/revoked key), 401 (unauth).
-                # Only stop for genuinely non-key errors (network, 5xx that
-                # repeated on multiple keys — caught by sweep exhaustion).
-                if any(
-                    code in err
-                    for code in ("429", "RESOURCE_EXHAUSTED", "400", "401", "403")
-                ):
-                    log.warning(
-                        "v2 embed: key #%d failed (%s), trying next of %d",
-                        idx,
-                        err.split("\n")[0][:120],
-                        len(keys),
-                    )
+        fatal_error = False  # non-quota exception → no retries on this text
+        deadline = _time.time() + 60.0  # single-text deadline
+        attempts_this_text = 0
+        while _time.time() < deadline and vec is None and not fatal_error:
+            any_available = False
+            made_attempt = False
+            for offset in range(len(keys)):
+                idx = (_key_rr_idx + offset) % len(keys)
+                if not _is_key_available(idx):
                     continue
-                # Different kind of error (5xx, network). Don't waste sweep.
+                # Single-text path (live МОЗГ query): respect soft RPD so a
+                # bulk migration doesn't fully starve interactive retrieval.
+                # If every key is soft-exhausted we still let the query try
+                # the least-loaded one (any_available stays False otherwise).
+                if _key_rpd_exhausted(idx) and not _all_keys_rpd_exhausted(len(keys)):
+                    continue
+                any_available = True
+                if attempts_this_text > 0:
+                    _time.sleep(_INTRA_SWEEP_GAP_S)
+                attempts_this_text += 1
+                made_attempt = True
+                try:
+                    result = clients[keys[idx]].models.embed_content(
+                        model=_EMBEDDING_MODEL_V2,
+                        contents=text,
+                        config=cfg,
+                    )
+                    _key_rr_idx = (idx + 1) % len(keys)
+                    _record_key_success(idx)
+                    embeddings = result.embeddings or []
+                    candidate = list(embeddings[0].values or []) if embeddings else None
+                    if candidate is None:
+                        last_err = RuntimeError(
+                            f"empty embeddings on 200 OK (key #{idx})"
+                        )
+                        continue
+                    vec = candidate
+                    break
+                except Exception as e:
+                    _key_rr_idx = (idx + 1) % len(keys)
+                    last_err = e
+                    err = str(e)
+                    if _CODE_RE.search(err):
+                        m = _RETRY_RE.search(err)
+                        wait = float(m.group(1)) if m else _DEFAULT_COOLDOWN_S
+                        _cool_key(idx, wait)
+                        log.warning(
+                            "v2 embed: key #%d %s (cooling %.1fs)",
+                            idx,
+                            err.split("\n")[0][:120],
+                            wait,
+                        )
+                        continue
+                    # Non-quota error — abandon this text entirely.
+                    fatal_error = True
+                    break
+            if vec is not None or fatal_error:
+                break
+            if not any_available:
+                wait = _soonest_wake()
+                if wait <= 0:
+                    continue
+                log.warning(
+                    "v2 embed: all keys cooling, sleeping %.1fs", min(wait, 90.0)
+                )
+                _time.sleep(min(wait, 90.0))
+            elif not made_attempt:
                 break
         if vec is None and last_err is not None:
             log.warning(
@@ -436,54 +586,98 @@ def _process_one_chunk(
     dim: int,
     keys: list[str],
 ) -> list[list[float] | None] | None:
-    """Send one chunk through the multi-key pool with retry-after handling.
+    """Send one chunk through the multi-key pool.
 
-    Returns the embedding list on success, or None if every key failed
-    every sweep (caller can then split-half retry)."""
+    Two cooperating mechanisms protect us from the self-inflicted RPM
+    burnout we observed in earlier logs:
+
+    1. Per-key cooldown — if a key returned 429 recently, we skip it
+       without an HTTP call until its wake-time. Avoids ticking its RPM
+       counter again (which would extend the cooldown Gemini already set).
+    2. Intra-sweep gap — 1 second between actual HTTP attempts within one
+       sweep. Spreads a 7-key sweep over ~7 seconds instead of ~1.2, so
+       retry_after windows on early keys can drain before we reach them
+       in the next sweep.
+
+    Returns the embedding list on success, or None if no key in the pool
+    can serve the chunk after waking up cooldowns. Caller can then split.
+    """
     import time as _time
 
+    _ensure_rr_idx_initialized(len(keys))
     global _key_rr_idx
-    for sweep in range(3):
-        min_retry_after: float | None = None
-        last_status: int | None = None
+
+    # Hard cap on total wait inside one chunk. Without this, a fully
+    # exhausted pool would loop indefinitely.
+    deadline = _time.time() + 180.0
+
+    last_nonretriable_status: int | None = None
+    attempt_count = 0  # actual HTTP attempts (not skipped-cooling)
+
+    while _time.time() < deadline:
+        # Soft-RPD gate: if every key has already issued ~1000 successful
+        # batches today, there is nothing useful we can do until the UTC
+        # midnight reset. Raise so the migration script exits cleanly.
+        if _all_keys_rpd_exhausted(len(keys)):
+            raise PoolDailyExhaustedError(
+                f"All {len(keys)} keys reached soft RPD limit ({_RPD_SOFT_LIMIT}). "
+                "Resume after 00:00 UTC when counters reset."
+            )
+
+        any_available = False
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
+            if not _is_key_available(idx):
+                continue
+            if _key_rpd_exhausted(idx):
+                # Skip without HTTP: this key already burned ~1K calls today.
+                continue
+            any_available = True
+            if attempt_count > 0:
+                _time.sleep(_INTRA_SWEEP_GAP_S)
+            attempt_count += 1
             status, result, retry_after = _embed_v2_rest_batch(
                 chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
             )
-            last_status = status
+            # Advance RR pointer per attempt, win or lose — keeps load
+            # spread even when keys are unevenly available.
+            _key_rr_idx = (idx + 1) % len(keys)
             if status == 200 and result is not None:
-                _key_rr_idx = (idx + 1) % len(keys)
+                _record_key_success(idx)
                 return result
             if status in (400, 401, 403, 429) or status == -1:
+                cool_for = (
+                    retry_after if retry_after is not None else _DEFAULT_COOLDOWN_S
+                )
+                _cool_key(idx, cool_for)
                 log.warning(
-                    "v2 batch: key #%d status=%s retry_after=%s",
+                    "v2 batch: key #%d status=%s retry_after=%s (cooling %.1fs)",
                     idx,
                     status,
                     retry_after,
+                    cool_for,
                 )
-                if retry_after is not None:
-                    min_retry_after = (
-                        retry_after
-                        if min_retry_after is None
-                        else min(min_retry_after, retry_after)
-                    )
                 continue
+            # Non-retriable per-key (e.g. 5xx). Note and abandon — caller
+            # can split-half.
             log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
+            last_nonretriable_status = status
             return None
-        if min_retry_after is None:
-            # No retry hint → permanent failure (likely 400/403). Don't loop.
-            log.warning(
-                "v2 batch: chunk failed, no retry hint (status=%s)", last_status
-            )
-            return None
-        wait = min(min_retry_after + 1.0, 90.0)
-        log.warning(
-            "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
-            sweep + 1,
-            wait,
-        )
-        _time.sleep(wait)
+
+        if not any_available:
+            wait = _soonest_wake()
+            if wait <= 0:
+                # Race: cooldown expired between checks. Try again.
+                continue
+            wait = min(wait, 90.0)
+            log.warning("v2 batch: all keys cooling, sleeping %.1fs to wake-up", wait)
+            _time.sleep(wait)
+            # After waking up, loop back to try again.
+
+    log.warning(
+        "v2 batch: chunk deadline reached (last non-retriable status=%s)",
+        last_nonretriable_status,
+    )
     return None
 
 
@@ -492,7 +686,7 @@ def compute_document_embeddings_v2_batch(
     dim: int = _EMBEDDING_DIM_V2,
     token_budget: int = 8000,
     max_count: int = 30,
-    inter_chunk_sleep: float = 4.0,
+    inter_chunk_sleep: float = 6.0,
 ) -> list[list[float] | None]:
     """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
 

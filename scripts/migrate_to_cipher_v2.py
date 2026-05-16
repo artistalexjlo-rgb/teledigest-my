@@ -183,14 +183,25 @@ def main() -> int:
 
     init_config(Path(args.config))
 
-    from teledigest.gemini_brain import _EMBEDDING_MODEL_TAG_V2, _build_firestore_client
+    from teledigest.gemini_brain import (
+        _EMBEDDING_MODEL_TAG_V2,
+        PoolDailyExhaustedError,
+        _build_firestore_client,
+    )
 
     db = _build_firestore_client()
     total_migrated = total_skipped = total_failed = 0
+    exhausted = False
     for name in [c.strip() for c in args.collections.split(",") if c.strip()]:
-        m, s, f = migrate_collection(
-            db, name, _EMBEDDING_MODEL_TAG_V2, args.batch_size, args.sleep
-        )
+        try:
+            m, s, f = migrate_collection(
+                db, name, _EMBEDDING_MODEL_TAG_V2, args.batch_size, args.sleep
+            )
+        except PoolDailyExhaustedError as e:
+            print(f"\n!!! Daily key-pool exhausted: {e}")
+            print("Migration paused. Resume after 00:00 UTC.")
+            exhausted = True
+            break
         total_migrated += m
         total_skipped += s
         total_failed += f
@@ -199,6 +210,8 @@ def main() -> int:
         f"\n=== TOTAL: migrated={total_migrated} "
         f"skipped={total_skipped} failed={total_failed} ==="
     )
+    if exhausted:
+        return 2  # distinct exit code for "ran out of daily quota, not a crash"
     return 0 if total_failed == 0 else 1
 
 
