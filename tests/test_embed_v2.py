@@ -35,10 +35,14 @@ def _reset_pool_state(monkeypatch):
     """
     gemini_brain._key_rr_idx = 0
     gemini_brain._key_cooldown_until = {}
+    gemini_brain._key_success_count = {}
+    gemini_brain._success_count_utc_day = None
     monkeypatch.setattr(gemini_brain, "_INTRA_SWEEP_GAP_S", 0.0)
     yield
     gemini_brain._key_rr_idx = 0
     gemini_brain._key_cooldown_until = {}
+    gemini_brain._key_success_count = {}
+    gemini_brain._success_count_utc_day = None
 
 
 def _fake_client_returning(vectors: list[list[float]]):

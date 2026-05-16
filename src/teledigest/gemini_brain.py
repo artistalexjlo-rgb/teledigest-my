@@ -175,6 +175,64 @@ _INTRA_SWEEP_GAP_S = 1.0
 _DEFAULT_COOLDOWN_S = 30.0
 
 
+class PoolDailyExhaustedError(RuntimeError):
+    """Raised when every key in the pool is at/beyond its soft RPD limit for
+    the current UTC day. Caller (e.g. migration script) should exit cleanly
+    and retry after 00:00 UTC."""
+
+
+# Free-tier RPD cap per key for gemini-embedding-2. We don't actually count
+# every Gemini request perfectly (only successful HTTP 200 batches), but it
+# gives an early warning: when a key has issued >= _RPD_SOFT_LIMIT successful
+# batches in the current UTC day, we stop sending it traffic and let the
+# day roll over.
+_RPD_HARD_LIMIT = 1000
+_RPD_SOFT_LIMIT = 950  # safety margin — stop ~50 calls before hard cap
+
+# Per-key successful-call counter, scoped to a single UTC day. Reset when
+# the day rolls over.
+_key_success_count: dict[int, int] = {}
+_success_count_utc_day: str | None = None
+
+
+def _utc_day_str() -> str:
+    """Current UTC date as YYYY-MM-DD — natural reset boundary for RPD."""
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _reset_success_counters_if_day_changed() -> None:
+    """If we've crossed the UTC midnight boundary, wipe per-key counters."""
+    global _success_count_utc_day, _key_success_count
+    today = _utc_day_str()
+    if _success_count_utc_day != today:
+        _success_count_utc_day = today
+        _key_success_count = {}
+
+
+def _record_key_success(idx: int) -> None:
+    """Bump the daily success counter for key idx."""
+    _reset_success_counters_if_day_changed()
+    _key_success_count[idx] = _key_success_count.get(idx, 0) + 1
+
+
+def _key_rpd_exhausted(idx: int) -> bool:
+    """True if this key has hit the soft RPD limit today."""
+    _reset_success_counters_if_day_changed()
+    return _key_success_count.get(idx, 0) >= _RPD_SOFT_LIMIT
+
+
+def _all_keys_rpd_exhausted(pool_size: int) -> bool:
+    """True if every key in the pool is at or beyond the soft RPD limit."""
+    if pool_size <= 0:
+        return True
+    _reset_success_counters_if_day_changed()
+    return all(
+        _key_success_count.get(i, 0) >= _RPD_SOFT_LIMIT for i in range(pool_size)
+    )
+
+
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
     """Compute embedding vector for a single text. On 429 falls back to the
     sibling embedding model so a single retrieval doesn't fail just because
@@ -327,6 +385,12 @@ def _embed_v2(
                 idx = (_key_rr_idx + offset) % len(keys)
                 if not _is_key_available(idx):
                     continue
+                # Single-text path (live МОЗГ query): respect soft RPD so a
+                # bulk migration doesn't fully starve interactive retrieval.
+                # If every key is soft-exhausted we still let the query try
+                # the least-loaded one (any_available stays False otherwise).
+                if _key_rpd_exhausted(idx) and not _all_keys_rpd_exhausted(len(keys)):
+                    continue
                 any_available = True
                 if attempts_this_text > 0:
                     _time.sleep(_INTRA_SWEEP_GAP_S)
@@ -339,6 +403,7 @@ def _embed_v2(
                         config=cfg,
                     )
                     _key_rr_idx = (idx + 1) % len(keys)
+                    _record_key_success(idx)
                     embeddings = result.embeddings or []
                     candidate = list(embeddings[0].values or []) if embeddings else None
                     if candidate is None:
@@ -550,10 +615,22 @@ def _process_one_chunk(
     attempt_count = 0  # actual HTTP attempts (not skipped-cooling)
 
     while _time.time() < deadline:
+        # Soft-RPD gate: if every key has already issued ~1000 successful
+        # batches today, there is nothing useful we can do until the UTC
+        # midnight reset. Raise so the migration script exits cleanly.
+        if _all_keys_rpd_exhausted(len(keys)):
+            raise PoolDailyExhaustedError(
+                f"All {len(keys)} keys reached soft RPD limit ({_RPD_SOFT_LIMIT}). "
+                "Resume after 00:00 UTC when counters reset."
+            )
+
         any_available = False
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
             if not _is_key_available(idx):
+                continue
+            if _key_rpd_exhausted(idx):
+                # Skip without HTTP: this key already burned ~1K calls today.
                 continue
             any_available = True
             if attempt_count > 0:
@@ -566,6 +643,7 @@ def _process_one_chunk(
             # spread even when keys are unevenly available.
             _key_rr_idx = (idx + 1) % len(keys)
             if status == 200 and result is not None:
+                _record_key_success(idx)
                 return result
             if status in (400, 401, 403, 429) or status == -1:
                 cool_for = (
