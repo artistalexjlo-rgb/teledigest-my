@@ -84,13 +84,6 @@ def migrate_collection(
     """Returns (migrated, skipped_already_v2, failed)."""
     from google.cloud.firestore_v1.vector import Vector
 
-    # NOTE: rolled back to per-text embedding via SDK (the cac199c approach).
-    # batchEmbedContents was experimentally faster but Google counts per-text
-    # in batch the same as separate calls, AND extended cooldowns punished
-    # repeated bursts. Per-text path migrated ~7K docs without issues; the
-    # batch version stalled on retries. Keep the batch import line commented
-    # in case we want to bring it back when Google's behavior changes.
-    # from teledigest.gemini_brain import compute_document_embeddings_v2_batch
     from teledigest.gemini_brain import compute_document_embeddings_v2
 
     coll = db.collection(collection_name)
@@ -105,12 +98,6 @@ def migrate_collection(
         if not pending:
             return
         texts = [t for _, _, t in pending]
-        # Per-text path: one HTTP call per text via SDK.embed_content with
-        # task_type=RETRIEVAL_DOCUMENT. Slower in wall-clock but predictable
-        # under Google rate limits — each call counts as 1 RPM/RPD on the
-        # current key, and round-robin spreads load. Multi-key cooldown
-        # bookkeeping from gemini_brain handles 429 backoff per key.
-        # vectors = compute_document_embeddings_v2_batch(texts)
         vectors = compute_document_embeddings_v2(texts)
         for (doc_id, src, text), vec in zip(pending, vectors):
             if vec is None:
@@ -176,15 +163,14 @@ def main() -> int:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=100,
-        help="Texts per batchEmbedContents call (default 100 = 1 RPD for 100 "
-        "embeddings). TPM budget ≈ 30K/min, ~100 short texts comfortably fit.",
+        default=50,
+        help="Texts per Firestore flush (each text is one embedding call).",
     )
     parser.add_argument(
         "--sleep",
         type=float,
-        default=2.0,
-        help="Sleep between batches (default 2s — keeps RPM at ~30/min per key)",
+        default=1.0,
+        help="Sleep between flush batches (seconds).",
     )
     args = parser.parse_args()
 
@@ -192,25 +178,14 @@ def main() -> int:
 
     init_config(Path(args.config))
 
-    from teledigest.gemini_brain import (
-        _EMBEDDING_MODEL_TAG_V2,
-        PoolDailyExhaustedError,
-        _build_firestore_client,
-    )
+    from teledigest.gemini_brain import _EMBEDDING_MODEL_TAG_V2, _build_firestore_client
 
     db = _build_firestore_client()
     total_migrated = total_skipped = total_failed = 0
-    exhausted = False
     for name in [c.strip() for c in args.collections.split(",") if c.strip()]:
-        try:
-            m, s, f = migrate_collection(
-                db, name, _EMBEDDING_MODEL_TAG_V2, args.batch_size, args.sleep
-            )
-        except PoolDailyExhaustedError as e:
-            print(f"\n!!! Daily key-pool exhausted: {e}")
-            print("Migration paused. Resume after 00:00 UTC.")
-            exhausted = True
-            break
+        m, s, f = migrate_collection(
+            db, name, _EMBEDDING_MODEL_TAG_V2, args.batch_size, args.sleep
+        )
         total_migrated += m
         total_skipped += s
         total_failed += f
@@ -219,8 +194,6 @@ def main() -> int:
         f"\n=== TOTAL: migrated={total_migrated} "
         f"skipped={total_skipped} failed={total_failed} ==="
     )
-    if exhausted:
-        return 2  # distinct exit code for "ran out of daily quota, not a crash"
     return 0 if total_failed == 0 else 1
 
 
