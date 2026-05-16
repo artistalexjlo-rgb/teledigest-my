@@ -84,7 +84,14 @@ def migrate_collection(
     """Returns (migrated, skipped_already_v2, failed)."""
     from google.cloud.firestore_v1.vector import Vector
 
-    from teledigest.gemini_brain import compute_document_embeddings_v2_batch
+    # NOTE: rolled back to per-text embedding via SDK (the cac199c approach).
+    # batchEmbedContents was experimentally faster but Google counts per-text
+    # in batch the same as separate calls, AND extended cooldowns punished
+    # repeated bursts. Per-text path migrated ~7K docs without issues; the
+    # batch version stalled on retries. Keep the batch import line commented
+    # in case we want to bring it back when Google's behavior changes.
+    # from teledigest.gemini_brain import compute_document_embeddings_v2_batch
+    from teledigest.gemini_brain import compute_document_embeddings_v2
 
     coll = db.collection(collection_name)
     migrated = 0
@@ -98,11 +105,13 @@ def migrate_collection(
         if not pending:
             return
         texts = [t for _, _, t in pending]
-        # batchEmbedContents: 1 HTTP call → N vectors → 1 RPD for whole batch.
-        # Chunking happens INSIDE compute_document_embeddings_v2_batch by
-        # token budget (8000), not by count — long wiki docs would otherwise
-        # blow past the 30K TPM cap on the first call.
-        vectors = compute_document_embeddings_v2_batch(texts)
+        # Per-text path: one HTTP call per text via SDK.embed_content with
+        # task_type=RETRIEVAL_DOCUMENT. Slower in wall-clock but predictable
+        # under Google rate limits — each call counts as 1 RPM/RPD on the
+        # current key, and round-robin spreads load. Multi-key cooldown
+        # bookkeeping from gemini_brain handles 429 backoff per key.
+        # vectors = compute_document_embeddings_v2_batch(texts)
+        vectors = compute_document_embeddings_v2(texts)
         for (doc_id, src, text), vec in zip(pending, vectors):
             if vec is None:
                 failed += 1
