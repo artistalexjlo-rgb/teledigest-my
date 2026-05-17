@@ -401,6 +401,73 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
 
 
+# Per-text token cap. Gemini :batchEmbedContents rejects requests where any
+# single text is too large — exact limit isn't documented but ~2K tokens is
+# safe. We split on this BEFORE chunking so a single long wiki article
+# doesn't blow a whole batch.
+_MAX_TOKENS_PER_TEXT = 1500
+# Soft overlap between adjacent pieces of a long text — preserves context
+# at chunk boundaries so the embedding doesn't lose mid-sentence meaning.
+_SPLIT_OVERLAP_CHARS = 200
+
+
+def _split_long_text(text: str, max_tokens: int = _MAX_TOKENS_PER_TEXT) -> list[str]:
+    """Split a long text into pieces each <= max_tokens.
+
+    Tries to split on paragraph boundaries (`\\n\\n`), then sentence
+    boundaries (`. `), then hard char limit. Keeps a small overlap between
+    pieces so embeddings don't lose context at the seam.
+
+    Returns [text] unchanged if text already fits."""
+    if _estimate_tokens(text) <= max_tokens:
+        return [text]
+
+    # Convert token cap back to a char cap (with the same 3-char-per-token
+    # margin so we stay under).
+    max_chars = max_tokens * 3
+    pieces: list[str] = []
+    remaining = text
+
+    while remaining:
+        if len(remaining) <= max_chars:
+            pieces.append(remaining)
+            break
+
+        # Find a clean cut point: prefer \n\n, then ". ", then hard cut.
+        cut = remaining.rfind("\n\n", 0, max_chars)
+        if cut < max_chars // 2:
+            cut = remaining.rfind(". ", 0, max_chars)
+            if cut < max_chars // 2:
+                cut = max_chars  # no clean boundary, hard cut
+
+        piece = remaining[:cut].rstrip()
+        if piece:
+            pieces.append(piece)
+        # Step forward with small overlap to preserve context at seam.
+        next_start = max(cut - _SPLIT_OVERLAP_CHARS, cut - max_chars // 4)
+        next_start = max(next_start, 1)  # always advance at least 1 char
+        remaining = remaining[next_start:].lstrip()
+
+    return pieces or [text]
+
+
+def _average_vectors(vectors: list[list[float]]) -> list[float]:
+    """Element-wise mean of a list of equal-dim vectors. Used to combine
+    embeddings of multiple pieces of one long text back into a single
+    vector representing the whole document."""
+    if not vectors:
+        return []
+    if len(vectors) == 1:
+        return vectors[0]
+    dim = len(vectors[0])
+    summed = [0.0] * dim
+    for v in vectors:
+        for i in range(dim):
+            summed[i] += v[i]
+    n = float(len(vectors))
+    return [s / n for s in summed]
+
+
 def _split_by_token_budget(
     texts: list[str],
     token_budget: int,
@@ -448,9 +515,6 @@ def _process_one_chunk(
         last_status: int | None = None
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
-            # DUMB-TEST: 60s gap before EVERY request — sweep любой,
-            # ключ любой. Один запрос в минуту, без пулемёта.
-            _time.sleep(60.0)
             status, result, retry_after = _embed_v2_rest_batch(
                 chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
             )
@@ -524,16 +588,43 @@ def compute_document_embeddings_v2_batch(
 
     import time as _time
 
-    chunks = _split_by_token_budget(texts, token_budget, max_count)
+    # STEP 1: Pre-split any text that's too large for a single embedding call.
+    # Gemini :batchEmbedContents rejects oversized texts with 429 even when
+    # the rest of the chunk is tiny. Split BEFORE chunking so each piece
+    # fits comfortably. Track original-doc → list-of-piece-indices so we
+    # can re-merge embeddings by averaging at the end.
+    pieces: list[str] = []
+    doc_to_piece_idx: list[list[int]] = []  # for each original doc, list of indices in `pieces`
+    split_log_count = 0
+    for t in texts:
+        ps = _split_long_text(t)
+        if len(ps) > 1:
+            split_log_count += 1
+        idxs = []
+        for p in ps:
+            idxs.append(len(pieces))
+            pieces.append(p)
+        doc_to_piece_idx.append(idxs)
+    if split_log_count:
+        log.info(
+            "v2 batch: %d/%d docs were too long, split into %d pieces total",
+            split_log_count,
+            len(texts),
+            len(pieces),
+        )
+
+    chunks = _split_by_token_budget(pieces, token_budget, max_count)
     log.info(
-        "v2 batch: %d texts → %d chunks (budget=%d tokens, max=%d count)",
+        "v2 batch: %d texts → %d pieces → %d chunks (budget=%d tokens, max=%d count)",
         len(texts),
+        len(pieces),
         len(chunks),
         token_budget,
         max_count,
     )
 
-    out: list[list[float] | None] = []
+    # STEP 2: Embed all pieces in chunks (the usual flow).
+    piece_vectors: list[list[float] | None] = []
     for chunk_idx, chunk in enumerate(chunks):
         result = _process_one_chunk(chunk, dim, keys)
 
@@ -556,10 +647,24 @@ def compute_document_embeddings_v2_batch(
 
         if result is None:
             result = [None] * len(chunk)
-        out.extend(result)
+        piece_vectors.extend(result)
 
         if chunk_idx < len(chunks) - 1 and inter_chunk_sleep > 0:
             _time.sleep(inter_chunk_sleep)
+
+    # STEP 3: Merge piece-vectors back into one vector per original doc.
+    # For multi-piece docs, average the embeddings (standard practice for
+    # long-document embedding). If any piece failed (None), drop it from
+    # the average; if ALL pieces failed, the doc gets None.
+    out: list[list[float] | None] = []
+    for idxs in doc_to_piece_idx:
+        vecs = [piece_vectors[i] for i in idxs if piece_vectors[i] is not None]
+        if not vecs:
+            out.append(None)
+        elif len(vecs) == 1:
+            out.append(vecs[0])
+        else:
+            out.append(_average_vectors(vecs))
 
     return out
 
