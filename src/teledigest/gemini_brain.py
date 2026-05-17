@@ -121,6 +121,18 @@ def _get_embedding_api_keys() -> list[str]:
 # Round-robin pointer for the multi-key pool. Reset on every process start.
 _key_rr_idx = 0
 
+# Per-key daily request counter, used by both _embed_v2 (single) and
+# _process_one_chunk (batch). Each successful AND each 429-failed request
+# bumps the counter — Google's quota meter counts 429s too. When a key
+# reaches _RPD_SOFT_CAP we stop sending to it for the rest of the day,
+# leaving margin under the 1000/day free-tier limit.
+#
+# IMPORTANT: this is in-process memory. If you restart the container,
+# counter resets. Restart only after midnight Pacific Time, or you'll
+# blow past the cap silently.
+_key_rpd_count: dict[int, int] = {}
+_RPD_SOFT_CAP = 950
+
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
     """Compute embedding vector for a single text. On 429 falls back to the
@@ -249,6 +261,14 @@ def _embed_v2(
     clients = {k: genai.Client(api_key=k) for k in keys}
     global _key_rr_idx
 
+    # Per-key per-day request counter. Free-tier limit is 1000 RPD per key
+    # on gemini-embedding-2; we stop trying a key when it hits 950 to leave
+    # safety margin and not generate extra 429s that warm up IP throttle.
+    # Counter resets on process restart — that's OK, Google's daily quota
+    # resets at midnight PT anyway, and a fresh container after midnight
+    # starts with clean counters.
+    import time as _time
+
     # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
     # is interpreted as a single multi-part document, not a batch — it returns
     # one vector regardless of list size. So call per-text individually.
@@ -261,12 +281,21 @@ def _embed_v2(
         last_err: Exception | None = None
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
+            # Skip keys that already hit our soft RPD cap (950/1000).
+            if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
+                continue
+            # Intra-sweep gap: don't fire keys faster than 1 per 5s. Without
+            # this, 8 keys get hit in ~1 second on 429, which Google reads
+            # as abuse and IP-throttles the source.
+            if offset > 0:
+                _time.sleep(5.0)
             try:
                 result = clients[keys[idx]].models.embed_content(
                     model=_EMBEDDING_MODEL_V2,
                     contents=text,
                     config=cfg,
                 )
+                _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
                 embeddings = result.embeddings or []
                 vec = list(embeddings[0].values or []) if embeddings else None
                 # Advance pointer past the successful key so next text starts
@@ -276,6 +305,9 @@ def _embed_v2(
             except Exception as e:
                 last_err = e
                 err = str(e)
+                # 429 still counts in Google's quota meter, so count it too.
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
                 # Move on to the next key for any transient/per-key error:
                 # 429 (quota), 400/403 (invalid/revoked key), 401 (unauth).
                 # Only stop for genuinely non-key errors (network, 5xx that
@@ -285,10 +317,13 @@ def _embed_v2(
                     for code in ("429", "RESOURCE_EXHAUSTED", "400", "401", "403")
                 ):
                     log.warning(
-                        "v2 embed: key #%d failed (%s), trying next of %d",
+                        "v2 embed: key #%d failed (%s), trying next of %d "
+                        "[rpd=%d/%d]",
                         idx,
                         err.split("\n")[0][:120],
                         len(keys),
+                        _key_rpd_count.get(idx, 0),
+                        _RPD_SOFT_CAP,
                     )
                     continue
                 # Different kind of error (5xx, network). Don't waste sweep.
@@ -515,19 +550,31 @@ def _process_one_chunk(
         last_status: int | None = None
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
+            # Skip keys at soft RPD cap — don't waste a 429 on them and
+            # don't generate IP-throttle pressure.
+            if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
+                continue
+            # Intra-sweep gap: 5s between key attempts. Without this, 8 keys
+            # get hit in ~1s on 429 and Google IP-throttles the source.
+            if offset > 0:
+                _time.sleep(5.0)
             status, result, retry_after = _embed_v2_rest_batch(
                 chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
             )
             last_status = status
+            # Each request burns RPD whether it succeeds or returns 429.
+            _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
             if status == 200 and result is not None:
                 _key_rr_idx = (idx + 1) % len(keys)
                 return result
             if status in (400, 401, 403, 429) or status == -1:
                 log.warning(
-                    "v2 batch: key #%d status=%s retry_after=%s",
+                    "v2 batch: key #%d status=%s retry_after=%s [rpd=%d/%d]",
                     idx,
                     status,
                     retry_after,
+                    _key_rpd_count.get(idx, 0),
+                    _RPD_SOFT_CAP,
                 )
                 if retry_after is not None:
                     min_retry_after = (
