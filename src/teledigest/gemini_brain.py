@@ -448,6 +448,9 @@ def _process_one_chunk(
         last_status: int | None = None
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
+            # DUMB-TEST: 60s gap before EVERY request — sweep любой,
+            # ключ любой. Один запрос в минуту, без пулемёта.
+            _time.sleep(60.0)
             status, result, retry_after = _embed_v2_rest_batch(
                 chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
             )
