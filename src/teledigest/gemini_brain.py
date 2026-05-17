@@ -596,10 +596,35 @@ def compute_document_embeddings_v2_batch(
     pieces: list[str] = []
     doc_to_piece_idx: list[list[int]] = []  # for each original doc, list of indices in `pieces`
     split_log_count = 0
-    for t in texts:
+    # Length stats for diagnostic visibility.
+    text_lens = [len(t) for t in texts]
+    text_tokens = [_estimate_tokens(t) for t in texts]
+    log.info(
+        "v2 batch INPUT STATS: count=%d chars[min=%d max=%d avg=%d] "
+        "tokens[min=%d max=%d avg=%d] threshold=%d tokens (=%d chars)",
+        len(texts),
+        min(text_lens) if text_lens else 0,
+        max(text_lens) if text_lens else 0,
+        sum(text_lens) // len(text_lens) if text_lens else 0,
+        min(text_tokens) if text_tokens else 0,
+        max(text_tokens) if text_tokens else 0,
+        sum(text_tokens) // len(text_tokens) if text_tokens else 0,
+        _MAX_TOKENS_PER_TEXT,
+        _MAX_TOKENS_PER_TEXT * 3,
+    )
+    for i, t in enumerate(texts):
         ps = _split_long_text(t)
         if len(ps) > 1:
             split_log_count += 1
+            log.info(
+                "v2 batch SPLIT: doc #%d len=%d chars (~%d tokens) → %d pieces "
+                "(piece_lens=%s)",
+                i,
+                len(t),
+                _estimate_tokens(t),
+                len(ps),
+                [len(p) for p in ps],
+            )
         idxs = []
         for p in ps:
             idxs.append(len(pieces))
@@ -612,6 +637,8 @@ def compute_document_embeddings_v2_batch(
             len(texts),
             len(pieces),
         )
+    else:
+        log.info("v2 batch: no docs needed splitting (all <=%d tokens)", _MAX_TOKENS_PER_TEXT)
 
     chunks = _split_by_token_budget(pieces, token_budget, max_count)
     log.info(
@@ -626,6 +653,18 @@ def compute_document_embeddings_v2_batch(
     # STEP 2: Embed all pieces in chunks (the usual flow).
     piece_vectors: list[list[float] | None] = []
     for chunk_idx, chunk in enumerate(chunks):
+        chunk_tokens = sum(_estimate_tokens(t) for t in chunk)
+        chunk_chars = sum(len(t) for t in chunk)
+        log.info(
+            "v2 batch SEND chunk %d/%d: %d texts, %d chars, ~%d tokens, "
+            "max_text_chars=%d",
+            chunk_idx + 1,
+            len(chunks),
+            len(chunk),
+            chunk_chars,
+            chunk_tokens,
+            max(len(t) for t in chunk) if chunk else 0,
+        )
         result = _process_one_chunk(chunk, dim, keys)
 
         if result is None and len(chunk) > 1:
