@@ -197,46 +197,37 @@ def pack_chunks(pieces: list[str]) -> list[Chunk]:
 
 
 class KeyBudget:
-    """Per-key TPM budget — fill-then-wait, not rolling-average.
+    """Per-key adaptive pace — wait proportional to tokens after each send.
 
-    Window of 65 seconds (TPM_PER_KEY = 30000 / min, +5s margin). Worker
-    fills the bucket up to TPM_PER_KEY tokens, then sleeps until the
-    window expires, then opens a fresh window.
+    Formula from TZ migration_pipeline_tz.md §2.1:
+        pause = (tokens_sent / TPM) * 60
 
-    No clever "rolling average" — Google's free-tier counter is bursty,
-    a sustained-rate calculation thinks 22K in 12s is fine but Google
-    sees the burst and 429s. Simple "fill to cap, wait full minute"
-    avoids that entirely.
+    После send'а 11K токенов ждём 11K/30K*60 = 22 секунды до следующего
+    HTTP на этом ключе. После 30K — 60 секунд. Это smooth rate-limiting:
+    долгосрочный темп никогда не превышает TPM_PER_KEY токенов/мин,
+    короткие burst'ы тоже невозможны (один запрос блокирует ключ
+    пропорционально его размеру).
+
+    Раньше тут была logика "fill window до 30K → wait 65с" — она
+    разрешала 11K+10K=21K за 10 секунд (в окне), Google ловил burst и
+    клал 429 на весь project (per User/Project/Model лимит).
     """
-
-    WINDOW_S = 65.0  # 60s minute + 5s safety margin
 
     def __init__(self, tpm: int = TPM_PER_KEY, rpm: int = RPM_PER_KEY) -> None:
         self.tpm = tpm
-        self.rpm = rpm  # kept for compat, not enforced (TPM is the tighter bound)
-        self._window_start = 0.0
-        self._tokens_in_window = 0
+        self.rpm = rpm  # kept for API compat; TPM is the binding constraint
+        self._next_allowed_at = 0.0
 
     def can_send(self, tokens: int) -> float:
         """Return seconds to wait before sending `tokens`. 0 = send now."""
         now = time.time()
-        # Window expired → fresh start, no wait.
-        if now - self._window_start >= self.WINDOW_S:
-            return 0.0
-        # Within window AND budget allows → send.
-        if self._tokens_in_window + tokens <= self.tpm:
-            return 0.0
-        # Window not expired AND budget exhausted → wait full window.
-        return max((self._window_start + self.WINDOW_S) - now, 0.0)
+        return max(self._next_allowed_at - now, 0.0)
 
     def record(self, tokens: int) -> None:
-        """Mark `tokens` as sent now. Opens a new window if previous expired."""
+        """Mark `tokens` as sent — schedule next-allowed time proportionally."""
         now = time.time()
-        if now - self._window_start >= self.WINDOW_S:
-            self._window_start = now
-            self._tokens_in_window = tokens
-        else:
-            self._tokens_in_window += tokens
+        delay = (tokens / self.tpm) * 60.0
+        self._next_allowed_at = now + delay
 
 
 # ---------------------------------------------------------------------------
