@@ -562,8 +562,10 @@ def _process_one_chunk(
                 chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
             )
             last_status = status
-            # Each request burns RPD whether it succeeds or returns 429.
-            _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+            # Google counts each text inside batchEmbedContents as a separate
+            # RPD tick. Chunk of N texts = +N toward the 1000/day cap.
+            # Both 200-OK and 429 burn quota.
+            _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + len(chunk)
             if status == 200 and result is not None:
                 _key_rr_idx = (idx + 1) % len(keys)
                 return result
