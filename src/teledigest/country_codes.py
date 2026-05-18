@@ -273,13 +273,81 @@ COUNTRIES: dict[str, tuple[str, str]] = {
 # Russian name (lowercase) -> code
 _NAME_TO_CODE: dict[str, str] = {v[0].lower(): k for k, v in COUNTRIES.items()}
 
-# Variants with spaces/dashes normalized
+# Common aliases — частые разговорные/неофициальные названия, которые
+# пользователи пишут вместо канонического имени из COUNTRIES. Добавлять
+# при появлении новой страны в чатах / wiki, если каноническое название
+# выглядит формальным или неоднозначным.
+_ALIASES: dict[str, str] = {
+    "южная корея": "kr",
+    "корея": "kr",  # по умолчанию южная (СК на луки в России называют так)
+    "северная корея": "kp",
+    "кндр": "kp",
+    "сша": "us",
+    "америка": "us",
+    "штаты": "us",
+    "англия": "gb",
+    "великобритания": "gb",
+    "великая британия": "gb",
+    "британия": "gb",
+    "уэк": "ae",
+    "оаэ": "ae",
+    "эмираты": "ae",
+    "чехия": "cz",
+    "беларусь": "by",
+    "белоруссия": "by",
+    "молдавия": "md",
+    "молдова": "md",
+    "грузия": "ge",
+    "вьетнам": "vn",
+    "лаос": "la",
+    "камбоджа": "kh",
+    "мьянма": "mm",
+    "бирма": "mm",
+    "иран": "ir",
+    "ирак": "iq",
+    "оман": "om",
+    "катар": "qa",
+    "бахрейн": "bh",
+    "израиль": "il",
+    "иордания": "jo",
+    "сирия": "sy",
+    "ливан": "lb",
+    "турция": "tr",
+    "македония": "mk",
+    "сербия": "rs",
+    "косово": "xk",
+    "черногория": "me",
+    "босния": "ba",
+    "хорватия": "hr",
+    "словения": "si",
+    "словакия": "sk",
+    "польша": "pl",
+    "венгрия": "hu",
+    "австрия": "at",
+    "болгария": "bg",
+    "румыния": "ro",
+    "греция": "gr",
+    "мальта": "mt",
+    "кипр": "cy",
+}
+
+# Variants with spaces/dashes normalized — collect from BOTH canonical
+# names and aliases so resolver catches "Южная Корея" / "Южная-Корея" /
+# "южнаякорея" all the same.
 _NORMALIZED: dict[str, str] = {}
-for name, code in _NAME_TO_CODE.items():
+
+
+def _add_variants(name: str, code: str) -> None:
     _NORMALIZED[name] = code
     _NORMALIZED[name.replace("-", " ")] = code
     _NORMALIZED[name.replace(" ", "-")] = code
     _NORMALIZED[name.replace("-", "").replace(" ", "")] = code
+
+
+for _name, _code in _NAME_TO_CODE.items():
+    _add_variants(_name, _code)
+for _alias, _code in _ALIASES.items():
+    _add_variants(_alias, _code)
 
 
 def resolve_country(text: str) -> tuple[str, str, str] | None:
