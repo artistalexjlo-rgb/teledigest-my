@@ -168,20 +168,7 @@ def migrate_collection(
                 last_progress_print = now
 
     texts = [t for _, _, t in pending]
-
-    # В Vertex-режиме все воркеры делят одну service-account auth = одну
-    # квоту проекта. >1 воркера = burst → 429. Используем vertex_worker_count
-    # из конфига (default 1). В free-tier режиме keys=None — берётся
-    # GEMINI_API_KEYS из env, один воркер на ключ.
-    from teledigest.config import get_config
-
-    cfg = get_config()
-    if cfg.gemini.use_vertex:
-        keys = [f"vertex-{i}" for i in range(cfg.gemini.vertex_worker_count)]
-    else:
-        keys = None
-
-    embed_documents_parallel(texts, dim=1536, keys=keys, on_doc_complete=write_back)
+    embed_documents_parallel(texts, dim=1536, on_doc_complete=write_back)
 
     total_time = time.time() - t_start
     print(
