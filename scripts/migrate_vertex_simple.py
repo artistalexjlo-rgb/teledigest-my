@@ -95,13 +95,24 @@ def fetch_all_pending(coll, model_tag: str) -> list[tuple[str, dict, str]]:
 
 
 def migrate_collection(
-    db, vertex_client, embed_cfg_factory, model_name, collection_name, model_tag
+    db,
+    vertex_client,
+    embed_cfg_factory,
+    model_name,
+    collection_name,
+    model_tag,
+    rpm: float = 5.0,
 ):
-    """Sequential per-text migration on Vertex. Returns (migrated, failed)."""
+    """Sequential per-text migration on Vertex. Returns (migrated, failed).
+
+    rpm: requests-per-minute throttle. На Vertex preview-моделях типа
+    gemini-embedding-2-preview по дефолту 5 RPM (12 секунд между запросами).
+    Сон рассчитывается между cycle start, не после ответа — чтобы общий
+    темп точно был ≤ rpm независимо от latency."""
     from google.cloud.firestore_v1.vector import Vector
 
     coll = db.collection(collection_name)
-    print(f"\n=== Migrating {collection_name} ===")
+    print(f"\n=== Migrating {collection_name} (throttle {rpm:.1f} RPM) ===")
 
     pending = fetch_all_pending(coll, model_tag)
     if not pending:
@@ -112,8 +123,11 @@ def migrate_collection(
     failed = 0
     t_start = time.time()
     last_print = t_start
+    min_cycle_s = 60.0 / max(rpm, 0.001)
 
     for doc_idx, (doc_id, src, text) in enumerate(pending):
+        t_cycle_start = time.time()
+
         # 1. Embed one text via Vertex SDK (single string → single vector).
         try:
             r = vertex_client.models.embed_content(
@@ -125,10 +139,17 @@ def migrate_collection(
         except Exception as e:
             print(f"  WARN: embed failed for {doc_id}: {str(e)[:200]}", flush=True)
             failed += 1
+            # Sleep остаток окна даже на failure — иначе rate скачет.
+            elapsed = time.time() - t_cycle_start
+            if elapsed < min_cycle_s:
+                time.sleep(min_cycle_s - elapsed)
             continue
 
         if vec is None:
             failed += 1
+            elapsed = time.time() - t_cycle_start
+            if elapsed < min_cycle_s:
+                time.sleep(min_cycle_s - elapsed)
             continue
 
         # 2. Write to Firestore.
@@ -148,19 +169,24 @@ def migrate_collection(
             print(f"  WARN: Firestore write failed for {doc_id}: {e}", flush=True)
             failed += 1
 
-        # 3. Progress every 10 seconds.
+        # 3. Progress every 60 seconds (rate is low, no point in 10s logs).
         now = time.time()
-        if now - last_print >= 10.0:
+        if now - last_print >= 60.0:
             rate = migrated / (now - t_start) if now > t_start else 0.0
             remaining = len(pending) - migrated - failed
-            eta_min = (remaining / rate / 60) if rate > 0 else 0.0
+            eta_hours = (remaining / rate / 3600) if rate > 0 else 0.0
             print(
                 f"  {collection_name}: migrated={migrated}/{len(pending)} "
-                f"failed={failed} rate={rate:.1f} docs/sec "
-                f"ETA={eta_min:.1f} min",
+                f"failed={failed} rate={rate * 60:.1f} docs/min "
+                f"ETA={eta_hours:.1f} hours",
                 flush=True,
             )
             last_print = now
+
+        # 4. Throttle: ensure cycle is at least min_cycle_s seconds.
+        elapsed = time.time() - t_cycle_start
+        if elapsed < min_cycle_s:
+            time.sleep(min_cycle_s - elapsed)
 
     total_time = time.time() - t_start
     rate = migrated / total_time if total_time > 0 else 0.0
@@ -172,6 +198,14 @@ def migrate_collection(
     return migrated, failed
 
 
+# Vertex defaults — отдельная жизнь от gemini_brain.py / config.py [gemini].
+# Если что-то нужно переопределить — CLI-аргументами.
+DEFAULT_VERTEX_PROJECT = "project-56cb62a9-8914-4ae3-b44"
+DEFAULT_VERTEX_LOCATION = "us-central1"
+DEFAULT_VERTEX_MODEL = "gemini-embedding-2-preview"
+DEFAULT_VERTEX_CREDENTIALS = "/home/teledigest/data/vertex.json"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--config", default="/config/teledigest.conf")
@@ -179,19 +213,24 @@ def main() -> int:
         "--collections",
         default="wisdom_base,wikivoyage_base",
     )
+    parser.add_argument("--vertex-project", default=DEFAULT_VERTEX_PROJECT)
+    parser.add_argument("--vertex-location", default=DEFAULT_VERTEX_LOCATION)
+    parser.add_argument("--vertex-model", default=DEFAULT_VERTEX_MODEL)
+    parser.add_argument("--vertex-credentials", default=DEFAULT_VERTEX_CREDENTIALS)
+    parser.add_argument(
+        "--rpm",
+        type=float,
+        default=5.0,
+        help="Requests-per-minute throttle. Vertex preview-модели обычно "
+        "залочены на 5 RPM. Поднять до 50-1000 если квота увеличена.",
+    )
     args = parser.parse_args()
 
-    from teledigest.config import get_config, init_config
+    from teledigest.config import init_config
 
+    # init_config нужен только чтобы Firestore-клиент мог стартануть
+    # (Firestore SA — в [google] service_account_path).
     init_config(Path(args.config))
-    cfg = get_config()
-
-    if not cfg.gemini.use_vertex:
-        print(
-            "ERROR: cfg.gemini.use_vertex is false. This script REQUIRES Vertex.\n"
-            "Set [gemini] use_vertex = true in /config/teledigest.conf."
-        )
-        return 1
 
     from google import genai
     from google.genai import types as genai_types
@@ -200,21 +239,21 @@ def main() -> int:
     from teledigest.gemini_brain import _EMBEDDING_MODEL_TAG_V2, _build_firestore_client
 
     print(
-        f"Using Vertex model: {cfg.gemini.vertex_model}\n"
-        f"Project: {cfg.gemini.vertex_project}\n"
-        f"Location: {cfg.gemini.vertex_location}\n"
-        f"Credentials: {cfg.gemini.vertex_credentials_path}",
+        f"Using Vertex model: {args.vertex_model}\n"
+        f"Project: {args.vertex_project}\n"
+        f"Location: {args.vertex_location}\n"
+        f"Credentials: {args.vertex_credentials}",
         flush=True,
     )
 
     creds = service_account.Credentials.from_service_account_file(
-        str(cfg.gemini.vertex_credentials_path),
+        args.vertex_credentials,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
     client = genai.Client(
         vertexai=True,
-        project=cfg.gemini.vertex_project,
-        location=cfg.gemini.vertex_location,
+        project=args.vertex_project,
+        location=args.vertex_location,
         credentials=creds,
     )
 
@@ -231,9 +270,10 @@ def main() -> int:
             db,
             client,
             embed_cfg_factory,
-            cfg.gemini.vertex_model,
+            args.vertex_model,
             name,
             _EMBEDDING_MODEL_TAG_V2,
+            rpm=args.rpm,
         )
         total_migrated += m
         total_failed += f
