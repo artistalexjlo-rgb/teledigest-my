@@ -179,6 +179,12 @@ class GeminiConfig:
     vertex_project: str = ""
     vertex_location: str = "us-central1"
     vertex_credentials_path: Path = Path("/home/teledigest/data/vertex.json")
+    # На Vertex модель `gemini-embedding-2` (как в aistudio Gemini API) не
+    # существует — 404. На Vertex это `gemini-embedding-2-preview`. Probe
+    # 2026-05-18 показал cos=1.0000 между векторами aistudio-`gemini-embedding-2`
+    # и Vertex-`gemini-embedding-2-preview` для одних и тех же текстов из
+    # wisdom_base — векторное пространство совпадает.
+    vertex_model: str = "gemini-embedding-2-preview"
 
 
 @dataclass
@@ -455,6 +461,10 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     vertex_credentials_path = Path(
         str(g_raw.get("vertex_credentials_path", "/home/teledigest/data/vertex.json"))
     )
+    vertex_model = (
+        str(g_raw.get("vertex_model", "gemini-embedding-2-preview")).strip()
+        or "gemini-embedding-2-preview"
+    )
     return GeminiConfig(
         api_key=api_key,
         model=model,
@@ -464,6 +474,7 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
         vertex_project=vertex_project,
         vertex_location=vertex_location,
         vertex_credentials_path=vertex_credentials_path,
+        vertex_model=vertex_model,
     )
 
 
