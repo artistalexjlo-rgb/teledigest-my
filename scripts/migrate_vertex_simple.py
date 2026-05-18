@@ -172,6 +172,14 @@ def migrate_collection(
     return migrated, failed
 
 
+# Vertex defaults — отдельная жизнь от gemini_brain.py / config.py [gemini].
+# Если что-то нужно переопределить — CLI-аргументами.
+DEFAULT_VERTEX_PROJECT = "project-56cb62a9-8914-4ae3-b44"
+DEFAULT_VERTEX_LOCATION = "us-central1"
+DEFAULT_VERTEX_MODEL = "gemini-embedding-2-preview"
+DEFAULT_VERTEX_CREDENTIALS = "/home/teledigest/data/vertex.json"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--config", default="/config/teledigest.conf")
@@ -179,19 +187,17 @@ def main() -> int:
         "--collections",
         default="wisdom_base,wikivoyage_base",
     )
+    parser.add_argument("--vertex-project", default=DEFAULT_VERTEX_PROJECT)
+    parser.add_argument("--vertex-location", default=DEFAULT_VERTEX_LOCATION)
+    parser.add_argument("--vertex-model", default=DEFAULT_VERTEX_MODEL)
+    parser.add_argument("--vertex-credentials", default=DEFAULT_VERTEX_CREDENTIALS)
     args = parser.parse_args()
 
-    from teledigest.config import get_config, init_config
+    from teledigest.config import init_config
 
+    # init_config нужен только чтобы Firestore-клиент мог стартануть
+    # (Firestore SA — в [google] service_account_path).
     init_config(Path(args.config))
-    cfg = get_config()
-
-    if not cfg.gemini.use_vertex:
-        print(
-            "ERROR: cfg.gemini.use_vertex is false. This script REQUIRES Vertex.\n"
-            "Set [gemini] use_vertex = true in /config/teledigest.conf."
-        )
-        return 1
 
     from google import genai
     from google.genai import types as genai_types
@@ -200,21 +206,21 @@ def main() -> int:
     from teledigest.gemini_brain import _EMBEDDING_MODEL_TAG_V2, _build_firestore_client
 
     print(
-        f"Using Vertex model: {cfg.gemini.vertex_model}\n"
-        f"Project: {cfg.gemini.vertex_project}\n"
-        f"Location: {cfg.gemini.vertex_location}\n"
-        f"Credentials: {cfg.gemini.vertex_credentials_path}",
+        f"Using Vertex model: {args.vertex_model}\n"
+        f"Project: {args.vertex_project}\n"
+        f"Location: {args.vertex_location}\n"
+        f"Credentials: {args.vertex_credentials}",
         flush=True,
     )
 
     creds = service_account.Credentials.from_service_account_file(
-        str(cfg.gemini.vertex_credentials_path),
+        args.vertex_credentials,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
     client = genai.Client(
         vertexai=True,
-        project=cfg.gemini.vertex_project,
-        location=cfg.gemini.vertex_location,
+        project=args.vertex_project,
+        location=args.vertex_location,
         credentials=creds,
     )
 
@@ -231,7 +237,7 @@ def main() -> int:
             db,
             client,
             embed_cfg_factory,
-            cfg.gemini.vertex_model,
+            args.vertex_model,
             name,
             _EMBEDDING_MODEL_TAG_V2,
         )

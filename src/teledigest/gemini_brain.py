@@ -356,73 +356,6 @@ def compute_document_embeddings_v2(
     return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
 
 
-def _embed_v2_vertex_batch(
-    texts: list[str],
-    task_type: str,
-    dim: int,
-    model: str = _EMBEDDING_MODEL_V2,
-) -> tuple[int, list[list[float] | None] | None, float | None]:
-    """Vertex AI variant of _embed_v2_rest_batch.
-
-    Uses google-genai SDK in Vertex mode (cfg.gemini.use_vertex=true).
-    Service account credentials loaded explicitly from
-    cfg.gemini.vertex_credentials_path (default
-    /home/teledigest/data/vertex.json). Project/location/model from
-    cfg.gemini.vertex_*. The `model` parameter is ignored — Vertex has
-    different model naming and is overridden by cfg.gemini.vertex_model
-    (default `gemini-embedding-2-preview`, vector-compatible with aistudio
-    `gemini-embedding-2` per 2026-05-18 cos=1.0000 probe).
-
-    Returns same tuple shape as REST variant so callers don't need to know
-    which path was taken. 429 → retry_after extracted from exception
-    message; other exceptions → status=-1 (transient).
-    """
-    from google import genai
-    from google.genai import types as genai_types
-    from google.oauth2 import service_account
-
-    cfg = get_config()
-    embed_cfg = genai_types.EmbedContentConfig(
-        task_type=task_type,
-        output_dimensionality=dim,
-    )
-    try:
-        creds = service_account.Credentials.from_service_account_file(
-            str(cfg.gemini.vertex_credentials_path),
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        client = genai.Client(
-            vertexai=True,
-            project=cfg.gemini.vertex_project,
-            location=cfg.gemini.vertex_location,
-            credentials=creds,
-        )
-        result = client.models.embed_content(
-            model=cfg.gemini.vertex_model,
-            contents=texts,  # type: ignore[arg-type]
-            config=embed_cfg,
-        )
-    except Exception as exc:
-        err = str(exc)
-        retry_after = _parse_retry_after_seconds(err)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err:
-            return 429, None, retry_after
-        if "403" in err or "PERMISSION_DENIED" in err:
-            log.warning("v2 vertex: 403 — %s", err[:200])
-            return 403, None, None
-        log.warning("v2 vertex: network/SDK error: %s", err[:200])
-        return -1, None, None
-
-    embeds = result.embeddings or []
-    out: list[list[float] | None] = []
-    for e in embeds:
-        vals = list(e.values or [])
-        out.append(vals if vals else None)
-    while len(out) < len(texts):
-        out.append(None)
-    return 200, out[: len(texts)], None
-
-
 def _parse_retry_after_seconds(body_text: str) -> float | None:
     """Extract 'Please retry in N.Ns' hint from Gemini 429 error body."""
     import re
@@ -446,29 +379,16 @@ def _embed_v2_rest_batch(
 ) -> tuple[int, list[list[float] | None] | None, float | None]:
     """Single :batchEmbedContents REST call carrying N texts.
 
-    Two code paths:
-    1. **Vertex mode** (`GOOGLE_GENAI_USE_VERTEXAI=true`): use google-genai
-       SDK with ADC (service account from GOOGLE_APPLICATION_CREDENTIALS).
-       Routes through aiplatform.googleapis.com → billed via GCP project's
-       billing account (where $300 free trial credits live, AI Studio prepay
-       not involved). On Vertex, SDK's `embed_content(contents=list)`
-       correctly returns one vector per text in the list (proper batch).
-    2. **Gemini API mode** (default, free-tier): direct REST to
-       generativelanguage.googleapis.com :batchEmbedContents. Uses
-       `?key=<API_KEY>` auth. SDK can't be used here because it bills via
-       AI Studio Prepay system, separate from GCP credits.
+    Direct REST to generativelanguage.googleapis.com with `?key=<API_KEY>`
+    auth (free-tier Gemini API). SDK can't be used for this endpoint
+    because it bills via AI Studio Prepay system, separate from GCP
+    credits. Vertex AI path lives in scripts/migrate_vertex_simple.py
+    отдельно — миграция через Vertex не задействует этот код.
 
     Returns (http_status, list-of-vectors-or-None-per-text, retry_after_seconds).
     status<0 on network failure with vectors=None. retry_after_seconds set
     when 429 body carries 'Please retry in N.Ns' hint.
     """
-    try:
-        cfg = get_config()
-        if cfg.gemini.use_vertex:
-            return _embed_v2_vertex_batch(texts, task_type, dim, model)
-    except Exception:
-        # Config not initialized yet (e.g. tests calling REST directly).
-        pass
 
     import requests as _req
 
