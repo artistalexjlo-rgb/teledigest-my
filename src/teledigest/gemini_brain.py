@@ -367,8 +367,11 @@ def _embed_v2_vertex_batch(
     Uses google-genai SDK in Vertex mode (cfg.gemini.use_vertex=true).
     Service account credentials loaded explicitly from
     cfg.gemini.vertex_credentials_path (default
-    /home/teledigest/data/vertex.json). Project/location from
-    cfg.gemini.vertex_project / vertex_location.
+    /home/teledigest/data/vertex.json). Project/location/model from
+    cfg.gemini.vertex_*. The `model` parameter is ignored — Vertex has
+    different model naming and is overridden by cfg.gemini.vertex_model
+    (default `gemini-embedding-2-preview`, vector-compatible with aistudio
+    `gemini-embedding-2` per 2026-05-18 cos=1.0000 probe).
 
     Returns same tuple shape as REST variant so callers don't need to know
     which path was taken. 429 → retry_after extracted from exception
@@ -395,7 +398,7 @@ def _embed_v2_vertex_batch(
             credentials=creds,
         )
         result = client.models.embed_content(
-            model=model,
+            model=cfg.gemini.vertex_model,
             contents=texts,  # type: ignore[arg-type]
             config=embed_cfg,
         )
