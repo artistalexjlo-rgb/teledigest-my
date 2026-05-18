@@ -50,7 +50,6 @@ import logging
 import os
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
@@ -198,42 +197,46 @@ def pack_chunks(pieces: list[str]) -> list[Chunk]:
 
 
 class KeyBudget:
-    """Tracks tokens sent per key in a rolling 60-second window.
+    """Per-key TPM budget — fill-then-wait, not rolling-average.
 
-    can_send(N) returns wait_seconds — 0 if you can send N tokens right
-    now, positive value if you need to wait first."""
+    Window of 65 seconds (TPM_PER_KEY = 30000 / min, +5s margin). Worker
+    fills the bucket up to TPM_PER_KEY tokens, then sleeps until the
+    window expires, then opens a fresh window.
+
+    No clever "rolling average" — Google's free-tier counter is bursty,
+    a sustained-rate calculation thinks 22K in 12s is fine but Google
+    sees the burst and 429s. Simple "fill to cap, wait full minute"
+    avoids that entirely.
+    """
+
+    WINDOW_S = 65.0  # 60s minute + 5s safety margin
 
     def __init__(self, tpm: int = TPM_PER_KEY, rpm: int = RPM_PER_KEY) -> None:
         self.tpm = tpm
-        self.rpm = rpm
-        self._events: deque[tuple[float, int]] = deque()
-        self._lock = threading.Lock()
-
-    def _prune(self, now: float) -> None:
-        cutoff = now - 60.0
-        while self._events and self._events[0][0] < cutoff:
-            self._events.popleft()
+        self.rpm = rpm  # kept for compat, not enforced (TPM is the tighter bound)
+        self._window_start = 0.0
+        self._tokens_in_window = 0
 
     def can_send(self, tokens: int) -> float:
-        with self._lock:
-            now = time.time()
-            self._prune(now)
-            used_tokens = sum(t for _, t in self._events)
-            used_requests = len(self._events)
-            wait = 0.0
-            if used_tokens + tokens > self.tpm and self._events:
-                oldest_ts = self._events[0][0]
-                wait = max(wait, (oldest_ts + 60.0) - now)
-            if used_requests + 1 > self.rpm and self._events:
-                oldest_ts = self._events[0][0]
-                wait = max(wait, (oldest_ts + 60.0) - now)
-            return max(wait, 0.0)
+        """Return seconds to wait before sending `tokens`. 0 = send now."""
+        now = time.time()
+        # Window expired → fresh start, no wait.
+        if now - self._window_start >= self.WINDOW_S:
+            return 0.0
+        # Within window AND budget allows → send.
+        if self._tokens_in_window + tokens <= self.tpm:
+            return 0.0
+        # Window not expired AND budget exhausted → wait full window.
+        return max((self._window_start + self.WINDOW_S) - now, 0.0)
 
     def record(self, tokens: int) -> None:
-        with self._lock:
-            now = time.time()
-            self._prune(now)
-            self._events.append((now, tokens))
+        """Mark `tokens` as sent now. Opens a new window if previous expired."""
+        now = time.time()
+        if now - self._window_start >= self.WINDOW_S:
+            self._window_start = now
+            self._tokens_in_window = tokens
+        else:
+            self._tokens_in_window += tokens
 
 
 # ---------------------------------------------------------------------------
