@@ -66,134 +66,12 @@ REQUEST_PAUSE_S = 1.5
 
 # Country code -> WikiVoyage category name. WikiVoyage uses English country
 # names verbatim as category roots (Category:Thailand, Category:Brazil).
-# This map is the only iso2 → wiki-name source we need.
-COUNTRY_WIKI_NAME = {
-    # Tier 0 — active user chats (import first)
-    "ar": "Argentina",
-    "at": "Austria",
-    "be": "Belgium",
-    "bg": "Bulgaria",
-    "br": "Brazil",
-    "de": "Germany",
-    "fr": "France",
-    "id": "Indonesia",
-    "lk": "Sri Lanka",
-    "mu": "Mauritius",
-    "ph": "Philippines",
-    "th": "Thailand",
-    "tr": "Turkey",
-    "vn": "Vietnam",
-    # Tier 1 — popular expat/digital-nomad destinations
-    "ae": "United Arab Emirates",
-    "am": "Armenia",
-    "az": "Azerbaijan",
-    "ba": "Bosnia and Herzegovina",
-    "by": "Belarus",
-    "ca": "Canada",
-    "cl": "Chile",
-    "cn": "China",
-    "co": "Colombia",
-    "cr": "Costa Rica",
-    "cy": "Cyprus",
-    "cz": "Czech Republic",
-    "dk": "Denmark",
-    "ec": "Ecuador",
-    "ee": "Estonia",
-    "eg": "Egypt",
-    "es": "Spain",
-    "fi": "Finland",
-    "gb": "United Kingdom",
-    "ge": "Georgia",
-    "gr": "Greece",
-    "hr": "Croatia",
-    "hu": "Hungary",
-    "ie": "Ireland",
-    "il": "Israel",
-    "in": "India",
-    "it": "Italy",
-    "jo": "Jordan",
-    "jp": "Japan",
-    "ke": "Kenya",
-    "kg": "Kyrgyzstan",
-    "kh": "Cambodia",
-    "kr": "South Korea",
-    "kz": "Kazakhstan",
-    "la": "Laos",
-    "lb": "Lebanon",
-    "lt": "Lithuania",
-    "lv": "Latvia",
-    "ma": "Morocco",
-    "md": "Moldova",
-    "me": "Montenegro",
-    "mk": "North Macedonia",
-    "mm": "Myanmar",
-    "mn": "Mongolia",
-    "mx": "Mexico",
-    "my": "Malaysia",
-    "nl": "Netherlands",
-    "no": "Norway",
-    "np": "Nepal",
-    "nz": "New Zealand",
-    "pe": "Peru",
-    "pk": "Pakistan",
-    "pl": "Poland",
-    "pt": "Portugal",
-    "py": "Paraguay",
-    "ro": "Romania",
-    "rs": "Serbia",
-    "ru": "Russia",
-    "sa": "Saudi Arabia",
-    "se": "Sweden",
-    "sg": "Singapore",
-    "si": "Slovenia",
-    "sk": "Slovakia",
-    "tn": "Tunisia",
-    "tw": "Taiwan",
-    "ua": "Ukraine",
-    "us": "United States of America",
-    "uy": "Uruguay",
-    "uz": "Uzbekistan",
-    "za": "South Africa",
-    # Tier 2 — extended coverage
-    "bd": "Bangladesh",
-    "bo": "Bolivia",
-    "cd": "Democratic Republic of Congo",
-    "ci": "Ivory Coast",
-    "cm": "Cameroon",
-    "cu": "Cuba",
-    "do": "Dominican Republic",
-    "dz": "Algeria",
-    "et": "Ethiopia",
-    "gh": "Ghana",
-    "gt": "Guatemala",
-    "hn": "Honduras",
-    "ht": "Haiti",
-    "li": "Liechtenstein",
-    "lu": "Luxembourg",
-    "ly": "Libya",
-    "mg": "Madagascar",
-    "ml": "Mali",
-    "mw": "Malawi",
-    "mz": "Mozambique",
-    "na": "Namibia",
-    "ng": "Nigeria",
-    "ni": "Nicaragua",
-    "om": "Oman",
-    "pa": "Panama",
-    "qa": "Qatar",
-    "rw": "Rwanda",
-    "sd": "Sudan",
-    "sn": "Senegal",
-    "sv": "El Salvador",
-    "sy": "Syria",
-    "tz": "Tanzania",
-    "ug": "Uganda",
-    "ve": "Venezuela",
-    "xk": "Kosovo",
-    "ye": "Yemen",
-    "zm": "Zambia",
-    "zw": "Zimbabwe",
-}
+# Re-export from country_codes — single source of truth shared with the
+# migration and Apps Script. Membership in this dict also gates which
+# countries the wiki importer accepts (see arg parser below).
+from teledigest.country_codes import (  # noqa: E402,F401
+    COUNTRY_NAMES_EN as COUNTRY_WIKI_NAME,
+)
 
 # Wiki section heading -> our chat-мух tag vocabulary. Keeps wisdom_base
 # and wikivoyage_base searchable with the same tag filters.
@@ -547,25 +425,13 @@ def write_patterns(
         return 0, skipped
 
     # --- Phase 2: compute embeddings for new docs (v2 cipher) ---
+    from teledigest.country_codes import country_full_name_en
     from teledigest.gemini_brain import (
         _EMBEDDING_MODEL_TAG_V2,
         compute_document_embeddings_v2,
     )
 
-    # Country full-name lookup mirrors scripts/pilot_cipher_v2.py.
-    country_names = {
-        "th": "Thailand",
-        "br": "Brazil",
-        "ar": "Argentina",
-        "id": "Indonesia",
-        "lk": "Sri Lanka",
-        "tr": "Turkey",
-        "vn": "Vietnam",
-        "fr": "France",
-        "ph": "Philippines",
-        "bg": "Bulgaria",
-    }
-    country_full = country_names.get(country, country.upper())
+    country_full = country_full_name_en(country)
 
     def _embed_text(p: dict) -> str:
         parts = [country_full]

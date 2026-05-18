@@ -27,25 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-# Country ISO → English name. Only the ones we actually have in the base.
-# Add more as countries get imported; missing codes fall back to uppercase ISO.
-_COUNTRY_NAMES: dict[str, str] = {
-    "th": "Thailand",
-    "br": "Brazil",
-    "ar": "Argentina",
-    "id": "Indonesia",
-    "lk": "Sri Lanka",
-    "tr": "Turkey",
-    "vn": "Vietnam",
-    "fr": "France",
-    "ph": "Philippines",
-    "bg": "Bulgaria",
-}
-
-
-def country_full_name(code: str) -> str:
-    """ISO code → full English name, fallback to uppercase code."""
-    return _COUNTRY_NAMES.get(code, (code or "").upper())
+from teledigest.country_codes import country_full_name_en as country_full_name
 
 
 def build_document_text(doc: dict) -> str:

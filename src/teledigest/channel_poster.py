@@ -110,6 +110,9 @@ def _channel_field_safe(target: str) -> str:
     return "".join(c for c in target.lower() if c.isalnum() or c == "_") or "default"
 
 
+_CANDIDATE_BATCH_LIMIT = 2000
+
+
 def select_next_candidate(
     db,
     collection: str,
@@ -118,21 +121,22 @@ def select_next_candidate(
     excluded_countries: set[str] | None = None,
 ) -> PostCandidate | None:
     """
-    Pick the oldest unposted doc, preferring a country NOT in the recent
-    rotation window. Falls back gracefully if the queue is starved of
-    variety.
+    Alphabetical round-robin across countries. Each country gets a fair slot.
 
     Strategy:
-        1. Read up to 100 oldest unposted docs (by createdAt asc).
-        2. Filter out excluded countries (operator-configured exclude list)
-           and entries without content.
-        3. Try widest variety first: candidates whose country is NOT in
-           recent_countries (last N posted). If any — return oldest of those.
-        4. If queue is dominated by a country that's in recent_countries
-           (the typical situation after a historical-feed dump), shorten
-           the rotation window step by step: try excluding only the
-           last-2, then last-1, then nothing. This guarantees we don't
-           starve when the feed is skewed.
+        1. Read up to _CANDIDATE_BATCH_LIMIT oldest unposted docs in the
+           collection. With ~1300 total in the queue we read all of them in
+           one shot, so every country with content gets represented.
+        2. Group by country, keeping each country's docs sorted oldest-first.
+        3. Walk countries in alphabetical order, advancing past the last
+           posted country (recent_countries[-1]). Return the oldest doc of
+           the first country with content available.
+
+    Why round-robin and not "oldest globally": old version pulled top-100
+    oldest, which after a historical-feed dump was dominated by one country
+    (e.g. 526 BR). Newer countries never reached the top-100 window and
+    starved indefinitely. Round-robin guarantees every country with content
+    posts in turn at 1/N rate.
     """
     from google.cloud import firestore as fs
 
@@ -143,13 +147,13 @@ def select_next_candidate(
     # are returned (treated as not posted).
     # Note: docs with postedTo.<key>.posted == false also returned.
     coll = db.collection(collection)
-    # We pull a bigger batch and filter Python-side because compound queries
-    # with map fields require composite indexes on Firestore.
     docs = list(
-        coll.order_by("createdAt", direction=fs.Query.ASCENDING).limit(100).stream()
+        coll.order_by("createdAt", direction=fs.Query.ASCENDING)
+        .limit(_CANDIDATE_BATCH_LIMIT)
+        .stream()
     )
 
-    candidates: list[PostCandidate] = []
+    by_country: dict[str, list[PostCandidate]] = {}
     for d in docs:
         data = d.to_dict() or {}
         # Skip if already posted to this channel
@@ -157,7 +161,7 @@ def select_next_candidate(
         ch = posted_to.get(channel_key) or {}
         if ch.get("posted") is True:
             continue
-        country = (data.get("country") or "").lower()
+        country = (data.get("country") or "").lower() or "any"
         if excluded_countries and country in excluded_countries:
             continue
         if not (data.get("content") or "").strip():
@@ -165,29 +169,39 @@ def select_next_candidate(
         created = data.get("createdAt")
         if created is not None and hasattr(created, "to_pydatetime"):
             created = created.to_pydatetime()
-        candidates.append(
-            PostCandidate(
-                doc_id=d.id,
-                country=country or "any",
-                title=str(data.get("title") or ""),
-                content=str(data.get("content") or ""),
-                tag=str(data.get("tag") or ""),
-                created_at=created if isinstance(created, dt.datetime) else None,
-            )
+        cand = PostCandidate(
+            doc_id=d.id,
+            country=country,
+            title=str(data.get("title") or ""),
+            content=str(data.get("content") or ""),
+            tag=str(data.get("tag") or ""),
+            created_at=created if isinstance(created, dt.datetime) else None,
         )
+        by_country.setdefault(country, []).append(cand)
 
-    if not candidates:
+    if not by_country:
         return None
 
-    # Country rotation: try to avoid recent_countries entirely. If that
-    # starves the pool, shrink the rotation window step by step.
+    countries_sorted = sorted(by_country.keys())
+
+    # Find where to start in the alphabetical cycle. recent_countries[-1]
+    # is the most recent post; we want the next country after it.
+    start_idx = 0
     if recent_countries:
-        for window_size in range(len(recent_countries), 0, -1):
-            recent_set = set(recent_countries[-window_size:])
-            diff = [c for c in candidates if c.country not in recent_set]
-            if diff:
-                return diff[0]
-    return candidates[0]
+        last = recent_countries[-1]
+        if last in countries_sorted:
+            start_idx = (countries_sorted.index(last) + 1) % len(countries_sorted)
+
+    # Walk the ring starting at start_idx; first non-empty country wins.
+    n = len(countries_sorted)
+    for offset in range(n):
+        country = countries_sorted[(start_idx + offset) % n]
+        bucket = by_country.get(country) or []
+        if bucket:
+            # bucket is already oldest-first (we kept Firestore order).
+            return bucket[0]
+
+    return None
 
 
 def _load_recent_posted_countries(
