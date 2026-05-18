@@ -185,11 +185,6 @@ class GeminiConfig:
     # и Vertex-`gemini-embedding-2-preview` для одних и тех же текстов из
     # wisdom_base — векторное пространство совпадает.
     vertex_model: str = "gemini-embedding-2-preview"
-    # Сколько параллельных воркеров запускать в Vertex-режиме. ВНИМАНИЕ: все
-    # воркеры используют ОДНУ service-account авторизацию, значит делят одну
-    # квоту проекта. >1 воркера сразу даёт burst → 429 на всех. Default = 1
-    # (sequential). Если Vertex Tier 1 paid с запасом — можно поднять до 2-3.
-    vertex_worker_count: int = 1
 
 
 @dataclass
@@ -470,10 +465,6 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
         str(g_raw.get("vertex_model", "gemini-embedding-2-preview")).strip()
         or "gemini-embedding-2-preview"
     )
-    try:
-        vertex_worker_count = max(1, int(g_raw.get("vertex_worker_count", 1)))
-    except (TypeError, ValueError):
-        vertex_worker_count = 1
     return GeminiConfig(
         api_key=api_key,
         model=model,
@@ -484,7 +475,6 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
         vertex_location=vertex_location,
         vertex_credentials_path=vertex_credentials_path,
         vertex_model=vertex_model,
-        vertex_worker_count=vertex_worker_count,
     )
 
 
