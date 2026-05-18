@@ -188,12 +188,10 @@ def test_select_country_rotation_falls_back_when_only_repeat_left():
     assert pick.doc_id == "d1"
 
 
-def test_select_country_rotation_window_shrinks_on_starvation():
+def test_select_round_robin_after_last_posted():
     """
-    recent=[br,vn,id], queue is br+vn+id only — window 3 has nothing,
-    window 2 (last vn,id) still empty, window 1 (only id) excludes id but
-    allows br/vn → returns oldest of br/vn (br).
-    Verifies the graceful shrinking degradation.
+    Round-robin: countries sorted alphabetically [br, id, vn]. Last posted
+    'id' → next is 'vn'. Returns d2.
     """
     docs = [
         _fake_doc("d1", "br", "br1"),
@@ -205,12 +203,52 @@ def test_select_country_rotation_window_shrinks_on_starvation():
         db, "telegram_queue", "@luky_channel", recent_countries=["br", "vn", "id"]
     )
     assert pick is not None
-    # Window 3 → empty. Window 2 (vn,id) → only br left → returns d1.
+    assert pick.country == "vn"
+
+
+def test_select_round_robin_wraps_around_alphabet():
+    """
+    Last posted is the alphabetically-last country in the queue — RR wraps
+    to the first one. Countries=[br, id, vn], last='vn' → wraps to 'br'.
+    """
+    docs = [
+        _fake_doc("d1", "br", "br1"),
+        _fake_doc("d2", "vn", "vn1"),
+        _fake_doc("d3", "id", "id1"),
+    ]
+    db = _fake_db(docs)
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["vn"]
+    )
+    assert pick is not None
     assert pick.country == "br"
 
 
-def test_select_rotation_window_3_avoids_recent_three():
-    """recent=[br,vn,id] + queue has [br,vn,id,mu] — picks mu (not in window)."""
+def test_select_picks_oldest_within_country():
+    """
+    Multiple docs for the chosen country — RR returns the OLDEST one
+    (Firestore order preserved: ASC by createdAt).
+    """
+    docs = [
+        _fake_doc("d-br-old", "br", "br oldest"),
+        _fake_doc("d-br-new", "br", "br newer"),
+        _fake_doc("d-id-1", "id", "id1"),
+    ]
+    db = _fake_db(docs)
+    pick = cp.select_next_candidate(
+        db, "telegram_queue", "@luky_channel", recent_countries=["id"]
+    )
+    assert pick is not None
+    assert pick.country == "br"
+    # Oldest BR comes first in Firestore stream → must be picked.
+    assert pick.doc_id == "d-br-old"
+
+
+def test_select_rotation_window_3_picks_next_alphabetical():
+    """
+    Countries=[br,id,mu,vn]. Last posted 'id' → next after id alphabetically
+    is 'mu'.
+    """
     docs = [
         _fake_doc("d1", "br", "br1"),
         _fake_doc("d2", "vn", "vn1"),
