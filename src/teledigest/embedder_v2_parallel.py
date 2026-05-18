@@ -373,6 +373,17 @@ def _worker(
     """
     from teledigest.gemini_brain import _embed_v2_rest_batch  # type: ignore
 
+    # Vertex paid tier has Unlimited RPD — soft cap не применяется.
+    # Free tier (Gemini API): cap 1000 RPD per (account, project, model),
+    # стопимся на 950.
+    skip_rpd_cap = False
+    try:
+        from teledigest.config import get_config
+
+        skip_rpd_cap = bool(get_config().gemini.use_vertex)
+    except Exception:
+        skip_rpd_cap = False
+
     cooldown_until = 0.0
 
     while not stop_event.is_set():
@@ -382,8 +393,8 @@ def _worker(
             time.sleep(min(cooldown_until - now + 0.1, 90.0))
             continue
 
-        # 2. RPD soft-cap.
-        if stats.rpd_count >= RPD_SOFT_CAP:
+        # 2. RPD soft-cap (free-tier only).
+        if not skip_rpd_cap and stats.rpd_count >= RPD_SOFT_CAP:
             log.warning(
                 "worker key #%d: RPD soft-cap reached (%d/%d), worker exiting",
                 key_idx,
