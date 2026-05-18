@@ -84,11 +84,48 @@ var EMBEDDING_DIM_V2 = 1536;
 var EMBEDDING_MODEL_TAG_V2 = "gemini-embedding-2-1536";
 
 // ISO → full English country name. Falls back to uppercase ISO if missing.
-// Mirrors the table in scripts/pilot_cipher_v2.py.
+//
+// !!! KEEP IN SYNC WITH src/teledigest/country_codes.py::COUNTRY_NAMES_EN !!!
+// Apps Script can't import Python, so this is a manual mirror. When you add
+// a country to the Python source, copy the same line here.
 var COUNTRY_NAMES = {
-  "th": "Thailand", "br": "Brazil", "ar": "Argentina", "id": "Indonesia",
-  "lk": "Sri Lanka", "tr": "Turkey", "vn": "Vietnam", "fr": "France",
-  "ph": "Philippines", "bg": "Bulgaria"
+  // Tier 0 — active user chats
+  "ar": "Argentina", "at": "Austria", "be": "Belgium", "bg": "Bulgaria",
+  "br": "Brazil",    "de": "Germany", "fr": "France",  "id": "Indonesia",
+  "lk": "Sri Lanka", "mu": "Mauritius", "ph": "Philippines",
+  "th": "Thailand",  "tr": "Turkey",  "vn": "Vietnam",
+  // Tier 1 — popular expat/digital-nomad destinations
+  "ae": "United Arab Emirates", "am": "Armenia", "az": "Azerbaijan",
+  "ba": "Bosnia and Herzegovina", "by": "Belarus", "ca": "Canada",
+  "cl": "Chile", "cn": "China", "co": "Colombia", "cr": "Costa Rica",
+  "cy": "Cyprus", "cz": "Czech Republic", "dk": "Denmark", "ec": "Ecuador",
+  "ee": "Estonia", "eg": "Egypt", "es": "Spain", "fi": "Finland",
+  "gb": "United Kingdom", "ge": "Georgia", "gr": "Greece", "hr": "Croatia",
+  "hu": "Hungary", "ie": "Ireland", "il": "Israel", "in": "India",
+  "it": "Italy", "jo": "Jordan", "jp": "Japan", "ke": "Kenya",
+  "kg": "Kyrgyzstan", "kh": "Cambodia", "kr": "South Korea",
+  "kz": "Kazakhstan", "la": "Laos", "lb": "Lebanon", "lt": "Lithuania",
+  "lv": "Latvia", "ma": "Morocco", "md": "Moldova", "me": "Montenegro",
+  "mk": "North Macedonia", "mm": "Myanmar", "mn": "Mongolia",
+  "mx": "Mexico", "my": "Malaysia", "nl": "Netherlands", "no": "Norway",
+  "np": "Nepal", "nz": "New Zealand", "pe": "Peru", "pk": "Pakistan",
+  "pl": "Poland", "pt": "Portugal", "py": "Paraguay", "ro": "Romania",
+  "rs": "Serbia", "ru": "Russia", "sa": "Saudi Arabia", "se": "Sweden",
+  "sg": "Singapore", "si": "Slovenia", "sk": "Slovakia", "tn": "Tunisia",
+  "tw": "Taiwan", "ua": "Ukraine", "us": "United States of America",
+  "uy": "Uruguay", "uz": "Uzbekistan", "za": "South Africa",
+  // Tier 2 — extended coverage
+  "bd": "Bangladesh", "bo": "Bolivia",
+  "cd": "Democratic Republic of Congo", "ci": "Ivory Coast",
+  "cm": "Cameroon", "cu": "Cuba", "do": "Dominican Republic",
+  "dz": "Algeria", "et": "Ethiopia", "gh": "Ghana", "gt": "Guatemala",
+  "hn": "Honduras", "ht": "Haiti", "li": "Liechtenstein",
+  "lu": "Luxembourg", "ly": "Libya", "mg": "Madagascar", "ml": "Mali",
+  "mw": "Malawi", "mz": "Mozambique", "na": "Namibia", "ng": "Nigeria",
+  "ni": "Nicaragua", "om": "Oman", "pa": "Panama", "qa": "Qatar",
+  "rw": "Rwanda", "sd": "Sudan", "sn": "Senegal", "sv": "El Salvador",
+  "sy": "Syria", "tz": "Tanzania", "ug": "Uganda", "ve": "Venezuela",
+  "xk": "Kosovo", "ye": "Yemen", "zm": "Zambia", "zw": "Zimbabwe"
 };
 
 function countryFullName_(code) {

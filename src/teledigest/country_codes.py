@@ -3,6 +3,10 @@ country_codes.py — ISO 3166-1 alpha-2 country codes with Russian names.
 Single source of truth for country code resolution.
 """
 
+import logging
+
+log = logging.getLogger("teledigest")
+
 # code -> (russian_name, flag_emoji)
 COUNTRIES: dict[str, tuple[str, str]] = {
     "af": ("Афганистан", "🇦🇫"),
@@ -315,3 +319,161 @@ def display_name(code: str) -> str:
         name, flag = COUNTRIES[code]
         return f"{flag} {name}"
     return code.upper()
+
+
+# ---------------------------------------------------------------------------
+# English country names — for embedding text and other places where we need
+# a stable English label (Apps Script, wiki import, migration). Single source
+# of truth: import from here, do NOT redefine locally.
+#
+# SYNC WITH apps_script/Code.gs::COUNTRY_NAMES — keep the two lists identical.
+# When you add a row here, mirror it there.
+# ---------------------------------------------------------------------------
+COUNTRY_NAMES_EN: dict[str, str] = {
+    # Tier 0 — active user chats
+    "ar": "Argentina",
+    "at": "Austria",
+    "be": "Belgium",
+    "bg": "Bulgaria",
+    "br": "Brazil",
+    "de": "Germany",
+    "fr": "France",
+    "id": "Indonesia",
+    "lk": "Sri Lanka",
+    "mu": "Mauritius",
+    "ph": "Philippines",
+    "th": "Thailand",
+    "tr": "Turkey",
+    "vn": "Vietnam",
+    # Tier 1 — popular expat/digital-nomad destinations
+    "ae": "United Arab Emirates",
+    "am": "Armenia",
+    "az": "Azerbaijan",
+    "ba": "Bosnia and Herzegovina",
+    "by": "Belarus",
+    "ca": "Canada",
+    "cl": "Chile",
+    "cn": "China",
+    "co": "Colombia",
+    "cr": "Costa Rica",
+    "cy": "Cyprus",
+    "cz": "Czech Republic",
+    "dk": "Denmark",
+    "ec": "Ecuador",
+    "ee": "Estonia",
+    "eg": "Egypt",
+    "es": "Spain",
+    "fi": "Finland",
+    "gb": "United Kingdom",
+    "ge": "Georgia",
+    "gr": "Greece",
+    "hr": "Croatia",
+    "hu": "Hungary",
+    "ie": "Ireland",
+    "il": "Israel",
+    "in": "India",
+    "it": "Italy",
+    "jo": "Jordan",
+    "jp": "Japan",
+    "ke": "Kenya",
+    "kg": "Kyrgyzstan",
+    "kh": "Cambodia",
+    "kr": "South Korea",
+    "kz": "Kazakhstan",
+    "la": "Laos",
+    "lb": "Lebanon",
+    "lt": "Lithuania",
+    "lv": "Latvia",
+    "ma": "Morocco",
+    "md": "Moldova",
+    "me": "Montenegro",
+    "mk": "North Macedonia",
+    "mm": "Myanmar",
+    "mn": "Mongolia",
+    "mx": "Mexico",
+    "my": "Malaysia",
+    "nl": "Netherlands",
+    "no": "Norway",
+    "np": "Nepal",
+    "nz": "New Zealand",
+    "pe": "Peru",
+    "pk": "Pakistan",
+    "pl": "Poland",
+    "pt": "Portugal",
+    "py": "Paraguay",
+    "ro": "Romania",
+    "rs": "Serbia",
+    "ru": "Russia",
+    "sa": "Saudi Arabia",
+    "se": "Sweden",
+    "sg": "Singapore",
+    "si": "Slovenia",
+    "sk": "Slovakia",
+    "tn": "Tunisia",
+    "tw": "Taiwan",
+    "ua": "Ukraine",
+    "us": "United States of America",
+    "uy": "Uruguay",
+    "uz": "Uzbekistan",
+    "za": "South Africa",
+    # Tier 2 — extended coverage
+    "bd": "Bangladesh",
+    "bo": "Bolivia",
+    "cd": "Democratic Republic of Congo",
+    "ci": "Ivory Coast",
+    "cm": "Cameroon",
+    "cu": "Cuba",
+    "do": "Dominican Republic",
+    "dz": "Algeria",
+    "et": "Ethiopia",
+    "gh": "Ghana",
+    "gt": "Guatemala",
+    "hn": "Honduras",
+    "ht": "Haiti",
+    "li": "Liechtenstein",
+    "lu": "Luxembourg",
+    "ly": "Libya",
+    "mg": "Madagascar",
+    "ml": "Mali",
+    "mw": "Malawi",
+    "mz": "Mozambique",
+    "na": "Namibia",
+    "ng": "Nigeria",
+    "ni": "Nicaragua",
+    "om": "Oman",
+    "pa": "Panama",
+    "qa": "Qatar",
+    "rw": "Rwanda",
+    "sd": "Sudan",
+    "sn": "Senegal",
+    "sv": "El Salvador",
+    "sy": "Syria",
+    "tz": "Tanzania",
+    "ug": "Uganda",
+    "ve": "Venezuela",
+    "xk": "Kosovo",
+    "ye": "Yemen",
+    "zm": "Zambia",
+    "zw": "Zimbabwe",
+}
+
+
+def country_full_name_en(code: str) -> str:
+    """Return English country name for an ISO code, or uppercase ISO if missing.
+
+    Use this everywhere we build embedding text or any English label —
+    keeps `wisdom_base`/`wikivoyage_base` consistent across writers
+    (Apps Script, wiki import, migration).
+    """
+    c = (code or "").lower()
+    name = COUNTRY_NAMES_EN.get(c)
+    if name:
+        return name
+    # Fall back to uppercase ISO and log so missing countries surface.
+    if c:
+        log.warning(
+            "country_full_name_en: missing English name for ISO code %r — "
+            "falling back to uppercase. Add it to COUNTRY_NAMES_EN.",
+            c,
+        )
+    return c.upper()

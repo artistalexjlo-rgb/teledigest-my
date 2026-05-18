@@ -35,24 +35,7 @@ import sys
 import time
 from pathlib import Path
 
-# ISO → English name (must match writers — Apps Script and wikivoyage_import).
-COUNTRY_NAMES: dict[str, str] = {
-    "th": "Thailand",
-    "br": "Brazil",
-    "ar": "Argentina",
-    "id": "Indonesia",
-    "lk": "Sri Lanka",
-    "tr": "Turkey",
-    "vn": "Vietnam",
-    "fr": "France",
-    "ph": "Philippines",
-    "bg": "Bulgaria",
-}
-
-
-def country_full_name(code: str) -> str:
-    c = (code or "").lower()
-    return COUNTRY_NAMES.get(c, c.upper())
+from teledigest.country_codes import country_full_name_en as country_full_name
 
 
 def build_embed_text(doc: dict) -> str:
