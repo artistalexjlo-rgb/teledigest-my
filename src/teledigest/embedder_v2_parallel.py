@@ -418,7 +418,10 @@ def _worker(
             api_key,
         )
         dt = time.time() - t0
-        stats.rpd_count += 1
+        # Google considers each text inside batchEmbedContents as a separate
+        # RPD tick. So a 100-text chunk = +100 toward the 1000/day cap, NOT +1.
+        # Both 200-OK and 429 burn quota (Google still meters the request).
+        stats.rpd_count += len(chunk.texts)
         budget.record(chunk.total_tokens)
 
         # Update shared RPD state (used for persist).
