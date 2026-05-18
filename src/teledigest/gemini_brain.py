@@ -118,10 +118,20 @@ def _get_embedding_api_keys() -> list[str]:
     return [single] if single else []
 
 
-# Round-robin pointer for the multi-key pool. Initialized lazily on first
-# use to a random index, so concurrent instances (e.g. live bot + migration
-# script) don't collide on the same key at start.
-_key_rr_idx: int | None = None
+# Round-robin pointer for the multi-key pool. Reset on every process start.
+_key_rr_idx = 0
+
+# Per-key daily request counter, used by both _embed_v2 (single) and
+# _process_one_chunk (batch). Each successful AND each 429-failed request
+# bumps the counter — Google's quota meter counts 429s too. When a key
+# reaches _RPD_SOFT_CAP we stop sending to it for the rest of the day,
+# leaving margin under the 1000/day free-tier limit.
+#
+# IMPORTANT: this is in-process memory. If you restart the container,
+# counter resets. Restart only after midnight Pacific Time, or you'll
+# blow past the cap silently.
+_key_rpd_count: dict[int, int] = {}
+_RPD_SOFT_CAP = 950
 
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
@@ -216,16 +226,13 @@ def _embed_v2(
     task_type: str,
     dim: int = _EMBEDDING_DIM_V2,
 ) -> list[list[float] | None]:
-    """Compute embeddings via direct REST on :embedContent.
+    """Compute embeddings via the canonical v2 setup.
 
     task_type: "RETRIEVAL_QUERY" for user queries,
                "RETRIEVAL_DOCUMENT" for indexed documents.
-
-    Why direct REST and not the SDK: google-genai's `client.models.embed_content`
-    transports every call to the `:batchEmbedContents` endpoint, which on
-    gemini-embedding-2 free-tier returns 429 immediately even on fresh keys.
-    Apps Script writes embeddings via REST `:embedContent` on the same model
-    every day without issue, so we mirror its call shape exactly.
+    Asymmetric task_type is what makes short queries land near long structured
+    docs — without it the embedder treats both sides symmetrically and recall
+    on short-query / long-doc pairs collapses.
     """
     if not texts:
         return []
@@ -234,64 +241,94 @@ def _embed_v2(
             f"task_type must be RETRIEVAL_QUERY or RETRIEVAL_DOCUMENT, got {task_type!r}"
         )
 
-    import requests as _req
+    from google import genai
+    from google.genai import types as genai_types
 
     keys = _get_embedding_api_keys()
     if not keys:
         log.warning("v2 embed: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
         return [None] * len(texts)
 
-    global _key_rr_idx
-    if _key_rr_idx is None:
-        import random
-
-        _key_rr_idx = random.randint(0, len(keys) - 1)
-
-    url_tpl = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_EMBEDDING_MODEL_V2}:embedContent?key={{key}}"
+    # Config MUST be the typed EmbedContentConfig — passing a dict silently
+    # drops `task_type` (verified on VPS: cos(same text as QUERY vs DOCUMENT)
+    # returned 1.0000, meaning task_type was ignored). Known SDK quirk.
+    cfg = genai_types.EmbedContentConfig(
+        task_type=task_type,
+        output_dimensionality=dim,
     )
 
+    # Lazily build one Client per key (round-robin across calls).
+    clients = {k: genai.Client(api_key=k) for k in keys}
+    global _key_rr_idx
+
+    # Per-key per-day request counter. Free-tier limit is 1000 RPD per key
+    # on gemini-embedding-2; we stop trying a key when it hits 950 to leave
+    # safety margin and not generate extra 429s that warm up IP throttle.
+    # Counter resets on process restart — that's OK, Google's daily quota
+    # resets at midnight PT anyway, and a fresh container after midnight
+    # starts with clean counters.
+    import time as _time
+
+    # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
+    # is interpreted as a single multi-part document, not a batch — it returns
+    # one vector regardless of list size. So call per-text individually.
     out: list[list[float] | None] = []
     for text in texts:
         vec: list[float] | None = None
-        last_err: str | None = None
-        # One full sweep across keys; on 429 move to next key, on any other
-        # error (4xx/5xx/network) abandon this text.
+        # Try every key in order starting from current round-robin index. On
+        # 429/RESOURCE_EXHAUSTED move to the next key — that key still has
+        # its own daily quota. Stop after one full sweep.
+        last_err: Exception | None = None
         for offset in range(len(keys)):
             idx = (_key_rr_idx + offset) % len(keys)
+            # Skip keys that already hit our soft RPD cap (950/1000).
+            if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
+                continue
+            # Intra-sweep gap: don't fire keys faster than 1 per 5s. Without
+            # this, 8 keys get hit in ~1 second on 429, which Google reads
+            # as abuse and IP-throttles the source.
+            if offset > 0:
+                _time.sleep(5.0)
             try:
-                resp = _req.post(
-                    url_tpl.format(key=keys[idx]),
-                    json={
-                        "content": {"parts": [{"text": text}]},
-                        "outputDimensionality": dim,
-                        "taskType": task_type,
-                    },
-                    timeout=60,
+                result = clients[keys[idx]].models.embed_content(
+                    model=_EMBEDDING_MODEL_V2,
+                    contents=text,
+                    config=cfg,
                 )
-            except Exception as e:
-                last_err = f"network: {e}"
-                break
-            if resp.status_code == 200:
-                data = resp.json()
-                vals = (data.get("embedding") or {}).get("values") or []
-                vec = list(vals) if vals else None
-                if vec is None:
-                    last_err = "200 OK but empty embedding"
+                _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+                embeddings = result.embeddings or []
+                vec = list(embeddings[0].values or []) if embeddings else None
+                # Advance pointer past the successful key so next text starts
+                # on the next key — spreads load across keys evenly.
                 _key_rr_idx = (idx + 1) % len(keys)
                 break
-            if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp.text:
-                log.warning(
-                    "v2 embed: key #%d hit quota, trying next of %d keys",
-                    idx,
-                    len(keys),
-                )
-                continue
-            # Non-quota HTTP error — abandon this text.
-            last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
-            break
-        if vec is None:
+            except Exception as e:
+                last_err = e
+                err = str(e)
+                # 429 still counts in Google's quota meter, so count it too.
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+                # Move on to the next key for any transient/per-key error:
+                # 429 (quota), 400/403 (invalid/revoked key), 401 (unauth).
+                # Only stop for genuinely non-key errors (network, 5xx that
+                # repeated on multiple keys — caught by sweep exhaustion).
+                if any(
+                    code in err
+                    for code in ("429", "RESOURCE_EXHAUSTED", "400", "401", "403")
+                ):
+                    log.warning(
+                        "v2 embed: key #%d failed (%s), trying next of %d "
+                        "[rpd=%d/%d]",
+                        idx,
+                        err.split("\n")[0][:120],
+                        len(keys),
+                        _key_rpd_count.get(idx, 0),
+                        _RPD_SOFT_CAP,
+                    )
+                    continue
+                # Different kind of error (5xx, network). Don't waste sweep.
+                break
+        if vec is None and last_err is not None:
             log.warning(
                 "v2 embed failed (task=%s, text_len=%d): %s",
                 task_type,
@@ -317,6 +354,412 @@ def compute_document_embeddings_v2(
 ) -> list[list[float] | None]:
     """Embed a batch of documents for indexing (task_type=RETRIEVAL_DOCUMENT)."""
     return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
+
+
+def _parse_retry_after_seconds(body_text: str) -> float | None:
+    """Extract 'Please retry in N.Ns' hint from Gemini 429 error body."""
+    import re
+
+    m = re.search(r"retry in ([\d.]+)s", body_text or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _embed_v2_rest_batch(
+    texts: list[str],
+    task_type: str,
+    dim: int,
+    api_key: str,
+    model: str = _EMBEDDING_MODEL_V2,
+    timeout: int = 60,
+) -> tuple[int, list[list[float] | None] | None, float | None]:
+    """Single :batchEmbedContents REST call carrying N texts.
+
+    Why direct REST: google-genai SDK's embed_content with contents=[t1, t2]
+    silently concatenates into ONE multi-part doc and returns ONE vector
+    (verified on VPS). The real "N texts → N vectors in one HTTP call" lives
+    only on the batchEmbedContents REST endpoint. One such call costs 1 RPD,
+    so batching 100 texts per call effectively multiplies free-tier capacity
+    by 100x.
+
+    Returns (http_status, list-of-vectors-or-None-per-text, retry_after_seconds).
+    status<0 on network failure with vectors=None. retry_after_seconds is set
+    when Gemini's 429 body carries 'Please retry in N.Ns' (RPM bucket refill).
+    """
+    import requests as _req
+
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+        f":batchEmbedContents?key={api_key}"
+    )
+    body = {
+        "requests": [
+            {
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": t}]},
+                "taskType": task_type,
+                "outputDimensionality": dim,
+            }
+            for t in texts
+        ]
+    }
+    try:
+        resp = _req.post(url, json=body, timeout=timeout)  # type: ignore[arg-type]
+    except Exception as exc:
+        log.warning("v2 batch REST: network error: %s", exc)
+        return -1, None, None
+    if resp.status_code != 200:
+        retry_after = _parse_retry_after_seconds(resp.text)
+        return resp.status_code, None, retry_after
+    data = resp.json()
+    embeds = data.get("embeddings", [])
+    out: list[list[float] | None] = []
+    for emb in embeds:
+        vals = emb.get("values") or []
+        out.append(list(vals) if vals else None)
+    # Defend against mismatched length — pad/truncate to match input.
+    while len(out) < len(texts):
+        out.append(None)
+    return 200, out[: len(texts)], None
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token count for a text. Gemini's tokenizer averages ~4 chars
+    per token on mixed text; we divide by 3 to overestimate so a chunk
+    stays under TPM rather than burst over it. False positives (chunk
+    smaller than necessary) cost a bit of throughput; false negatives
+    (chunk over TPM cap) cost the whole chunk via 429."""
+    return max(1, len(text) // 3)
+
+
+# Per-text token cap. Gemini :batchEmbedContents rejects requests where any
+# single text is too large — exact limit isn't documented but ~2K tokens is
+# safe. We split on this BEFORE chunking so a single long wiki article
+# doesn't blow a whole batch.
+_MAX_TOKENS_PER_TEXT = 1500
+# Soft overlap between adjacent pieces of a long text — preserves context
+# at chunk boundaries so the embedding doesn't lose mid-sentence meaning.
+_SPLIT_OVERLAP_CHARS = 200
+
+
+def _split_long_text(text: str, max_tokens: int = _MAX_TOKENS_PER_TEXT) -> list[str]:
+    """Split a long text into pieces each <= max_tokens.
+
+    Tries to split on paragraph boundaries (`\\n\\n`), then sentence
+    boundaries (`. `), then hard char limit. Keeps a small overlap between
+    pieces so embeddings don't lose context at the seam.
+
+    Returns [text] unchanged if text already fits."""
+    if _estimate_tokens(text) <= max_tokens:
+        return [text]
+
+    # Convert token cap back to a char cap (with the same 3-char-per-token
+    # margin so we stay under).
+    max_chars = max_tokens * 3
+    pieces: list[str] = []
+    remaining = text
+
+    while remaining:
+        if len(remaining) <= max_chars:
+            pieces.append(remaining)
+            break
+
+        # Find a clean cut point: prefer \n\n, then ". ", then hard cut.
+        cut = remaining.rfind("\n\n", 0, max_chars)
+        if cut < max_chars // 2:
+            cut = remaining.rfind(". ", 0, max_chars)
+            if cut < max_chars // 2:
+                cut = max_chars  # no clean boundary, hard cut
+
+        piece = remaining[:cut].rstrip()
+        if piece:
+            pieces.append(piece)
+        # Step forward with small overlap to preserve context at seam.
+        next_start = max(cut - _SPLIT_OVERLAP_CHARS, cut - max_chars // 4)
+        next_start = max(next_start, 1)  # always advance at least 1 char
+        remaining = remaining[next_start:].lstrip()
+
+    return pieces or [text]
+
+
+def _average_vectors(vectors: list[list[float]]) -> list[float]:
+    """Element-wise mean of a list of equal-dim vectors. Used to combine
+    embeddings of multiple pieces of one long text back into a single
+    vector representing the whole document."""
+    if not vectors:
+        return []
+    if len(vectors) == 1:
+        return vectors[0]
+    dim = len(vectors[0])
+    summed = [0.0] * dim
+    for v in vectors:
+        for i in range(dim):
+            summed[i] += v[i]
+    n = float(len(vectors))
+    return [s / n for s in summed]
+
+
+def _split_by_token_budget(
+    texts: list[str],
+    token_budget: int,
+    max_count: int,
+) -> list[list[str]]:
+    """Pack `texts` into chunks where sum(tokens) <= token_budget and
+    len(chunk) <= max_count. Documents that alone exceed budget go in
+    their own single-element chunk (Gemini will either accept or reject,
+    but won't poison other texts)."""
+    chunks: list[list[str]] = []
+    cur: list[str] = []
+    cur_tokens = 0
+    for t in texts:
+        tk = _estimate_tokens(t)
+        if tk >= token_budget:
+            if cur:
+                chunks.append(cur)
+                cur, cur_tokens = [], 0
+            chunks.append([t])
+            continue
+        if cur_tokens + tk > token_budget or len(cur) >= max_count:
+            chunks.append(cur)
+            cur, cur_tokens = [], 0
+        cur.append(t)
+        cur_tokens += tk
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _process_one_chunk(
+    chunk: list[str],
+    dim: int,
+    keys: list[str],
+) -> list[list[float] | None] | None:
+    """Send one chunk through the multi-key pool with retry-after handling.
+
+    Returns the embedding list on success, or None if every key failed
+    every sweep (caller can then split-half retry)."""
+    import time as _time
+
+    global _key_rr_idx
+    for sweep in range(3):
+        min_retry_after: float | None = None
+        last_status: int | None = None
+        for offset in range(len(keys)):
+            idx = (_key_rr_idx + offset) % len(keys)
+            # Skip keys at soft RPD cap — don't waste a 429 on them and
+            # don't generate IP-throttle pressure.
+            if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
+                continue
+            # Intra-sweep gap: 5s between key attempts. Without this, 8 keys
+            # get hit in ~1s on 429 and Google IP-throttles the source.
+            if offset > 0:
+                _time.sleep(5.0)
+            status, result, retry_after = _embed_v2_rest_batch(
+                chunk, "RETRIEVAL_DOCUMENT", dim, keys[idx]
+            )
+            last_status = status
+            # Each request burns RPD whether it succeeds or returns 429.
+            _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+            if status == 200 and result is not None:
+                _key_rr_idx = (idx + 1) % len(keys)
+                return result
+            if status in (400, 401, 403, 429) or status == -1:
+                log.warning(
+                    "v2 batch: key #%d status=%s retry_after=%s [rpd=%d/%d]",
+                    idx,
+                    status,
+                    retry_after,
+                    _key_rpd_count.get(idx, 0),
+                    _RPD_SOFT_CAP,
+                )
+                if retry_after is not None:
+                    min_retry_after = (
+                        retry_after
+                        if min_retry_after is None
+                        else min(min_retry_after, retry_after)
+                    )
+                continue
+            log.warning("v2 batch: key #%d non-retriable status=%s", idx, status)
+            return None
+        if min_retry_after is None:
+            # No retry hint → permanent failure (likely 400/403). Don't loop.
+            log.warning(
+                "v2 batch: chunk failed, no retry hint (status=%s)", last_status
+            )
+            return None
+        wait = min(min_retry_after + 1.0, 90.0)
+        log.warning(
+            "v2 batch: all keys cooling down (sweep %d), sleeping %.1fs",
+            sweep + 1,
+            wait,
+        )
+        _time.sleep(wait)
+    return None
+
+
+def compute_document_embeddings_v2_batch(
+    texts: list[str],
+    dim: int = _EMBEDDING_DIM_V2,
+    token_budget: int = 8000,
+    max_count: int = 30,
+    inter_chunk_sleep: float = 4.0,
+) -> list[list[float] | None]:
+    """Bulk-embed documents via :batchEmbedContents REST (1 HTTP call → N vectors).
+
+    Chunks are sized by **token budget**, not document count — wiki docs
+    vary 200..2000 chars and a flat count-based limit blows past the 30K
+    TPM cap on long-doc-heavy batches. Token budget 8000 leaves room for
+    transient bursts and stays well under TPM.
+
+    Pacing: inter_chunk_sleep seconds between chunks keeps total
+    throughput well under 100 RPM per key even on a single-key pool.
+
+    Resilience: if a chunk fails its full sweep budget, retried as two
+    halves recursively. A single bad document gets isolated and skipped,
+    rest of the batch continues.
+
+    Returns embeddings in input order; None for any text that could not
+    be embedded (typically the bad-doc case after split-half).
+    """
+    if not texts:
+        return []
+
+    keys = _get_embedding_api_keys()
+    if not keys:
+        log.warning("v2 batch: no API keys (GEMINI_API_KEY/GEMINI_API_KEYS missing)")
+        return [None] * len(texts)
+
+    import time as _time
+
+    # STEP 1: Pre-split any text that's too large for a single embedding call.
+    # Gemini :batchEmbedContents rejects oversized texts with 429 even when
+    # the rest of the chunk is tiny. Split BEFORE chunking so each piece
+    # fits comfortably. Track original-doc → list-of-piece-indices so we
+    # can re-merge embeddings by averaging at the end.
+    pieces: list[str] = []
+    doc_to_piece_idx: list[list[int]] = (
+        []
+    )  # for each original doc, list of indices in `pieces`
+    split_log_count = 0
+    # Length stats for diagnostic visibility.
+    text_lens = [len(t) for t in texts]
+    text_tokens = [_estimate_tokens(t) for t in texts]
+    log.info(
+        "v2 batch INPUT STATS: count=%d chars[min=%d max=%d avg=%d] "
+        "tokens[min=%d max=%d avg=%d] threshold=%d tokens (=%d chars)",
+        len(texts),
+        min(text_lens) if text_lens else 0,
+        max(text_lens) if text_lens else 0,
+        sum(text_lens) // len(text_lens) if text_lens else 0,
+        min(text_tokens) if text_tokens else 0,
+        max(text_tokens) if text_tokens else 0,
+        sum(text_tokens) // len(text_tokens) if text_tokens else 0,
+        _MAX_TOKENS_PER_TEXT,
+        _MAX_TOKENS_PER_TEXT * 3,
+    )
+    for i, t in enumerate(texts):
+        ps = _split_long_text(t)
+        if len(ps) > 1:
+            split_log_count += 1
+            log.info(
+                "v2 batch SPLIT: doc #%d len=%d chars (~%d tokens) → %d pieces "
+                "(piece_lens=%s)",
+                i,
+                len(t),
+                _estimate_tokens(t),
+                len(ps),
+                [len(p) for p in ps],
+            )
+        idxs = []
+        for p in ps:
+            idxs.append(len(pieces))
+            pieces.append(p)
+        doc_to_piece_idx.append(idxs)
+    if split_log_count:
+        log.info(
+            "v2 batch: %d/%d docs were too long, split into %d pieces total",
+            split_log_count,
+            len(texts),
+            len(pieces),
+        )
+    else:
+        log.info(
+            "v2 batch: no docs needed splitting (all <=%d tokens)", _MAX_TOKENS_PER_TEXT
+        )
+
+    chunks = _split_by_token_budget(pieces, token_budget, max_count)
+    log.info(
+        "v2 batch: %d texts → %d pieces → %d chunks (budget=%d tokens, max=%d count)",
+        len(texts),
+        len(pieces),
+        len(chunks),
+        token_budget,
+        max_count,
+    )
+
+    # STEP 2: Embed all pieces in chunks (the usual flow).
+    piece_vectors: list[list[float] | None] = []
+    for chunk_idx, chunk in enumerate(chunks):
+        chunk_tokens = sum(_estimate_tokens(t) for t in chunk)
+        chunk_chars = sum(len(t) for t in chunk)
+        log.info(
+            "v2 batch SEND chunk %d/%d: %d texts, %d chars, ~%d tokens, "
+            "max_text_chars=%d",
+            chunk_idx + 1,
+            len(chunks),
+            len(chunk),
+            chunk_chars,
+            chunk_tokens,
+            max(len(t) for t in chunk) if chunk else 0,
+        )
+        result = _process_one_chunk(chunk, dim, keys)
+
+        if result is None and len(chunk) > 1:
+            # Split-half rescue: maybe one doc poisons the batch.
+            log.warning(
+                "v2 batch: chunk %d/%d (%d texts) failed, splitting in half",
+                chunk_idx + 1,
+                len(chunks),
+                len(chunk),
+            )
+            mid = len(chunk) // 2
+            left = compute_document_embeddings_v2_batch(
+                chunk[:mid], dim, token_budget, max_count, inter_chunk_sleep
+            )
+            right = compute_document_embeddings_v2_batch(
+                chunk[mid:], dim, token_budget, max_count, inter_chunk_sleep
+            )
+            result = left + right
+
+        if result is None:
+            result = [None] * len(chunk)
+        piece_vectors.extend(result)
+
+        if chunk_idx < len(chunks) - 1 and inter_chunk_sleep > 0:
+            _time.sleep(inter_chunk_sleep)
+
+    # STEP 3: Merge piece-vectors back into one vector per original doc.
+    # For multi-piece docs, average the embeddings (standard practice for
+    # long-document embedding). If any piece failed (None), drop it from
+    # the average; if ALL pieces failed, the doc gets None.
+    out: list[list[float] | None] = []
+    for idxs in doc_to_piece_idx:
+        # Filter Nones explicitly so the type narrows to list[list[float]].
+        vecs: list[list[float]] = [
+            piece_vectors[i] for i in idxs if piece_vectors[i] is not None  # type: ignore[misc]
+        ]
+        if not vecs:
+            out.append(None)
+        elif len(vecs) == 1:
+            out.append(vecs[0])
+        else:
+            out.append(_average_vectors(vecs))
+
+    return out
 
 
 def _fetch_by_vector(
