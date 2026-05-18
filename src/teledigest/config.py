@@ -170,6 +170,15 @@ class GeminiConfig:
     # rotates preview model IDs roughly monthly.
     live_model: str = "gemini-3.1-flash-live-preview"
     enabled: bool = False
+    # Vertex AI mode — routes embed_v2 batch path through aiplatform.googleapis.com.
+    # Bills against the project's GCP billing account (uses Cloud free-trial $300,
+    # not AI Studio Prepay). Single-text МОЗГ-query path is unaffected.
+    # vertex_credentials_path = отдельный service-account JSON под Vertex (роль
+    # `roles/aiplatform.user`), НЕ тот же что Firestore-SA в [google].
+    use_vertex: bool = False
+    vertex_project: str = ""
+    vertex_location: str = "us-central1"
+    vertex_credentials_path: Path = Path("/home/teledigest/data/vertex.json")
 
 
 @dataclass
@@ -434,11 +443,27 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
         str(g_raw.get("live_model", "gemini-3.1-flash-live-preview")).strip()
         or "gemini-3.1-flash-live-preview"
     )
+    use_vertex = str(g_raw.get("use_vertex", "false")).strip().lower() in (
+        "true",
+        "yes",
+        "1",
+    )
+    vertex_project = str(g_raw.get("vertex_project", "")).strip()
+    vertex_location = (
+        str(g_raw.get("vertex_location", "us-central1")).strip() or "us-central1"
+    )
+    vertex_credentials_path = Path(
+        str(g_raw.get("vertex_credentials_path", "/home/teledigest/data/vertex.json"))
+    )
     return GeminiConfig(
         api_key=api_key,
         model=model,
         live_model=live_model,
         enabled=bool(api_key),
+        use_vertex=use_vertex,
+        vertex_project=vertex_project,
+        vertex_location=vertex_location,
+        vertex_credentials_path=vertex_credentials_path,
     )
 
 
