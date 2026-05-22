@@ -171,6 +171,30 @@ class GeminiConfig:
 
 
 @dataclass
+class QdrantConfig:
+    """Qdrant vector DB — self-hosted на VPS, заменяет Firestore для
+    vector search. Firestore остаётся источником правды для метаданных
+    (wisdom_base, wikivoyage_base пишут писатели), cron-скрипт
+    sync_firestore_to_qdrant.py подтягивает данные сюда раз в час.
+
+    Defaults — Qdrant на той же VPS, REST на 6333, без auth (контейнер
+    локально доступен). Если выставлен api_key — будет передаваться в
+    Authorization header. host оставить пустым = Qdrant отключён,
+    fallback на старый Firestore-путь в _fetch_by_vector.
+    """
+
+    host: str = ""
+    port: int = 6333
+    api_key: str = ""
+    # Имена коллекций в Qdrant. Совпадают с Firestore для удобства sync'а.
+    wisdom_collection: str = "wisdom_base"
+    wiki_collection: str = "wikivoyage_base"
+    # Размерность вектора. Должна совпадать с _EMBEDDING_DIM_V2 в
+    # gemini_brain.py (1536 — MRL-truncation от gemini-embedding-2).
+    vector_dim: int = 1536
+
+
+@dataclass
 class LoggingConfig:
     level: str = "INFO"
 
@@ -186,6 +210,7 @@ class AppConfig:
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     google: GoogleConfig = field(default_factory=GoogleConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    qdrant: QdrantConfig = field(default_factory=QdrantConfig)
 
 
 _CONFIG: Optional[AppConfig] = None
@@ -417,6 +442,28 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     )
 
 
+def _parse_qdrant(raw: Dict[str, Any]) -> QdrantConfig:
+    q_raw = raw.get("qdrant") or {}
+    try:
+        port = int(q_raw.get("port", 6333))
+    except (TypeError, ValueError):
+        port = 6333
+    try:
+        vector_dim = int(q_raw.get("vector_dim", 1536))
+    except (TypeError, ValueError):
+        vector_dim = 1536
+    return QdrantConfig(
+        host=str(q_raw.get("host", "")).strip(),
+        port=port,
+        api_key=str(q_raw.get("api_key", "")).strip(),
+        wisdom_collection=str(q_raw.get("wisdom_collection", "wisdom_base")).strip()
+        or "wisdom_base",
+        wiki_collection=str(q_raw.get("wiki_collection", "wikivoyage_base")).strip()
+        or "wikivoyage_base",
+        vector_dim=vector_dim,
+    )
+
+
 def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
     """
     Convert the raw TOML dict into typed AppConfig.
@@ -434,6 +481,7 @@ def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
         sources=sources,
         google=_parse_google(raw),
         gemini=_parse_gemini(raw),
+        qdrant=_parse_qdrant(raw),
     )
 
 
