@@ -46,7 +46,6 @@ Usage (inside container or anywhere teledigest is installed):
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
 import re
 import sys
@@ -395,88 +394,40 @@ def write_patterns(
 ) -> tuple[int, int]:
     """Returns (written, skipped). Skipped = already-exists (idempotent).
 
-    Computes text-embedding-004 vectors for new docs in batches so vector
-    search works immediately after import (no separate backfill needed).
-    Falls back gracefully if embedding API is unavailable.
+    Пишет в SQLite таблицу wikivoyage_patterns (pending-queue).
+    Эмбеддинг и upsert в Qdrant делает embed_pump.py отдельным проходом.
+
+    Аргумент `db` оставлен в сигнатуре для совместимости с вызывающим
+    кодом — больше не используется (Firestore выпилен из пути).
     """
     if not patterns:
         return 0, 0
-    # Cipher-fix: write to wikivoyage_base with v2 unified-text embedding.
-    # Bot reads same collection. Backup of pre-migration state lives in
-    # wikivoyage_v1_backup.
-    coll = db.collection("wikivoyage_base")
-    now = dt.datetime.now(dt.timezone.utc)
+    from teledigest.extraction_db import init_extraction_tables, insert_wiki_pattern
+
+    init_extraction_tables()
     url = WIKI_PAGE_BASE + page_title.replace(" ", "_")
-
-    # --- Phase 1: determine which docs are new (need write) ---
-    new_docs: list[tuple[str, dict]] = []  # (doc_id, pattern)
-    skipped = 0
-    for p in patterns:
-        idx = p.pop("_seed_index")
-        doc_id = _doc_id(country, page_title, idx)
-        ref = coll.document(doc_id)
-        snap = ref.get()
-        if snap.exists:
-            skipped += 1
-            continue
-        new_docs.append((doc_id, p))
-
-    if not new_docs:
-        return 0, skipped
-
-    # --- Phase 2: compute embeddings for new docs (v2 cipher) ---
-    from teledigest.country_codes import country_full_name_en
-    from teledigest.gemini_brain import (
-        _EMBEDDING_MODEL_TAG_V2,
-        compute_document_embeddings_v2,
-    )
-
-    country_full = country_full_name_en(country)
-
-    def _embed_text(p: dict) -> str:
-        parts = [country_full]
-        title = (p.get("title") or "").strip()
-        tag = (p.get("tag") or "").strip()
-        instr = (p.get("instruction") or "").strip()
-        if title:
-            parts.append(title)
-        if tag:
-            parts.append(tag)
-        if instr:
-            parts.append(instr)
-        return ". ".join(parts)
-
-    texts = [_embed_text(nd) for _, nd in new_docs]
-    try:
-        embeddings = compute_document_embeddings_v2(texts)
-    except Exception as emb_err:
-        log.warning(
-            "write_patterns: embedding batch failed (%s) — writing without vectors",
-            emb_err,
-        )
-        embeddings = [None] * len(new_docs)
-
-    # --- Phase 3: write new docs with embeddings ---
     written = 0
-    for (doc_id, p), emb, text in zip(new_docs, embeddings, texts):
-        instr = p.get("instruction") or ""
-        payload: dict = {
-            **p,
-            "source": "wikivoyage",
-            "sourceTitle": page_title,
-            "sourceUrl": url,
-            "importedAt": now,
-            "embedded_text": text,
-            "embedding_model": _EMBEDDING_MODEL_TAG_V2,
-            "text_length": len(instr),
-            "needs_chunking": len(instr) > 500,
-        }
-        if emb is not None:
-            from google.cloud.firestore_v1.vector import Vector
+    skipped = 0
 
-            payload["embedding"] = Vector(emb)
-        coll.document(doc_id).set(payload)
-        written += 1
+    for p in patterns:
+        idx = p.pop("_seed_index", 0)
+        doc_id = _doc_id(country, page_title, idx)
+        title = (p.get("title") or page_title or "").strip()
+        tag = (p.get("tag") or "Travel").strip()
+        instruction = (p.get("instruction") or "").strip()
+        inserted = insert_wiki_pattern(
+            id_=doc_id,
+            country=country,
+            title=title,
+            tag=tag,
+            instruction=instruction,
+            source_title=page_title,
+            source_url=url,
+        )
+        if inserted:
+            written += 1
+        else:
+            skipped += 1
 
     return written, skipped
 
