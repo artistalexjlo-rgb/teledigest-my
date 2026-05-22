@@ -52,3 +52,8 @@ Thumbs.db
 
 # Black cache (pytest-black)
 .black/
+# Service account JSONs — never commit
+sa.json
+vertex.json
+google-token.json
+service-account.json

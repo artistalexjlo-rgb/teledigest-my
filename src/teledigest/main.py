@@ -94,13 +94,10 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
         )
         return
 
-    # Run both clients + scheduler + channel poster
-    from .channel_poster import channel_poster_loop
-
+    # Run both clients + scheduler.
     await asyncio.gather(
         run_clients(),
         summary_scheduler(),
-        channel_poster_loop(),
     )
 
 
