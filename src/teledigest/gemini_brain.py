@@ -771,7 +771,26 @@ def _fetch_by_vector(
     limit: int,
     source_label: str,
 ) -> list[dict]:
-    """Vector search via Firestore find_nearest. Falls back to recency on error."""
+    """Vector search — Qdrant first (если сконфигурирован), Firestore fallback.
+
+    Если в [qdrant] конфиге задан host — идём в Qdrant (см. qdrant_db).
+    Если Qdrant не настроен или упал — пробуем Firestore find_nearest.
+    Если оба пути дохлые — возвращаем [], caller сам решит fallback на recency.
+    """
+    # Path 1: Qdrant (preferred, локальный, без Google rate-limits).
+    try:
+        from .qdrant_db import find_nearest, is_configured
+
+        if is_configured():
+            results = find_nearest(collection, query_vector, limit, source_label)
+            if results:
+                return results
+            # Пустой результат от Qdrant — пробуем Firestore (вдруг там
+            # ещё есть доки не успевшие синкнуться).
+    except Exception as e:
+        log.warning("МОЗГ: Qdrant vector search on %s failed (%s)", collection, e)
+
+    # Path 2: Firestore find_nearest (legacy / fallback).
     try:
         from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
         from google.cloud.firestore_v1.vector import Vector
@@ -796,7 +815,7 @@ def _fetch_by_vector(
         return results
     except Exception as e:
         log.warning(
-            "МОЗГ: vector search on %s failed (%s) — falling back to recency",
+            "МОЗГ: Firestore vector search on %s failed (%s) — falling back to recency",
             collection,
             e,
         )
