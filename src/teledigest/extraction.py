@@ -31,6 +31,7 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from .config import get_config, log
 from .extraction_db import (
@@ -141,7 +142,7 @@ def _gemini_generate_json(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
         f":generateContent?key={api_key}"
     )
-    payload = {
+    payload: dict[str, Any] = {
         "contents": [{"parts": [{"text": f"Текст лога:\n{content}"}]}],
         "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
         "generationConfig": {"responseMimeType": "application/json"},
