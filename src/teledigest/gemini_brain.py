@@ -771,54 +771,27 @@ def _fetch_by_vector(
     limit: int,
     source_label: str,
 ) -> list[dict]:
-    """Vector search — Qdrant first (если сконфигурирован), Firestore fallback.
+    """Vector search через Qdrant. Firestore полностью убран из пути
+    после Google-suspend'а 2026-05-18 — все писатели (extraction.py,
+    wikivoyage_import.py) пишут в SQLite pending → embed_pump.py →
+    Qdrant.
 
-    Если в [qdrant] конфиге задан host — идём в Qdrant (см. qdrant_db).
-    Если Qdrant не настроен или упал — пробуем Firestore find_nearest.
-    Если оба пути дохлые — возвращаем [], caller сам решит fallback на recency.
+    Аргумент `db` оставлен в сигнатуре для совместимости с вызывающим
+    `_fetch_wisdom_and_wiki` (он передаёт Firestore-клиент) — больше не
+    используется.
     """
-    # Path 1: Qdrant (preferred, локальный, без Google rate-limits).
     try:
         from .qdrant_db import find_nearest, is_configured
 
-        if is_configured():
-            results = find_nearest(collection, query_vector, limit, source_label)
-            if results:
-                return results
-            # Пустой результат от Qdrant — пробуем Firestore (вдруг там
-            # ещё есть доки не успевшие синкнуться).
+        if not is_configured():
+            log.warning(
+                "МОЗГ: Qdrant не настроен (cfg.qdrant.host пустой) — "
+                "vector search невозможен"
+            )
+            return []
+        return find_nearest(collection, query_vector, limit, source_label)
     except Exception as e:
         log.warning("МОЗГ: Qdrant vector search on %s failed (%s)", collection, e)
-
-    # Path 2: Firestore find_nearest (legacy / fallback).
-    try:
-        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-        from google.cloud.firestore_v1.vector import Vector
-
-        docs = (
-            db.collection(collection)
-            .find_nearest(
-                vector_field="embedding",
-                query_vector=Vector(query_vector),
-                distance_measure=DistanceMeasure.COSINE,
-                limit=limit,
-            )
-            .stream()
-        )
-        results = []
-        for d in docs:
-            data = d.to_dict()
-            if not data:
-                continue
-            data["_source"] = source_label
-            results.append(data)
-        return results
-    except Exception as e:
-        log.warning(
-            "МОЗГ: Firestore vector search on %s failed (%s) — falling back to recency",
-            collection,
-            e,
-        )
         return []
 
 
