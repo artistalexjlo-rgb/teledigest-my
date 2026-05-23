@@ -180,7 +180,12 @@ def test_upsert_point_uses_doc_id_as_qdrant_id():
     call = fake_client.upsert.call_args
     pts = call.kwargs["points"]
     assert len(pts) == 1
-    assert pts[0].id == "abc123"
+    # _point_id оборачивает doc_id в детерминированный UUID5 (Qdrant
+    # требует UUID или uint, sha1-hex-24 не принимается).
+    import uuid as _uuid
+
+    expected = str(_uuid.uuid5(qdrant_db._QDRANT_POINT_UUID_NAMESPACE, "abc123"))
+    assert pts[0].id == expected
     assert pts[0].vector == [0.1] * 1536
     assert pts[0].payload == {"country": "br"}
 
