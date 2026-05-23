@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
+import uuid
 from typing import Any, Optional
 
 from .config import get_config, log
@@ -158,12 +159,20 @@ def upsert_points_batch(
     client.upsert(collection_name=collection, points=points)
 
 
+_QDRANT_POINT_UUID_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+
 def _point_id(doc_id: str) -> str:
-    """Qdrant принимает либо UUID-строку, либо unsigned int. Наши
-    Firestore-doc-id — 24-символьные SHA1 hex prefix'ы. Они в общем
-    случае не UUID, поэтому используем как опаковую строку. Qdrant
-    принимает её как 'extended' point id."""
-    return doc_id
+    """Qdrant принимает либо UUID-строку, либо unsigned int.
+
+    Наши doc_id — 24-символьные sha1-hex prefix'ы (например
+    'a742c0e01993385d2c0741ec'), это НЕ валидный UUID и НЕ uint. Qdrant
+    на upsert такого ID возвращает 400 ("not a valid point ID").
+
+    Решение: оборачиваем в UUID5 c фиксированным namespace. uuid5
+    детерминистичен — тот же doc_id всегда даёт тот же UUID, поэтому
+    idempotency на повторных upsert/retrieve не ломается."""
+    return str(uuid.uuid5(_QDRANT_POINT_UUID_NAMESPACE, doc_id))
 
 
 def point_exists(collection: str, doc_id: str) -> bool:
