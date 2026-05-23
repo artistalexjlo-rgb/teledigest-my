@@ -37,6 +37,7 @@ from .config import get_config, log
 from .extraction_db import (
     COLLECTION_STORIES,
     COLLECTION_WISDOM,
+    _key_hash,
     init_extraction_tables,
     insert_extracted_pattern,
     quota_ban_today,
@@ -109,11 +110,6 @@ def _doc_id(source_file_name: str, idx: int, collection: str) -> str:
     как в Apps Script saveToFirestore_."""
     seed = f"{source_file_name}:{idx}:{collection}"
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:24]
-
-
-def _key_hash(api_key: str) -> str:
-    """Короткий хэш для квота-таблицы (не храним сами ключи)."""
-    return hashlib.sha1(api_key.encode("utf-8")).hexdigest()[:16]
 
 
 def iter_model_key_pairs(

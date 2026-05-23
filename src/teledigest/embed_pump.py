@@ -89,7 +89,9 @@ def _pump_extracted_collection(
             continue
 
         try:
-            vectors = compute_document_embeddings_v2(texts)
+            vectors = compute_document_embeddings_v2(
+                texts, min_interval_s=10.0, use_persistent_quota=True
+            )
         except Exception as e:
             log.warning("embed_pump extracted batch failed (%s): %s", qd_collection, e)
             for r, _t in ids_payload:
@@ -184,7 +186,9 @@ def _pump_wiki(batch_size: int = 50) -> tuple[int, int]:
             continue
 
         try:
-            vectors = compute_document_embeddings_v2(texts)
+            vectors = compute_document_embeddings_v2(
+                texts, min_interval_s=10.0, use_persistent_quota=True
+            )
         except Exception as e:
             log.warning("embed_pump wiki batch failed: %s", e)
             for r, _t in ids_payload:

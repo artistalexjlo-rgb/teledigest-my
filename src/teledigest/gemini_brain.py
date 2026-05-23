@@ -26,6 +26,7 @@ Auth: GEMINI_API_KEY from env or [gemini] api_key in config.
 from __future__ import annotations
 
 import asyncio
+import time as _time
 
 from .config import get_config, log
 
@@ -129,9 +130,22 @@ _key_rr_idx = 0
 #
 # IMPORTANT: this is in-process memory. If you restart the container,
 # counter resets. Restart only after midnight Pacific Time, or you'll
-# blow past the cap silently.
+# blow past the cap silently. For bulk embed_pump runs pass
+# use_persistent_quota=True to switch onto the SQLite gemini_quota table.
 _key_rpd_count: dict[int, int] = {}
 _RPD_SOFT_CAP = 950
+
+# Module-level state for bulk paced embed (embed_pump). Cooldown is
+# in-memory only — short-lived, not worth persisting; suspend-risk states
+# (repeated 429 after cooldown) escalate to persistent quota_ban_today.
+_EMBED_COOLDOWN_S = 300.0
+_EMBED_ABUSE_THRESHOLD = 3
+_EMBED_ABUSE_WINDOW_S = 60.0
+_EMBED_ABUSE_PAUSE_S = 1800.0
+_embed_cooldown_until: dict[int, float] = {}
+_embed_was_cooldowned: set[int] = set()
+_embed_recent_429: list[float] = []
+_embed_abuse_pause_until: float = 0.0
 
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
@@ -225,6 +239,9 @@ def _embed_v2(
     texts: list[str],
     task_type: str,
     dim: int = _EMBEDDING_DIM_V2,
+    *,
+    min_interval_s: float = 0.0,
+    use_persistent_quota: bool = False,
 ) -> list[list[float] | None]:
     """Compute embeddings via the canonical v2 setup.
 
@@ -233,6 +250,18 @@ def _embed_v2(
     Asymmetric task_type is what makes short queries land near long structured
     docs — without it the embedder treats both sides symmetrically and recall
     on short-query / long-doc pairs collapses.
+
+    Optional bulk-pacing kwargs (defaults preserve fast query-path behavior):
+
+      min_interval_s: sleep after every text request (success or fail). Set
+                     to e.g. 10.0 for embed_pump runs to keep RPS well under
+                     abuse threshold.
+      use_persistent_quota: when True, gate keys on the SQLite gemini_quota
+                     table (model='gemini-embedding-2') — survives container
+                     restarts. First 429 puts a key into 5min in-memory
+                     cooldown; second 429 after cooldown calls quota_ban_today.
+                     Also triggers global 30min pause if >=3 distinct keys
+                     hit 429 in a 60s window (likely IP-throttle / abuse flag).
     """
     if not texts:
         return []
@@ -267,13 +296,23 @@ def _embed_v2(
     # Counter resets on process restart — that's OK, Google's daily quota
     # resets at midnight PT anyway, and a fresh container after midnight
     # starts with clean counters.
-    import time as _time
-
     # gemini-embedding-2 via google-genai SDK: passing a list as `contents`
     # is interpreted as a single multi-part document, not a batch — it returns
     # one vector regardless of list size. So call per-text individually.
     out: list[list[float] | None] = []
     for text in texts:
+        # Global abuse-pause respect (set when many keys 429 in tight window).
+        if use_persistent_quota:
+            global _embed_abuse_pause_until
+            now = _time.time()
+            if now < _embed_abuse_pause_until:
+                wait = _embed_abuse_pause_until - now
+                log.warning(
+                    "v2 embed: abuse-flag pause active, sleeping %.0fs",
+                    wait,
+                )
+                _time.sleep(wait)
+
         vec: list[float] | None = None
         # Try every key in order starting from current round-robin index. On
         # 429/RESOURCE_EXHAUSTED move to the next key — that key still has
@@ -284,6 +323,19 @@ def _embed_v2(
             # Skip keys that already hit our soft RPD cap (950/1000).
             if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
                 continue
+            # Persistent quota check (bulk path) — SQLite-backed survives
+            # restarts; in-memory cooldown is short-lived but still tracked.
+            if use_persistent_quota:
+                from .extraction_db import _key_hash as _kh
+                from .extraction_db import quota_state
+
+                kh = _kh(keys[idx])
+                cnt, banned = quota_state(kh, _EMBEDDING_MODEL_V2)
+                if banned or cnt >= _RPD_SOFT_CAP:
+                    continue
+                cooldown_until = _embed_cooldown_until.get(idx, 0.0)
+                if _time.time() < cooldown_until:
+                    continue
             # Intra-sweep gap: don't fire keys faster than 1 per 5s. Without
             # this, 8 keys get hit in ~1 second on 429, which Google reads
             # as abuse and IP-throttles the source.
@@ -296,6 +348,11 @@ def _embed_v2(
                     config=cfg,
                 )
                 _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+                if use_persistent_quota:
+                    from .extraction_db import _key_hash as _kh
+                    from .extraction_db import quota_increment
+
+                    quota_increment(_kh(keys[idx]), _EMBEDDING_MODEL_V2)
                 embeddings = result.embeddings or []
                 vec = list(embeddings[0].values or []) if embeddings else None
                 # Advance pointer past the successful key so next text starts
@@ -305,9 +362,51 @@ def _embed_v2(
             except Exception as e:
                 last_err = e
                 err = str(e)
+                is_429 = "429" in err or "RESOURCE_EXHAUSTED" in err
                 # 429 still counts in Google's quota meter, so count it too.
-                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                if is_429:
                     _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
+                    if use_persistent_quota:
+                        from .extraction_db import _key_hash as _kh
+                        from .extraction_db import quota_ban_today
+                        from .extraction_db import quota_increment as _qi
+
+                        kh = _kh(keys[idx])
+                        _qi(kh, _EMBEDDING_MODEL_V2)
+                        if idx in _embed_was_cooldowned:
+                            # Second 429 after a cooldown — escalate to
+                            # persistent ban until UTC midnight.
+                            log.warning(
+                                "v2 embed: key #%d second 429 after "
+                                "cooldown — ban till UTC midnight",
+                                idx,
+                            )
+                            quota_ban_today(kh, _EMBEDDING_MODEL_V2)
+                        else:
+                            cooldown_until = _time.time() + _EMBED_COOLDOWN_S
+                            _embed_cooldown_until[idx] = cooldown_until
+                            _embed_was_cooldowned.add(idx)
+                            log.warning(
+                                "v2 embed: key #%d 429 — cooldown %.0fs",
+                                idx,
+                                _EMBED_COOLDOWN_S,
+                            )
+                        # Track abuse window — many keys 429ing fast = IP flag.
+                        now = _time.time()
+                        _embed_recent_429.append(now)
+                        # prune outside window
+                        cutoff = now - _EMBED_ABUSE_WINDOW_S
+                        while _embed_recent_429 and _embed_recent_429[0] < cutoff:
+                            _embed_recent_429.pop(0)
+                        if len(_embed_recent_429) >= _EMBED_ABUSE_THRESHOLD:
+                            _embed_abuse_pause_until = now + _EMBED_ABUSE_PAUSE_S
+                            log.error(
+                                "v2 embed: ABUSE FLAG — %d 429s in %.0fs, "
+                                "global pause %.0fs",
+                                len(_embed_recent_429),
+                                _EMBED_ABUSE_WINDOW_S,
+                                _EMBED_ABUSE_PAUSE_S,
+                            )
                 # Move on to the next key for any transient/per-key error:
                 # 429 (quota), 400/403 (invalid/revoked key), 401 (unauth).
                 # Only stop for genuinely non-key errors (network, 5xx that
@@ -336,6 +435,9 @@ def _embed_v2(
                 last_err,
             )
         out.append(vec)
+        # Bulk pacing: throttle aggregate RPS between texts (success or fail).
+        if min_interval_s > 0:
+            _time.sleep(min_interval_s)
     return out
 
 
@@ -350,10 +452,25 @@ def compute_query_embedding_v2(
 
 
 def compute_document_embeddings_v2(
-    texts: list[str], dim: int = _EMBEDDING_DIM_V2
+    texts: list[str],
+    dim: int = _EMBEDDING_DIM_V2,
+    *,
+    min_interval_s: float = 0.0,
+    use_persistent_quota: bool = False,
 ) -> list[list[float] | None]:
-    """Embed a batch of documents for indexing (task_type=RETRIEVAL_DOCUMENT)."""
-    return _embed_v2(texts, "RETRIEVAL_DOCUMENT", dim)
+    """Embed a batch of documents for indexing (task_type=RETRIEVAL_DOCUMENT).
+
+    Defaults preserve legacy fast behavior (no sleep, in-memory quota).
+    embed_pump.py (the only bulk caller) passes min_interval_s=10.0 +
+    use_persistent_quota=True explicitly — see embed_pump._pump_*.
+    """
+    return _embed_v2(
+        texts,
+        "RETRIEVAL_DOCUMENT",
+        dim,
+        min_interval_s=min_interval_s,
+        use_persistent_quota=use_persistent_quota,
+    )
 
 
 def _parse_retry_after_seconds(body_text: str) -> float | None:

@@ -124,6 +124,13 @@ def _today_utc() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
 
 
+def _key_hash(api_key: str) -> str:
+    """Короткий sha1 хэш для записи в gemini_quota (не храним сами ключи)."""
+    import hashlib
+
+    return hashlib.sha1(api_key.encode("utf-8")).hexdigest()[:16]
+
+
 def quota_state(key_hash: str, model: str) -> tuple[int, bool]:
     """Returns (today_count, banned) для пары (key_hash, model) на текущую UTC-дату."""
     with get_db_connection() as conn:
