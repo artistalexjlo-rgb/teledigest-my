@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS extracted_patterns (
 );
 """
 
+_SCHEMA_QUOTA = """
+CREATE TABLE IF NOT EXISTS gemini_quota (
+    key_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    date_utc TEXT NOT NULL,        -- 'YYYY-MM-DD' UTC
+    count INTEGER NOT NULL DEFAULT 0,
+    banned INTEGER NOT NULL DEFAULT 0,  -- 1 = пара забанена до конца суток (например после 429)
+    PRIMARY KEY (key_hash, model, date_utc)
+);
+"""
+
 _SCHEMA_WIKI = """
 CREATE TABLE IF NOT EXISTS wikivoyage_patterns (
     id TEXT PRIMARY KEY,
@@ -94,10 +105,76 @@ def init_extraction_tables() -> None:
         cur = conn.cursor()
         cur.execute(_SCHEMA_EXTRACTED)
         cur.execute(_SCHEMA_WIKI)
+        cur.execute(_SCHEMA_QUOTA)
         for idx_sql in _INDEXES:
             cur.execute(idx_sql)
         conn.commit()
-    log.info("extraction_db: tables ensured (extracted_patterns + wikivoyage_patterns)")
+    log.info(
+        "extraction_db: tables ensured "
+        "(extracted_patterns + wikivoyage_patterns + gemini_quota)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gemini quota tracking (per key+model RPD, persistent across container restarts)
+# ---------------------------------------------------------------------------
+
+
+def _today_utc() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def quota_state(key_hash: str, model: str) -> tuple[int, bool]:
+    """Returns (today_count, banned) для пары (key_hash, model) на текущую UTC-дату."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT count, banned FROM gemini_quota "
+            "WHERE key_hash = ? AND model = ? AND date_utc = ?",
+            (key_hash, model, _today_utc()),
+        )
+        row = cur.fetchone()
+    if not row:
+        return 0, False
+    return int(row[0] or 0), bool(row[1])
+
+
+def quota_increment(key_hash: str, model: str) -> int:
+    """Increment today's counter, returns new count."""
+    today = _today_utc()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO gemini_quota (key_hash, model, date_utc, count) "
+            "VALUES (?, ?, ?, 1) "
+            "ON CONFLICT(key_hash, model, date_utc) "
+            "DO UPDATE SET count = count + 1",
+            (key_hash, model, today),
+        )
+        conn.commit()
+        cur.execute(
+            "SELECT count FROM gemini_quota "
+            "WHERE key_hash = ? AND model = ? AND date_utc = ?",
+            (key_hash, model, today),
+        )
+        row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def quota_ban_today(key_hash: str, model: str) -> None:
+    """Пометить пару (key, model) как забаненную до конца UTC-суток
+    (например после 429)."""
+    today = _today_utc()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO gemini_quota (key_hash, model, date_utc, count, banned) "
+            "VALUES (?, ?, ?, 0, 1) "
+            "ON CONFLICT(key_hash, model, date_utc) "
+            "DO UPDATE SET banned = 1",
+            (key_hash, model, today),
+        )
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
