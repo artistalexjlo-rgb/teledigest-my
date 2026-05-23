@@ -158,6 +158,9 @@ class GeminiConfig:
     """Gemini API settings for МОЗГ chat assistant."""
 
     api_key: str = ""
+    # Pool of keys for extraction.py (multi-account free-tier RPD aggregation).
+    # Parsed from env GEMINI_API_KEYS=k1,k2,k3. Если пусто — fallback на [api_key].
+    api_keys: list[str] = field(default_factory=list)
     # Legacy synchronous model (used by Apps Script extraction-style flows
     # and as fallback if Live API errors). Shares 500 RPD on free tier.
     model: str = "gemini-3.1-flash-lite-preview"
@@ -426,6 +429,10 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
 def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
+    keys_env = os.environ.get("GEMINI_API_KEYS", "")
+    api_keys = [k.strip() for k in keys_env.split(",") if k.strip()]
+    if not api_keys and api_key:
+        api_keys = [api_key]
     model = (
         str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip()
         or "gemini-3.1-flash-lite-preview"
@@ -436,9 +443,10 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     )
     return GeminiConfig(
         api_key=api_key,
+        api_keys=api_keys,
         model=model,
         live_model=live_model,
-        enabled=bool(api_key),
+        enabled=bool(api_key or api_keys),
     )
 
 

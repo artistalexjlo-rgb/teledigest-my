@@ -240,3 +240,44 @@ def test_stats_returns_counts(temp_db):
     assert "wiki" in st
     assert st["wiki"]["total"] == 1
     assert st["wiki"]["pending"] == 1
+
+
+def test_quota_state_initial(temp_db):
+    cnt, banned = extraction_db.quota_state("keyhashAAA", "gemini-3.5-flash")
+    assert cnt == 0
+    assert banned is False
+
+
+def test_quota_increment_counts(temp_db):
+    kh = "keyhashBBB"
+    m = "gemini-3.1-flash-lite"
+    assert extraction_db.quota_increment(kh, m) == 1
+    assert extraction_db.quota_increment(kh, m) == 2
+    assert extraction_db.quota_increment(kh, m) == 3
+    cnt, banned = extraction_db.quota_state(kh, m)
+    assert cnt == 3
+    assert banned is False
+
+
+def test_quota_ban_today(temp_db):
+    kh = "keyhashCCC"
+    m = "gemini-2.5-flash"
+    extraction_db.quota_ban_today(kh, m)
+    cnt, banned = extraction_db.quota_state(kh, m)
+    assert cnt == 0
+    assert banned is True
+    # Бан не сбрасывает счётчик — повторный increment работает, banned остаётся.
+    extraction_db.quota_increment(kh, m)
+    cnt, banned = extraction_db.quota_state(kh, m)
+    assert cnt == 1
+    assert banned is True
+
+
+def test_quota_separate_per_model_and_key(temp_db):
+    extraction_db.quota_increment("kh1", "m1")
+    extraction_db.quota_increment("kh1", "m2")
+    extraction_db.quota_increment("kh2", "m1")
+    assert extraction_db.quota_state("kh1", "m1")[0] == 1
+    assert extraction_db.quota_state("kh1", "m2")[0] == 1
+    assert extraction_db.quota_state("kh2", "m1")[0] == 1
+    assert extraction_db.quota_state("kh2", "m2")[0] == 0
