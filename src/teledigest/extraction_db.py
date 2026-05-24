@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS extracted_patterns (
 );
 """
 
+_SCHEMA_PATTERN_POSTS = """
+CREATE TABLE IF NOT EXISTS pattern_posts (
+    pattern_id TEXT NOT NULL,
+    channel TEXT NOT NULL,             -- 'luky', 'vk_main', 'discord_en', ...
+    posted_at TEXT NOT NULL,
+    message_url TEXT,                  -- t.me link or platform-specific URL
+    posted_text TEXT,                  -- the exact text that went out (debug)
+    PRIMARY KEY (pattern_id, channel)
+);
+"""
+
 _SCHEMA_QUOTA = """
 CREATE TABLE IF NOT EXISTS gemini_quota (
     key_hash TEXT NOT NULL,
@@ -106,6 +117,7 @@ def init_extraction_tables() -> None:
         cur.execute(_SCHEMA_EXTRACTED)
         cur.execute(_SCHEMA_WIKI)
         cur.execute(_SCHEMA_QUOTA)
+        cur.execute(_SCHEMA_PATTERN_POSTS)
         for idx_sql in _INDEXES:
             cur.execute(idx_sql)
         conn.commit()
@@ -166,6 +178,92 @@ def quota_increment(key_hash: str, model: str) -> int:
         )
         row = cur.fetchone()
     return int(row[0]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# pattern_posts — per-channel posting log (used by channel_poster.py)
+# ---------------------------------------------------------------------------
+
+
+def fetch_unposted_stories(
+    channel: str,
+    limit: int = 2000,
+    excluded_countries: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return story patterns (collection_target='telegram_queue') that have
+    NOT been posted to the given channel yet, oldest-first."""
+    excluded = excluded_countries or set()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, country, title, tag, routing, human_story,
+                   target_languages, source_country_file, extracted_at
+            FROM extracted_patterns
+            WHERE collection_target = 'telegram_queue'
+              AND human_story IS NOT NULL
+              AND human_story != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM pattern_posts pp
+                  WHERE pp.pattern_id = extracted_patterns.id
+                    AND pp.channel = ?
+              )
+            ORDER BY extracted_at
+            LIMIT ?
+            """,
+            (channel, limit),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return [r for r in rows if (r.get("country") or "").lower() not in excluded]
+
+
+def mark_pattern_posted(
+    pattern_id: str,
+    channel: str,
+    posted_text: str,
+    message_url: str | None = None,
+) -> None:
+    """Insert a row into pattern_posts. Idempotent on (pattern_id, channel)
+    via PRIMARY KEY — repeated calls silently noop, which is the right
+    behaviour if a post somehow gets retried with the same target."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO pattern_posts
+                (pattern_id, channel, posted_at, message_url, posted_text)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (pattern_id, channel, now, message_url, posted_text),
+        )
+        conn.commit()
+
+
+def recent_posted_countries(channel: str, n: int = 3) -> list[str]:
+    """Return countries of the most recent N posts to the channel,
+    oldest-first (so list[-1] is the most recent). Used by channel_poster
+    to avoid repeating any of the last N countries when picking the next.
+
+    Persistent across container restarts — rotation memory survives Dokploy
+    redeploys (which was the BR-spam bug in the Firestore-era).
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT ep.country
+            FROM pattern_posts pp
+            JOIN extracted_patterns ep ON ep.id = pp.pattern_id
+            WHERE pp.channel = ?
+            ORDER BY pp.posted_at DESC
+            LIMIT ?
+            """,
+            (channel, n),
+        )
+        rows = [(r[0] or "").lower() for r in cur.fetchall()]
+    return list(reversed(rows))
 
 
 def quota_ban_today(key_hash: str, model: str) -> None:

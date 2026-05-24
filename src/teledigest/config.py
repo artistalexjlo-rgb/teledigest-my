@@ -198,6 +198,26 @@ class QdrantConfig:
 
 
 @dataclass
+class ChannelConfig:
+    """Auto-poster: reads stories from SQLite extracted_patterns
+    (collection_target='telegram_queue'), posts to a Telegram channel.
+
+    Each (pattern_id, channel) pair is recorded in pattern_posts table —
+    so a story posted to @luky_channel never reposts there, but the same
+    story can still be picked up by future posters for vk/discord/etc.
+    """
+
+    target: str = ""  # @luky_channel or numeric chat_id (e.g. -100...)
+    posts_per_day: int = 5
+    window_start_hour: int = 8  # 08:00
+    window_end_hour: int = 24  # exclusive — 24 = up to 23:59:59
+    jitter_minutes: int = 5  # ± random minutes per slot to look natural
+    enabled: bool = False
+    # Optional comma-separated list of country codes to exclude from posting
+    exclude_countries: str = ""
+
+
+@dataclass
 class LoggingConfig:
     level: str = "INFO"
 
@@ -212,6 +232,7 @@ class AppConfig:
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     google: GoogleConfig = field(default_factory=GoogleConfig)
+    channel: ChannelConfig = field(default_factory=ChannelConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
 
@@ -472,6 +493,20 @@ def _parse_qdrant(raw: Dict[str, Any]) -> QdrantConfig:
     )
 
 
+def _parse_channel(raw: Dict[str, Any]) -> ChannelConfig:
+    c_raw = raw.get("channel") or {}
+    target = str(c_raw.get("target", "")).strip()
+    return ChannelConfig(
+        target=target,
+        posts_per_day=int(c_raw.get("posts_per_day", 5)),
+        window_start_hour=int(c_raw.get("window_start_hour", 8)),
+        window_end_hour=int(c_raw.get("window_end_hour", 24)),
+        jitter_minutes=int(c_raw.get("jitter_minutes", 5)),
+        enabled=bool(target) and bool(c_raw.get("enabled", True)),
+        exclude_countries=str(c_raw.get("exclude_countries", "")).strip(),
+    )
+
+
 def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
     """
     Convert the raw TOML dict into typed AppConfig.
@@ -488,6 +523,7 @@ def _parse_app_config(raw: Dict[str, Any]) -> AppConfig:
         telegraph=_parse_telegraph(raw),
         sources=sources,
         google=_parse_google(raw),
+        channel=_parse_channel(raw),
         gemini=_parse_gemini(raw),
         qdrant=_parse_qdrant(raw),
     )
