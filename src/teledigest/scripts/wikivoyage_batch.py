@@ -270,23 +270,6 @@ def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def count_in_sqlite(country: str) -> int:
-    """Count existing wiki patterns for a country in SQLite. Returns 0 if none."""
-    try:
-        from teledigest.db import get_db_connection
-
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) FROM wikivoyage_patterns WHERE country = ?",
-                (country,),
-            )
-            row = cur.fetchone()
-            return int(row[0]) if row else 0
-    except Exception:
-        return 0
-
-
 def import_country(country: str, session) -> int:
     """Import one country. Returns total patterns written into SQLite this run.
 
@@ -515,18 +498,18 @@ def main() -> int:
             )
             time.sleep(inter_country_pause_s)
         try:
-            # Skip if SQLite already has wiki patterns for this country.
-            # write_patterns is idempotent anyway (INSERT OR IGNORE), this is
-            # just a "don't re-walk the whole category tree" shortcut.
-            existing = count_in_sqlite(cc)
-            if existing > 0:
-                log.info(
-                    "Country %s already has %d patterns in SQLite — marking done",
-                    cc,
-                    existing,
-                )
-                mark_done(state, cc, existing, state_path)
-                continue
+            # Always do a full re-walk. write_patterns is idempotent
+            # (INSERT OR IGNORE on deterministic doc_id), so already-known
+            # patterns are written as skipped — no duplicates. This is the
+            # cost we pay for resilience against mid-run interruptions:
+            # if a previous run got SIGKILLed (Dokploy redeploy, systemd
+            # timeout, OOM) after writing only part of a country's pages,
+            # the next run completes the rest. The old count_in_sqlite()
+            # shortcut would have falsely marked such a country done.
+            #
+            # state.json mark_done is the ONLY source of truth for "country
+            # fully processed" — and it's only written after import_country
+            # returns success, never on partial progress.
             patterns = import_country(cc, session)
             mark_done(state, cc, patterns, state_path)
         except Exception as e:
