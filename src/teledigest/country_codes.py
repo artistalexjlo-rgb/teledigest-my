@@ -330,12 +330,19 @@ def display_name(code: str) -> str:
 # When you add a row here, mirror it there.
 # ---------------------------------------------------------------------------
 COUNTRY_NAMES_EN: dict[str, str] = {
+    # Special pseudo-codes (not ISO 3166).
+    # 'any' is emitted by extraction.py when a pattern is universal — not tied
+    # to a single country. Mapping it to "Universal" makes the embed text
+    # ("Universal. <title>. <tag>. <lesson>") semantically meaningful for the
+    # МОЗГ retrieval, instead of leaking the literal "ANY" upper-case fallback.
+    "any": "Universal",
     # Tier 0 — active user chats
     "ar": "Argentina",
     "at": "Austria",
     "be": "Belgium",
     "bg": "Bulgaria",
     "br": "Brazil",
+    "ch": "Switzerland",
     "de": "Germany",
     "fr": "France",
     "id": "Indonesia",
