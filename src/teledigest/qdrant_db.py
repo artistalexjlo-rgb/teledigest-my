@@ -207,12 +207,17 @@ def find_nearest(
     query_vector: list[float],
     limit: int,
     source_label: Optional[str] = None,
+    score_threshold: Optional[float] = None,
 ) -> list[dict]:
     """Vector search — заменяет Firestore find_nearest.
 
     Возвращает list[dict] в том же формате что отдавал старый
-    `_fetch_by_vector` — payload-словарь + `_source` label. Это даёт
-    нам drop-in замену в gemini_brain.py.
+    `_fetch_by_vector` — payload-словарь + `_source` label.
+
+    score_threshold: если задан, отбрасывает точки с cosine < threshold.
+    Помогает МОЗГу не тонуть в нерелевантном шуме на коротких запросах
+    (например 'спф' возвращал 150 wisdom-док из которых реально похожих
+    меньше десятка, остальные модель пыталась "объяснить" и галлюцинировала).
     """
     try:
         client = get_client()
@@ -220,6 +225,7 @@ def find_nearest(
             collection_name=collection,
             query=query_vector,
             limit=limit,
+            score_threshold=score_threshold,
             with_payload=True,
             with_vectors=False,
         ).points
