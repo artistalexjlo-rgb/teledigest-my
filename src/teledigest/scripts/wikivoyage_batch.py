@@ -270,19 +270,30 @@ def mark_failed(state: dict, country: str, error: str, state_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def count_in_firestore(db, country: str, collection: str = "wikivoyage_base") -> int:
-    """Count docs for a country in Firestore. Returns 0 if none or error."""
+def count_in_sqlite(country: str) -> int:
+    """Count existing wiki patterns for a country in SQLite. Returns 0 if none."""
     try:
-        docs = list(
-            db.collection(collection).where("country", "==", country).limit(1).stream()
-        )
-        return len(docs)
+        from teledigest.db import get_db_connection
+
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM wikivoyage_patterns WHERE country = ?",
+                (country,),
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
     except Exception:
         return 0
 
 
-def import_country(country: str, db, session) -> int:
-    """Import one country. Returns total patterns in Firestore after import."""
+def import_country(country: str, session) -> int:
+    """Import one country. Returns total patterns written into SQLite this run.
+
+    write_patterns is idempotent (INSERT OR IGNORE on deterministic doc_id),
+    so re-running a country never produces duplicates — it just re-fetches
+    pages and skips already-known patterns.
+    """
     from teledigest.scripts.wikivoyage_import import (
         COUNTRY_WIKI_NAME,
         fetch_wikitext,
@@ -307,7 +318,9 @@ def import_country(country: str, db, session) -> int:
             if not wt:
                 continue
             patterns = parse_page(wt, country, title)
-            written, skipped = write_patterns(db, country, title, patterns)
+            # write_patterns ignores its first `db` arg (kept for back-compat);
+            # SQLite goes through extraction_db.insert_wiki_pattern internally.
+            written, skipped = write_patterns(None, country, title, patterns)
             total_written += written
             total_skipped += skipped
         except Exception as e:
@@ -322,7 +335,7 @@ def import_country(country: str, db, session) -> int:
         total_skipped,
         len(failed),
     )
-    return total_written + total_skipped  # total patterns in DB
+    return total_written + total_skipped
 
 
 # ---------------------------------------------------------------------------
@@ -484,31 +497,37 @@ def main() -> int:
     import requests
 
     from teledigest.config import init_config
-    from teledigest.scripts.wikivoyage_import import _build_firestore_client
 
     init_config(_Path(args.config))
-    db = _build_firestore_client()
     session = requests.Session()
     session.headers["User-Agent"] = "teledigest-wikivoyage-bot/1.0 (teledigest project)"
+
+    # Inter-country pause. Bumped from 60s → 300s after 2026-05-21 incident
+    # where REQUEST_PAUSE_S=1.5 + 60s between countries caused an 8-burst
+    # 429 cascade on `ru` that killed the systemd unit after 18h.
+    inter_country_pause_s = 300
 
     for i, cc in enumerate(batch):
         if i > 0:
             log.info(
-                "Pausing 60s between countries to respect WikiVoyage rate limits..."
+                "Pausing %ds between countries to respect WikiVoyage rate limits...",
+                inter_country_pause_s,
             )
-            time.sleep(60)
+            time.sleep(inter_country_pause_s)
         try:
-            # Check Firestore first — skip if already has data (imported manually)
-            existing = count_in_firestore(db, cc)
+            # Skip if SQLite already has wiki patterns for this country.
+            # write_patterns is idempotent anyway (INSERT OR IGNORE), this is
+            # just a "don't re-walk the whole category tree" shortcut.
+            existing = count_in_sqlite(cc)
             if existing > 0:
                 log.info(
-                    "Country %s already has data in Firestore (%d docs) — marking done",
+                    "Country %s already has %d patterns in SQLite — marking done",
                     cc,
                     existing,
                 )
                 mark_done(state, cc, existing, state_path)
                 continue
-            patterns = import_country(cc, db, session)
+            patterns = import_country(cc, session)
             mark_done(state, cc, patterns, state_path)
         except Exception as e:
             log.error("Country %s failed: %s", cc, e)
