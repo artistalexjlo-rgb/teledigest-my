@@ -25,7 +25,6 @@ from typing import Any
 from .config import get_config, log
 from .country_codes import country_full_name_en
 from .extraction_db import (
-    COLLECTION_STORIES,
     COLLECTION_WIKI,
     COLLECTION_WISDOM,
     fetch_pending_extracted,
@@ -259,9 +258,12 @@ def run_embed_pass(batch_size: int = 50) -> dict[str, dict[str, int]]:
 
     results: dict[str, dict[str, int]] = {}
 
+    # Только wisdom уходит в Qdrant. Stories (human_story для канала) НЕ
+    # векторим — в Firestore-эпохе их тоже не эмбедили, эти записи нужны
+    # только postera как pending queue. Они остаются в SQLite с
+    # embedded_at=NULL навсегда, что для логики поста не имеет значения.
     for label, qcoll, src_label in [
         ("wisdom", COLLECTION_WISDOM, "База данных"),
-        ("stories", COLLECTION_STORIES, "База данных"),
     ]:
         emb, fail = _pump_extracted_collection(qcoll, src_label, batch_size)
         results[label] = {"embedded": emb, "failed": fail}
