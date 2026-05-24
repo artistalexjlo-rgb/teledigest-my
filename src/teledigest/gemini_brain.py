@@ -51,10 +51,21 @@ Behavior:
 - If the user needs depth, finish with: "хочешь подробнее — спроси конкретнее".
 - If this is a follow-up turn (the conversation already has prior exchanges)
   — use that context. Don't ask the user to repeat themselves.
-- If the question is ambiguous (could apply to multiple countries / multiple
-  scenarios in the knowledge base): list the most likely interpretations
-  in 1-2 sentences each and append: "уточни, что из этого тебе нужно".
-  Do NOT pick one arbitrarily.
+- If the question is ambiguous (a short abbreviation like "SPF/CPF/DNI",
+  or could apply to multiple countries): list UP TO 3 most likely
+  interpretations as a numbered list, one sentence each, naming the
+  meaning AND the country/context. Then append: "уточни, что из этого нужно".
+  Do NOT pick one arbitrarily. Do NOT invent a meaning that has no support
+  in the knowledge base — if only one interpretation is supported, give
+  just that one.
+
+  Format example (do NOT copy the wording, follow the shape):
+    1. В Бразилии CPF — это местный налоговый ID, без него не открыть счёт
+       и не оформить SIM. Делают в Receita Federal или Correios за 7 BRL.
+    2. SPF в косметике — солнцезащитный фактор крема. На экваторе нужен
+       каждый день.
+    3. (если в базе есть третий смысл — добавить, иначе строку не писать)
+    уточни, что из этого нужно
 - If the knowledge base really has nothing — reply exactly:
   "в базе пока нет информации по этому вопросу"
 - Plain text only — no Markdown, no bullet symbols, no formatting.
@@ -887,6 +898,7 @@ def _fetch_by_vector(
     query_vector: list[float],
     limit: int,
     source_label: str,
+    score_threshold: float | None = None,
 ) -> list[dict]:
     """Vector search через Qdrant. Firestore полностью убран из пути
     после Google-suspend'а 2026-05-18 — все писатели (extraction.py,
@@ -906,16 +918,30 @@ def _fetch_by_vector(
                 "vector search невозможен"
             )
             return []
-        return find_nearest(collection, query_vector, limit, source_label)
+        return find_nearest(
+            collection,
+            query_vector,
+            limit,
+            source_label,
+            score_threshold=score_threshold,
+        )
     except Exception as e:
         log.warning("МОЗГ: Qdrant vector search on %s failed (%s)", collection, e)
         return []
 
 
+# Score threshold for МОЗГ retrieval. cosine similarity in [-1, 1];
+# gemini-embedding-2 на task_type=RETRIEVAL_QUERY обычно даёт ~0.6-0.8 для
+# реально похожих пар и <0.5 для шума. 0.55 — компромисс: пропускает
+# хорошие матчи, отрезает мусор. Понизить если в проде получаем "в базе
+# пока нет информации" слишком часто.
+_RETRIEVAL_SCORE_THRESHOLD = 0.55
+
+
 def _fetch_wisdom_and_wiki(
     query: str = "",
-    wisdom_limit: int = 150,
-    wiki_limit: int = 50,
+    wisdom_limit: int = 40,
+    wiki_limit: int = 20,
 ) -> list[dict]:
     """Fetch top-N docs from BOTH wisdom_base and wikivoyage_base via Qdrant.
 
@@ -963,6 +989,7 @@ def _fetch_wisdom_and_wiki(
             query_vector,
             wisdom_limit,
             "База данных",
+            score_threshold=_RETRIEVAL_SCORE_THRESHOLD,
         )
     )
 
@@ -974,6 +1001,7 @@ def _fetch_wisdom_and_wiki(
             query_vector,
             wiki_limit,
             "WikiVoyage",
+            score_threshold=_RETRIEVAL_SCORE_THRESHOLD,
         )
     )
 
