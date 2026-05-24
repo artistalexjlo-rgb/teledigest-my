@@ -60,8 +60,10 @@ WIKI_API = "https://en.wikivoyage.org/w/api.php"
 WIKI_PAGE_BASE = "https://en.wikivoyage.org/wiki/"
 USER_AGENT = "teledigest-bot/0.1 (https://github.com/artistalexjlo-rgb/teledigest-my)"
 
-# Be polite to the wiki API. 1.5s pause keeps us well under rate limits.
-REQUEST_PAUSE_S = 1.5
+# Be polite to the wiki API. 5s pause = ~0.2 RPS, well under abuse threshold.
+# Previously 1.5s caused an 8-burst 429 cascade on `ru` (journalctl 2026-05-21);
+# killed the systemd unit after 18h of retries.
+REQUEST_PAUSE_S = 5.0
 
 # Country code -> WikiVoyage category name. WikiVoyage uses English country
 # names verbatim as category roots (Category:Thailand, Category:Brazil).
@@ -508,7 +510,10 @@ def main() -> int:
         log.info("Dry run — would process %d pages.", len(pages))
         return 0
 
-    db = _build_firestore_client()
+    # No Firestore: write_patterns ignores its first arg and writes through
+    # extraction_db.insert_wiki_pattern (SQLite). Pre-2026-05-19 this was
+    # _build_firestore_client(), but that path is dead post GCP suspend.
+    db = None
     total_written = 0
     total_skipped = 0
     total_patterns = 0
