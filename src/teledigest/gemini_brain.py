@@ -991,19 +991,32 @@ def _format_context(docs: list[dict]) -> str:
     Header shape: [n. title | tag | country | source]
     Source is "База данных" or "WikiVoyage" — explicit so the model can
     attribute citations and weigh recency vs encyclopedic baseline.
+
+    Doc body field varies by collection (post-Qdrant migration):
+    - wikivoyage_base payload has `instruction` (verbatim wiki excerpt)
+    - wisdom_base payload has `ai_lesson` (English dry fact from extraction)
+    - both have `embedded_text` ("country. title. tag. body") as a fallback
+      that always exists for any vector that made it into Qdrant.
+    Prefer instruction → ai_lesson → embedded_text. Previously the function
+    only checked `instruction` and silently dropped every wisdom doc —
+    МОЗГ retrieved them but format_context filtered them all out.
     """
     parts = []
     idx = 1
     for doc in docs:
-        instruction = (doc.get("instruction") or "").strip()
-        if not instruction:
+        body = (
+            (doc.get("instruction") or "").strip()
+            or (doc.get("ai_lesson") or "").strip()
+            or (doc.get("embedded_text") or "").strip()
+        )
+        if not body:
             continue
         title = (doc.get("title") or "").strip()
         tag = (doc.get("tag") or "").strip()
         country = (doc.get("country") or "").strip()
         source = (doc.get("_source") or "База данных").strip()
         header = f"[{idx}. {title} | {tag} | {country} | {source}]"
-        parts.append(f"{header}\n{instruction}")
+        parts.append(f"{header}\n{body}")
         idx += 1
     return "\n\n".join(parts)
 
