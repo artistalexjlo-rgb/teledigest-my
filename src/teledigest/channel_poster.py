@@ -43,7 +43,6 @@ from .extraction_db import (
     recent_posted_countries,
 )
 
-
 # --- Helpers -----------------------------------------------------------------
 
 
