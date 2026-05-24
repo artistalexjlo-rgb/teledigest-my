@@ -917,118 +917,65 @@ def _fetch_wisdom_and_wiki(
     wisdom_limit: int = 150,
     wiki_limit: int = 50,
 ) -> list[dict]:
-    """
-    Fetch top-N docs from BOTH wisdom_base (chat-mined facts) and
-    wikivoyage_base (wiki-imported facts).
+    """Fetch top-N docs from BOTH wisdom_base and wikivoyage_base via Qdrant.
 
-    When `query` is provided (non-empty) AND an embedding can be computed,
-    uses vector search (find_nearest COSINE) — returns semantically relevant
-    docs regardless of insertion time.
-
-    Falls back to recency sort (order_by createdAt/importedAt) when:
-    - query is empty string
-    - GEMINI_API_KEY is missing
-    - embedding API call fails
-    - Firestore vector index not yet deployed
-
+    Vector search (find_nearest COSINE) over Qdrant collections —
+    `wisdom_base` (chat-mined facts) and `wikivoyage_base` (wiki-imported).
     Each doc is tagged with `_source` ("База данных" or "WikiVoyage") so
     the formatter can mark its origin in the context Gemini sees.
+
+    Returns []:
+    - query is empty
+    - embedding API failed (no query vector)
+    - Qdrant not configured (cfg.qdrant.host пустой)
+    - both collections empty / not yet created
+
+    Post-Qdrant migration (2026-05-19) — Firestore path fully removed.
+    Previously the function tried Firestore client init first and returned []
+    when project_id was missing or auth failed; that bailed out before ever
+    reaching Qdrant, leaving МОЗГ without context. Now we go straight to
+    Qdrant.
 
     Token math: ~150 wisdom + ~50 wiki = ~200 docs × ~200 chars ≈ 40K chars
     ≈ ~12K tokens. Fits Live API 65K TPM budget with headroom.
     """
-    from google.cloud import firestore as fs
+    if not query or not query.strip():
+        return []
+
+    query_vector = compute_query_embedding_v2(query)
+    if not query_vector:
+        log.warning(
+            "Gemini МОЗГ: query embedding failed for %r — no context fetched",
+            query[:60],
+        )
+        return []
+
+    log.info("МОЗГ: vector search for query %r", query[:60])
 
     cfg = get_config()
-    if not cfg.google.firestore_project_id:
-        log.warning("Gemini МОЗГ: firestore_project_id not configured — skipping.")
-        return []
-
-    try:
-        db = _build_firestore_client()
-    except Exception as e:
-        log.error("Gemini МОЗГ: Firestore init failed: %s", e)
-        return []
-
-    # Try to compute embedding for vector search.
-    # Must use the v2 query embedder (1536 dim, task_type=RETRIEVAL_QUERY) —
-    # the Firestore vector indexes are built for 1536-dim vectors, and the
-    # legacy _compute_embedding returned 768-dim symmetric vectors. Calling
-    # the legacy path against the new index threw silent dim-mismatch
-    # exceptions that fell back to recency sort — MOZG looked like it
-    # "worked" but was returning the newest 200 docs regardless of relevance.
-    query_vector: list[float] | None = None
-    if query:
-        query_vector = compute_query_embedding_v2(query)
-        if query_vector:
-            log.info("МОЗГ: using vector search for query %r", query[:60])
-        else:
-            log.info("МОЗГ: embedding failed — falling back to recency sort")
-
     results: list[dict] = []
 
-    # 1. wisdom_base — chat-mined facts
-    if query_vector:
-        results.extend(
-            _fetch_by_vector(
-                db,
-                cfg.google.assistant_collection,
-                query_vector,
-                wisdom_limit,
-                "База данных",
-            )
+    # 1. wisdom_base
+    results.extend(
+        _fetch_by_vector(
+            None,
+            cfg.qdrant.wisdom_collection,
+            query_vector,
+            wisdom_limit,
+            "База данных",
         )
-        # If vector search returned nothing (e.g. index not ready), fall back
-        if not results:
-            log.info("МОЗГ: vector search returned 0 wisdom docs — recency fallback")
-            query_vector = None  # triggers recency path below for both collections
+    )
 
-    if not query_vector:
-        try:
-            docs = (
-                db.collection(cfg.google.assistant_collection)
-                .order_by("createdAt", direction=fs.Query.DESCENDING)
-                .limit(wisdom_limit)
-                .stream()
-            )
-            for d in docs:
-                data = d.to_dict()
-                if not data:
-                    continue
-                data["_source"] = "База данных"
-                results.append(data)
-        except Exception as e:
-            log.error("Gemini МОЗГ: wisdom_base query failed: %s", e)
-
-    # 2. wikivoyage_base — wiki-imported facts
-    # Optional: if collection name is configurable add to GoogleConfig later.
-    if query_vector:
-        wiki_results = _fetch_by_vector(
-            db,
-            "wikivoyage_base",
+    # 2. wikivoyage_base
+    results.extend(
+        _fetch_by_vector(
+            None,
+            cfg.qdrant.wiki_collection,
             query_vector,
             wiki_limit,
             "WikiVoyage",
         )
-        results.extend(wiki_results)
-    else:
-        try:
-            docs = (
-                db.collection("wikivoyage_base")
-                .order_by("importedAt", direction=fs.Query.DESCENDING)
-                .limit(wiki_limit)
-                .stream()
-            )
-            for d in docs:
-                data = d.to_dict()
-                if not data:
-                    continue
-                data["_source"] = "WikiVoyage"
-                results.append(data)
-        except Exception as e:
-            # Wiki collection may not exist yet / index missing. Soft fail —
-            # wisdom_base alone still works.
-            log.warning("Gemini МОЗГ: wikivoyage_base query skipped (%s)", e)
+    )
 
     return results
 
