@@ -216,6 +216,36 @@ async def summary_scheduler():
             except Exception as e:
                 log.error("Drive upload failed (non-fatal): %s", e)
 
+            # --- STEP 5: Mine extracted patterns from new samples ---
+            # Replaces the old Apps Script timer that read samples from Drive
+            # and pushed patterns to Firestore. Now everything happens in this
+            # container: read samples/, call Gemini extraction, write to SQLite
+            # extracted_patterns (pending queue). Idempotent — already-processed
+            # files are skipped via the .processed sidecar marker.
+            #
+            # run_extraction_pass blocks on time.sleep internally (model rotation
+            # pacing). Wrap in asyncio.to_thread so the event loop keeps serving
+            # Telegram bot commands while extraction crunches in a worker thread.
+            try:
+                from .extraction import run_extraction_pass
+
+                fp, sv, at = await asyncio.to_thread(run_extraction_pass)
+                log.info("Extraction pass: files=%d saved=%d attempted=%d", fp, sv, at)
+            except Exception as e:
+                log.error("Extraction pass failed (non-fatal): %s", e)
+
+            # --- STEP 6: Embed new pending patterns into Qdrant ---
+            # Picks up wisdom_base pending from STEP 5 (and any wiki pending
+            # produced by wikivoyage-batch.service) and pushes vectors to Qdrant.
+            # Same to_thread reasoning — embed_pump uses 10s/text pacing.
+            try:
+                from .embed_pump import run_embed_pass
+
+                res = await asyncio.to_thread(run_embed_pass, 10)
+                log.info("Embed pass: %s", res)
+            except Exception as e:
+                log.error("Embed pass failed (non-fatal): %s", e)
+
             last_run_for = today
             await asyncio.sleep(65)
         else:
