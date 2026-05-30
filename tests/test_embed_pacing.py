@@ -35,6 +35,7 @@ def temp_quota_db(tmp_path: Path, monkeypatch):
     gemini_brain._embed_recent_429.clear()
     gemini_brain._embed_abuse_pause_until = 0.0
     gemini_brain._key_rpd_count.clear()
+    gemini_brain._key_rpd_date = None
     gemini_brain._key_rr_idx = 0
     yield db_path
 
@@ -171,6 +172,38 @@ def test_second_429_after_cooldown_persists_ban(temp_quota_db, monkeypatch):
 
     _, banned = quota_state(_key_hash("kBAD"), gemini_brain._EMBEDDING_MODEL_V2)
     assert banned is True
+
+
+def test_keys_all_exhausted_false_when_capacity(temp_quota_db, monkeypatch):
+    keys = ["k1", "k2"]
+    monkeypatch.setattr(gemini_brain, "_get_embedding_api_keys", lambda: keys)
+    monkeypatch.setattr(
+        gemini_brain, "_time", MagicMock(time=time.time, sleep=lambda *_: None)
+    )
+    assert gemini_brain.keys_all_exhausted() is False
+
+
+def test_keys_all_exhausted_true_when_in_memory_capped(temp_quota_db, monkeypatch):
+    keys = ["k1", "k2"]
+    monkeypatch.setattr(gemini_brain, "_get_embedding_api_keys", lambda: keys)
+    monkeypatch.setattr(
+        gemini_brain, "_time", MagicMock(time=time.time, sleep=lambda *_: None)
+    )
+    # Both keys at the in-memory soft cap → no key can serve.
+    gemini_brain._key_rpd_count[0] = gemini_brain._RPD_SOFT_CAP
+    gemini_brain._key_rpd_count[1] = gemini_brain._RPD_SOFT_CAP
+    gemini_brain._key_rpd_date = extraction_db._quota_day()
+    assert gemini_brain.keys_all_exhausted() is True
+
+
+def test_rpd_counters_reset_on_quota_day_rollover(temp_quota_db, monkeypatch):
+    # Simulate stale counters left over from a previous Pacific quota-day.
+    gemini_brain._key_rpd_count[0] = gemini_brain._RPD_SOFT_CAP
+    gemini_brain._key_rpd_date = "2000-01-01"
+    gemini_brain._maybe_reset_rpd_counters()
+    # New day → counters cleared, date advanced to today.
+    assert gemini_brain._key_rpd_count == {}
+    assert gemini_brain._key_rpd_date == extraction_db._quota_day()
 
 
 def test_abuse_threshold_triggers_global_pause(temp_quota_db, monkeypatch):

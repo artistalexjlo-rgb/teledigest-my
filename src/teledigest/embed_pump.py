@@ -56,7 +56,7 @@ def _pump_extracted_collection(
 ) -> tuple[int, int]:
     """Process pending patterns for one extracted-collection target.
     Returns (embedded, failed)."""
-    from .gemini_brain import compute_document_embeddings_v2
+    from .gemini_brain import compute_document_embeddings_v2, keys_all_exhausted
     from .qdrant_db import ensure_collection, upsert_points_batch
 
     ensure_collection(qd_collection)
@@ -100,8 +100,13 @@ def _pump_extracted_collection(
 
         upsert_items: list[tuple[str, list[float], dict[str, Any]]] = []
         completed_ids: list[str] = []
+        all_exhausted = False
         for (r, text), vec in zip(ids_payload, vectors):
             if vec is None:
+                # Capped key != failure (see _pump_wiki). Leave pending.
+                if keys_all_exhausted():
+                    all_exhausted = True
+                    continue
                 mark_embed_failed(
                     "extracted_patterns", r["id"], "embedding returned None"
                 )
@@ -145,6 +150,15 @@ def _pump_extracted_collection(
                     )
                     failed += 1
 
+        # All keys spent for today — stop cleanly (see _pump_wiki).
+        if all_exhausted:
+            log.warning(
+                "embed_pump.extracted[%s]: all embedding keys exhausted for "
+                "today — stopping pass, remaining rows left pending",
+                qd_collection,
+            )
+            break
+
         # Если batch вернулся меньше чем batch_size, значит pending закончился
         if len(rows) < batch_size:
             break
@@ -154,7 +168,7 @@ def _pump_extracted_collection(
 
 def _pump_wiki(batch_size: int = 50) -> tuple[int, int]:
     """Process pending wiki patterns. Returns (embedded, failed)."""
-    from .gemini_brain import compute_document_embeddings_v2
+    from .gemini_brain import compute_document_embeddings_v2, keys_all_exhausted
     from .qdrant_db import ensure_collection, upsert_points_batch
 
     ensure_collection(COLLECTION_WIKI)
@@ -197,8 +211,16 @@ def _pump_wiki(batch_size: int = 50) -> tuple[int, int]:
 
         upsert_items: list[tuple[str, list[float], dict[str, Any]]] = []
         completed_ids: list[str] = []
+        all_exhausted = False
         for (r, text), vec in zip(ids_payload, vectors):
             if vec is None:
+                # Distinguish "daily quota spent" from a real per-row failure.
+                # A capped key is NOT a failure — penalising it pushes good rows
+                # past embed_failed_count>=5 and silently drops them from the
+                # queue forever. Leave them pending; stop the pass below.
+                if keys_all_exhausted():
+                    all_exhausted = True
+                    continue
                 mark_embed_failed(
                     "wikivoyage_patterns", r["id"], "embedding returned None"
                 )
@@ -232,6 +254,17 @@ def _pump_wiki(batch_size: int = 50) -> tuple[int, int]:
                         "wikivoyage_patterns", cid, f"qdrant upsert: {e}"[:200]
                     )
                     failed += 1
+
+        # All keys spent for today — stop cleanly, leaving the rest pending for
+        # the next UTC day. Without this the loop spins through every pending
+        # row at 10s each, embedding nothing and hanging run_embed_pass (and the
+        # whole nightly scheduler) until container restart.
+        if all_exhausted:
+            log.warning(
+                "embed_pump.wiki: all embedding keys exhausted for today — "
+                "stopping pass, remaining rows left pending"
+            )
+            break
 
         if len(rows) < batch_size:
             break

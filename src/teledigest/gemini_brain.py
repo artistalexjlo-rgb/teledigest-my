@@ -158,6 +158,57 @@ _embed_was_cooldowned: set[int] = set()
 _embed_recent_429: list[float] = []
 _embed_abuse_pause_until: float = 0.0
 
+# Pacific quota-day for which the in-memory _key_rpd_count is valid. The
+# persistent SQLite quota and this in-memory counter MUST roll on the same
+# boundary as Google's actual RPD reset (midnight America/Los_Angeles) — see
+# extraction_db._quota_day. Before this guard _key_rpd_count lived in process
+# memory and never cleared within a long-lived container, so once every key hit
+# the soft cap in one run, embed froze permanently (the in-memory check
+# short-circuits before the persistent check), hanging run_embed_pass and the
+# whole nightly scheduler. Keying both off the same Pacific day also keeps a
+# long pass straddling the boundary consistent.
+_key_rpd_date: str | None = None
+
+
+def _maybe_reset_rpd_counters() -> None:
+    """Clear in-memory per-key RPD counters when the Pacific quota-day rolls
+    over, matching Google's reset and the persistent quota's day boundary."""
+    global _key_rpd_date
+    from .extraction_db import _quota_day
+
+    today = _quota_day()
+    if _key_rpd_date != today:
+        _key_rpd_count.clear()
+        _key_rpd_date = today
+
+
+def keys_all_exhausted(
+    use_persistent_quota: bool = True, model: str | None = None
+) -> bool:
+    """True if NO embedding key can serve a request right now — every key is at/
+    over the soft RPD cap, banned, or cooling down for today. Lets bulk callers
+    (embed_pump) stop a pass cleanly instead of grinding pending rows into
+    false failures when the daily quota is simply spent."""
+    _maybe_reset_rpd_counters()
+    keys = _get_embedding_api_keys()
+    if not keys:
+        return True
+    model = model or _EMBEDDING_MODEL_V2
+    for idx, k in enumerate(keys):
+        if _key_rpd_count.get(idx, 0) >= _RPD_SOFT_CAP:
+            continue
+        if use_persistent_quota:
+            from .extraction_db import _key_hash as _kh
+            from .extraction_db import quota_state
+
+            cnt, banned = quota_state(_kh(k), model)
+            if banned or cnt >= _RPD_SOFT_CAP:
+                continue
+            if _time.time() < _embed_cooldown_until.get(idx, 0.0):
+                continue
+        return False  # this key can still serve
+    return True
+
 
 def _compute_embedding(text: str, model_idx: int = 0) -> list[float] | None:
     """Compute embedding vector for a single text. On 429 falls back to the
@@ -312,6 +363,10 @@ def _embed_v2(
     # one vector regardless of list size. So call per-text individually.
     out: list[list[float] | None] = []
     for text in texts:
+        # Clear in-memory RPD counters on UTC rollover so a long-running pass
+        # (or long-lived process) frees keys at the daily reset without needing
+        # a container restart.
+        _maybe_reset_rpd_counters()
         # Global abuse-pause respect (set when many keys 429 in tight window).
         if use_persistent_quota:
             global _embed_abuse_pause_until
