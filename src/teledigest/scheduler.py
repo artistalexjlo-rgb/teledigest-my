@@ -17,6 +17,14 @@ from .message_utils import send_message_long
 from .telegram_client import get_bot_client
 from .telegraph import post_to_telegraph
 
+# Embedding is gated by Gemini's free-tier RPD quota, which resets at midnight
+# America/Los_Angeles (Pacific). Trigger the embed pass just after that reset so
+# each pass starts with a full fresh daily quota, drains until the keys cap, and
+# returns well before the next reset — one clean pass per quota-day, no straddle.
+_EMBED_TZ = ZoneInfo("America/Los_Angeles")
+_EMBED_HOUR = 0
+_EMBED_MINUTE = 30
+
 
 async def _post_digest(
     bot_client, target: str, day: dt.date, messages, country: str = ""
@@ -234,19 +242,55 @@ async def summary_scheduler():
             except Exception as e:
                 log.error("Extraction pass failed (non-fatal): %s", e)
 
-            # --- STEP 6: Embed new pending patterns into Qdrant ---
-            # Picks up wisdom_base pending from STEP 5 (and any wiki pending
-            # produced by wikivoyage-batch.service) and pushes vectors to Qdrant.
-            # Same to_thread reasoning — embed_pump uses 10s/text pacing.
-            try:
-                from .embed_pump import run_embed_pass
-
-                res = await asyncio.to_thread(run_embed_pass, 10)
-                log.info("Embed pass: %s", res)
-            except Exception as e:
-                log.error("Embed pass failed (non-fatal): %s", e)
-
+            # NOTE: embedding (formerly STEP 6 here) now runs in its own
+            # independent embed_scheduler() task, triggered just after the
+            # Pacific midnight RPD reset. Keeping it inline blocked this loop
+            # for the full multi-hour pass (10s/text), which both delayed the
+            # next day's extraction/digest and made a long pass straddle the
+            # quota reset. See embed_scheduler below.
             last_run_for = today
             await asyncio.sleep(65)
         else:
+            await asyncio.sleep(30)
+
+
+async def embed_scheduler() -> None:
+    """Independent daily embed pass, aligned to the Pacific RPD-quota reset.
+
+    Runs in its own task (see main.asyncio.gather) so a multi-hour pass never
+    blocks the summary/extraction loop. run_embed_pass drains pending wisdom +
+    wiki patterns into Qdrant until every key hits its soft cap, then returns
+    cleanly (the pump breaks on exhaustion — see embed_pump). The whole body is
+    guarded so a transient failure can never kill the loop.
+    """
+    log.info(
+        "Embed scheduler started - daily pass at %02d:%02d (%s)",
+        _EMBED_HOUR,
+        _EMBED_MINUTE,
+        _EMBED_TZ.key,
+    )
+    last_embed_for: dt.date | None = None
+
+    while True:
+        try:
+            now_pt = dt.datetime.now(_EMBED_TZ)
+            if (
+                now_pt.hour == _EMBED_HOUR
+                and now_pt.minute == _EMBED_MINUTE
+                and last_embed_for != now_pt.date()
+            ):
+                last_embed_for = now_pt.date()
+                log.info("Embed pass (PT-aligned) starting: %s", now_pt.isoformat())
+                try:
+                    from .embed_pump import run_embed_pass
+
+                    res = await asyncio.to_thread(run_embed_pass, 10)
+                    log.info("Embed pass: %s", res)
+                except Exception as e:
+                    log.error("Embed pass failed (non-fatal): %s", e)
+                await asyncio.sleep(65)
+            else:
+                await asyncio.sleep(30)
+        except Exception as e:  # never let the scheduler loop die
+            log.exception("embed_scheduler loop error (continuing): %s", e)
             await asyncio.sleep(30)
