@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import init_config, get_config, log
 from .db import backfill_message_countries, init_db
 from .sources_db import init_sources_table, migrate_from_config
-from .scheduler import summary_scheduler
+from .scheduler import embed_scheduler, summary_scheduler
 from .telegram_client import (
     create_clients,
     disconnect_clients,
@@ -100,6 +100,7 @@ async def _run(config_path: Path | None, auth_only: bool) -> None:
     await asyncio.gather(
         run_clients(),
         summary_scheduler(),
+        embed_scheduler(),
         channel_poster_loop(),
     )
 
