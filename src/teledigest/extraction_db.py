@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from .config import log
 from .db import get_db_connection
@@ -132,8 +133,23 @@ def init_extraction_tables() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _today_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+# Gemini free-tier RPD quota resets at midnight America/Los_Angeles (Pacific),
+# NOT UTC. The quota "day" we count against must match Google's reset boundary,
+# otherwise a long embed pass straddling the boundary makes inconsistent
+# decisions (in-memory counter and persistent counter rolling at different
+# instants) and we hit false 429s in the UTC↔PT skew window. Both the SQLite
+# quota rows and the in-memory _key_rpd_count reset key off this same value.
+# (The legacy column name `date_utc` is kept to avoid a schema migration; it
+# now stores the Pacific quota-day.)
+_QUOTA_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _quota_day() -> str:
+    return dt.datetime.now(_QUOTA_TZ).strftime("%Y-%m-%d")
+
+
+# Backwards-compatible alias — some callers/tests still import the old name.
+_today_utc = _quota_day
 
 
 def _key_hash(api_key: str) -> str:
