@@ -63,6 +63,12 @@ def get_client():
             host=cfg.host,
             port=cfg.port,
             api_key=cfg.api_key or None,
+            # ВАЖНО: qdrant-client при заданном api_key по умолчанию ставит
+            # https=True. Мы ходим на внутренний qdrant:6333 по плоскому HTTP
+            # (dokploy-network), поэтому форсим https=False — иначе клиент шлёт
+            # TLS в HTTP-порт и всё падает с SSL WRONG_VERSION_NUMBER. api-key
+            # уходит в заголовке независимо от транспорта.
+            https=False,
             # Short timeout — мы не хотим чтобы МОЗГ-запрос завис на 30+ сек
             # если Qdrant умер. Fallback на Firestore лучше чем повисший бот.
             timeout=10,
