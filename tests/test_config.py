@@ -572,3 +572,29 @@ def test_bot_config_allowed_user_ids_skips_invalid_entry_and_emits_warning(
 
     assert ids == {123}
     assert any("notanid" in r.message for r in caplog.records)
+
+
+def test_parse_qdrant_api_key_env_overrides_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # env QDRANT_API_KEY имеет приоритет над [qdrant] api_key из файла.
+    monkeypatch.setenv("QDRANT_API_KEY", "env-token")
+    q = config._parse_qdrant({"qdrant": {"host": "qdrant", "api_key": "file-token"}})
+    assert q.api_key == "env-token"
+
+
+def test_parse_qdrant_api_key_falls_back_to_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("QDRANT_API_KEY", raising=False)
+    q = config._parse_qdrant({"qdrant": {"host": "qdrant", "api_key": "file-token"}})
+    assert q.api_key == "file-token"
+
+
+def test_parse_qdrant_api_key_empty_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Ни env, ни конфиг → "" → qdrant_db передаст api_key=None (старое поведение).
+    monkeypatch.delenv("QDRANT_API_KEY", raising=False)
+    q = config._parse_qdrant({"qdrant": {"host": "qdrant"}})
+    assert q.api_key == ""
