@@ -29,3 +29,21 @@
 - db_path в конфиге: `/home/teledigest/data/messages_fts.db`
 - sessions_dir в конфиге: `/home/teledigest/data`
 - VPS: 199.195.252.114 (BuyVM), контейнер: `docker ps | grep bots-grab`
+
+## Qdrant auth
+
+- Qdrant защищён глобальным `QDRANT__SERVICE__API_KEY` (включён на контейнере
+  Qdrant, т.к. он расшарен наружу по HTTPS для другого сервиса). После включения
+  Qdrant требует ключ на ЛЮБОЙ запрос, включая внутренние.
+- teledigest шлёт ключ через env **`QDRANT_API_KEY`** → `config._parse_qdrant`
+  (env имеет приоритет над `[qdrant] api_key`) → единственный клиент
+  `qdrant_db.get_client()` передаёт `api_key=cfg.api_key or None`. Пусто = None =
+  старое поведение без auth.
+- URL внутренний: `host=qdrant`, `port=6333` (dokploy-network). Публичный домен
+  teledigest НЕ нужен — не менять host/port.
+- **Порядок включения (критично):** сначала задеплоить teledigest с заданным
+  `QDRANT_API_KEY`, ПОТОМ владелец включает `QDRANT__SERVICE__API_KEY` на Qdrant.
+  Иначе teledigest получает 401 на запись и перестаёт наполнять базу.
+- Ключ обязателен синхронно у ВСЕХ клиентов Qdrant (luky тоже шлёт).
+- Контракт эмбеддингов (модель `gemini-embedding-2` / dim 1536 / COSINE /
+  task_type) — НЕ трогать; менять только синхронно со всеми потребителями.

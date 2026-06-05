@@ -484,7 +484,12 @@ def _parse_qdrant(raw: Dict[str, Any]) -> QdrantConfig:
     return QdrantConfig(
         host=str(q_raw.get("host", "")).strip(),
         port=port,
-        api_key=str(q_raw.get("api_key", "")).strip(),
+        # api_key: env QDRANT_API_KEY имеет приоритет над конфигом. Пусто →
+        # "" → qdrant_db передаёт api_key=None (старое поведение, до включения
+        # глобального QDRANT__SERVICE__API_KEY на контейнере Qdrant).
+        api_key=str(
+            os.environ.get("QDRANT_API_KEY") or q_raw.get("api_key", "")
+        ).strip(),
         wisdom_collection=str(q_raw.get("wisdom_collection", "wisdom_base")).strip()
         or "wisdom_base",
         wiki_collection=str(q_raw.get("wiki_collection", "wikivoyage_base")).strip()
