@@ -290,3 +290,23 @@ def test_point_exists_false_when_retrieve_empty():
         patch.object(qdrant_db, "get_client", return_value=fake_client),
     ):
         assert qdrant_db.point_exists("wisdom_base", "abc") is False
+
+
+def test_get_client_forces_https_false_with_api_key():
+    # qdrant-client включает https=True при заданном api_key; для внутреннего
+    # qdrant:6333 (plain HTTP) это ломает соединение (SSL WRONG_VERSION_NUMBER).
+    # get_client должен форсить https=False и при этом слать api_key.
+    qclient = _stub_qdrant_modules()
+    from teledigest import qdrant_db
+
+    qdrant_db._CLIENT = None
+    try:
+        with patch.object(
+            qdrant_db, "get_config", return_value=_stub_config(api_key="tok123")
+        ):
+            qdrant_db.get_client()
+        _, kwargs = qclient.QdrantClient.call_args
+        assert kwargs.get("https") is False
+        assert kwargs.get("api_key") == "tok123"
+    finally:
+        qdrant_db._CLIENT = None
