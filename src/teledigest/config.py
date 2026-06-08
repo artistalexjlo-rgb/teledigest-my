@@ -447,13 +447,37 @@ def _parse_google(raw: Dict[str, Any]) -> GoogleConfig:
     )
 
 
+def gemini_api_keys_from_env(single_fallback: str = "") -> list[str]:
+    """Собрать Gemini API-ключи из env, в порядке предпочтения:
+
+    1. Пронумерованные `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, … (скан 1..64).
+       Пропуски разрешены — удобно следить, какие ключи есть, каких нет
+       (можно временно убрать `GEMINI_API_KEY_3`, остальные продолжат работать).
+    2. `GEMINI_API_KEYS` — comma-separated (legacy, для совместимости).
+    3. `GEMINI_API_KEY` (single) или переданный `single_fallback`.
+
+    Каждый free-tier ключ имеет свою дневную RPD-квоту на gemini-embedding-2,
+    ротация по N ключам множит throughput линейно.
+    """
+    numbered = [
+        v.strip()
+        for i in range(1, 65)
+        if (v := (os.environ.get(f"GEMINI_API_KEY_{i}") or "").strip())
+    ]
+    if numbered:
+        return numbered
+    plural = os.environ.get("GEMINI_API_KEYS", "")
+    comma = [k.strip() for k in plural.split(",") if k.strip()]
+    if comma:
+        return comma
+    single = (os.environ.get("GEMINI_API_KEY") or single_fallback or "").strip()
+    return [single] if single else []
+
+
 def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
-    keys_env = os.environ.get("GEMINI_API_KEYS", "")
-    api_keys = [k.strip() for k in keys_env.split(",") if k.strip()]
-    if not api_keys and api_key:
-        api_keys = [api_key]
+    api_keys = gemini_api_keys_from_env(single_fallback=api_key)
     model = (
         str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip()
         or "gemini-3.1-flash-lite-preview"

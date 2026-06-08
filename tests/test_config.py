@@ -598,3 +598,49 @@ def test_parse_qdrant_api_key_empty_when_unset(
     monkeypatch.delenv("QDRANT_API_KEY", raising=False)
     q = config._parse_qdrant({"qdrant": {"host": "qdrant"}})
     assert q.api_key == ""
+
+
+def _clear_gemini_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEYS", raising=False)
+    for i in range(1, 65):
+        monkeypatch.delenv(f"GEMINI_API_KEY_{i}", raising=False)
+
+
+def test_gemini_keys_numbered(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY_1", "k1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
+    assert config.gemini_api_keys_from_env() == ["k1", "k2"]
+
+
+def test_gemini_keys_numbered_allows_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY_1", "k1")
+    monkeypatch.setenv("GEMINI_API_KEY_3", "k3")  # _2 отсутствует — пропуск ОК
+    assert config.gemini_api_keys_from_env() == ["k1", "k3"]
+
+
+def test_gemini_keys_numbered_beats_comma(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY_1", "num")
+    monkeypatch.setenv("GEMINI_API_KEYS", "a,b,c")
+    assert config.gemini_api_keys_from_env() == ["num"]
+
+
+def test_gemini_keys_comma_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEYS", "a, b ,c")
+    assert config.gemini_api_keys_from_env() == ["a", "b", "c"]
+
+
+def test_gemini_keys_single_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    assert config.gemini_api_keys_from_env(single_fallback="cfgkey") == ["cfgkey"]
+    monkeypatch.setenv("GEMINI_API_KEY", "envkey")
+    assert config.gemini_api_keys_from_env() == ["envkey"]
+
+
+def test_gemini_keys_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_gemini_env(monkeypatch)
+    assert config.gemini_api_keys_from_env() == []

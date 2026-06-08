@@ -514,14 +514,11 @@ def _worker(
 
 
 def get_api_keys() -> list[str]:
-    """Read keys from GEMINI_API_KEYS (comma-separated) or GEMINI_API_KEY."""
-    plural = os.environ.get("GEMINI_API_KEYS", "")
-    if plural:
-        keys = [k.strip() for k in plural.split(",") if k.strip()]
-        if keys:
-            return keys
-    single = os.environ.get("GEMINI_API_KEY", "")
-    return [single.strip()] if single.strip() else []
+    """Read keys: numbered GEMINI_API_KEY_1..N, then legacy GEMINI_API_KEYS
+    (comma), then single GEMINI_API_KEY. Единый сборщик в config."""
+    from teledigest.config import gemini_api_keys_from_env
+
+    return gemini_api_keys_from_env()
 
 
 def embed_documents_parallel(

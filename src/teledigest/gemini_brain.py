@@ -111,23 +111,12 @@ def _get_embedding_api_key() -> str:
 def _get_embedding_api_keys() -> list[str]:
     """Return all available Gemini API keys for embedding.
 
-    Sources, in order of preference:
-      1. GEMINI_API_KEYS env var (comma-separated) — for multi-key migration
-      2. GEMINI_API_KEY env var or [gemini] api_key in config — single key
+    Источники (в порядке предпочтения): пронумерованные GEMINI_API_KEY_1..N,
+    затем legacy GEMINI_API_KEYS (comma), затем single GEMINI_API_KEY / config.
+    Единый сборщик — config.gemini_api_keys_from_env (см. там)."""
+    from .config import gemini_api_keys_from_env
 
-    Each free-tier key has its own daily quota on gemini-embedding-2 (~30K RPD),
-    so rotating across N keys multiplies throughput linearly during bulk
-    re-embedding without paid tier.
-    """
-    import os
-
-    raw_multi = os.environ.get("GEMINI_API_KEYS", "")
-    if raw_multi:
-        keys = [k.strip() for k in raw_multi.split(",") if k.strip()]
-        if keys:
-            return keys
-    single = _get_embedding_api_key()
-    return [single] if single else []
+    return gemini_api_keys_from_env(single_fallback=_get_embedding_api_key())
 
 
 # Round-robin pointer for the multi-key pool. Reset on every process start.

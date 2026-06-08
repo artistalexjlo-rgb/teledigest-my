@@ -24,6 +24,11 @@
 
 - GitHub → Dokploy auto-deploy при push в main
 - Docker multi-stage, secrets через env (TELEGRAM_API_ID/HASH/BOT_TOKEN, GEMINI_API_KEY)
+- **Gemini-ключи: пронумерованные `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, …**
+  (скан 1..64, пропуски разрешены — удобно следить какие есть/каких нет).
+  Сборщик: `config.gemini_api_keys_from_env()`. Порядок: numbered → legacy
+  `GEMINI_API_KEYS` (comma) → single `GEMINI_API_KEY`. Все читатели ключей
+  (config, gemini_brain, embedder_v2_parallel) идут через этот хелпер.
 - Конфиг: File Mount в Dokploy → `/config/teledigest.conf`
 - Данные (SQLite + сессии): Directory Mount — `/home/teledigest/data`
 - db_path в конфиге: `/home/teledigest/data/messages_fts.db`
