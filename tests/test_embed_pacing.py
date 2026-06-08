@@ -154,24 +154,50 @@ def test_first_429_cooldowns_key(temp_quota_db, monkeypatch):
     assert banned is False
 
 
-def test_second_429_after_cooldown_persists_ban(temp_quota_db, monkeypatch):
+def test_repeat_429_extends_cooldown_no_ban(temp_quota_db, monkeypatch):
+    # Повторный 429 после cooldown НЕ банит ключ на день — только продлевает
+    # cooldown. Дневной бан был дурным решением: терял живую квоту на транзиенте.
     keys = ["kBAD", "kGOOD"]
     clients = {"kBAD": _make_429_client(), "kGOOD": _make_ok_client()}
     _patch_clients(monkeypatch, keys, clients)
     # Имитируем что kBAD уже был в cooldown в прошлой сессии _embed_v2.
     gemini_brain._embed_was_cooldowned.add(0)
+    now = 1_000_000.0
     monkeypatch.setattr(
-        gemini_brain, "_time", MagicMock(time=time.time, sleep=lambda *_: None)
+        gemini_brain, "_time", MagicMock(time=lambda: now, sleep=lambda *_: None)
     )
 
     gemini_brain._embed_v2(
         ["y"], "RETRIEVAL_DOCUMENT", min_interval_s=0.0, use_persistent_quota=True
     )
-    # Теперь persistent ban должен быть выставлен.
     from teledigest.extraction_db import _key_hash, quota_state
 
+    # НЕ забанен.
     _, banned = quota_state(_key_hash("kBAD"), gemini_brain._EMBEDDING_MODEL_V2)
-    assert banned is True
+    assert banned is False
+    # Cooldown продлён на _EMBED_COOLDOWN_REPEAT_S (а не 5 мин).
+    assert gemini_brain._embed_cooldown_until[0] == now + (
+        gemini_brain._EMBED_COOLDOWN_REPEAT_S
+    )
+
+
+def test_success_clears_cooldown_history(temp_quota_db, monkeypatch):
+    # Успешный эмбед «прощает» ключ: убирает его из _embed_was_cooldowned,
+    # чтобы поздний транзиентный 429 не считался повтором.
+    keys = ["kGOOD"]
+    _patch_clients(monkeypatch, keys, {"kGOOD": _make_ok_client()})
+    gemini_brain._embed_was_cooldowned.add(0)
+    gemini_brain._embed_cooldown_until[0] = 1.0
+    monkeypatch.setattr(
+        gemini_brain, "_time", MagicMock(time=time.time, sleep=lambda *_: None)
+    )
+
+    out = gemini_brain._embed_v2(
+        ["ok"], "RETRIEVAL_DOCUMENT", min_interval_s=0.0, use_persistent_quota=True
+    )
+    assert out[0] is not None
+    assert 0 not in gemini_brain._embed_was_cooldowned
+    assert 0 not in gemini_brain._embed_cooldown_until
 
 
 def test_keys_all_exhausted_false_when_capacity(temp_quota_db, monkeypatch):

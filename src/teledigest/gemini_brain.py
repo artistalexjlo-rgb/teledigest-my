@@ -136,9 +136,13 @@ _key_rpd_count: dict[int, int] = {}
 _RPD_SOFT_CAP = 950
 
 # Module-level state for bulk paced embed (embed_pump). Cooldown is
-# in-memory only — short-lived, not worth persisting; suspend-risk states
-# (repeated 429 after cooldown) escalate to persistent quota_ban_today.
+# in-memory only — short-lived, not worth persisting. NB: a repeated 429 just
+# extends the cooldown (below) — it does NOT ban the key for the day. Real RPD
+# exhaustion is handled by the soft-cap count check (>=950 -> skip); a transient
+# 429 must never strand a key that still has daily quota left.
 _EMBED_COOLDOWN_S = 300.0
+# Repeat 429 (key 429'd again after its first cooldown) -> longer backoff.
+_EMBED_COOLDOWN_REPEAT_S = 1800.0
 _EMBED_ABUSE_THRESHOLD = 3
 _EMBED_ABUSE_WINDOW_S = 60.0
 _EMBED_ABUSE_PAUSE_S = 1800.0
@@ -310,7 +314,9 @@ def _embed_v2(
       use_persistent_quota: when True, gate keys on the SQLite gemini_quota
                      table (model='gemini-embedding-2') — survives container
                      restarts. First 429 puts a key into 5min in-memory
-                     cooldown; second 429 after cooldown calls quota_ban_today.
+                     cooldown; a repeat 429 just extends the cooldown to 30min
+                     (NO whole-day ban — real RPD exhaustion is the soft-cap's
+                     job). A successful embed clears the key's cooldown history.
                      Also triggers global 30min pause if >=3 distinct keys
                      hit 429 in a 60s window (likely IP-throttle / abuse flag).
     """
@@ -413,6 +419,10 @@ def _embed_v2(
                 # Advance pointer past the successful key so next text starts
                 # on the next key — spreads load across keys evenly.
                 _key_rr_idx = (idx + 1) % len(keys)
+                # Key recovered — forget its cooldown history so a later
+                # transient 429 isn't treated as a repeat offence.
+                _embed_cooldown_until.pop(idx, None)
+                _embed_was_cooldowned.discard(idx)
                 break
             except Exception as e:
                 last_err = e
@@ -423,20 +433,24 @@ def _embed_v2(
                     _key_rpd_count[idx] = _key_rpd_count.get(idx, 0) + 1
                     if use_persistent_quota:
                         from .extraction_db import _key_hash as _kh
-                        from .extraction_db import quota_ban_today
                         from .extraction_db import quota_increment as _qi
 
                         kh = _kh(keys[idx])
                         _qi(kh, _EMBEDDING_MODEL_V2)
                         if idx in _embed_was_cooldowned:
-                            # Second 429 after a cooldown — escalate to
-                            # persistent ban until UTC midnight.
-                            log.warning(
-                                "v2 embed: key #%d second 429 after "
-                                "cooldown — ban till UTC midnight",
-                                idx,
+                            # Repeat 429 after a cooldown — back off LONGER, but
+                            # NEVER a whole-day ban. Genuine RPD exhaustion is
+                            # caught by the soft-cap count check; a transient 429
+                            # must not strand a key with quota still left today.
+                            _embed_cooldown_until[idx] = (
+                                _time.time() + _EMBED_COOLDOWN_REPEAT_S
                             )
-                            quota_ban_today(kh, _EMBEDDING_MODEL_V2)
+                            log.warning(
+                                "v2 embed: key #%d repeat 429 — extended "
+                                "cooldown %.0fs",
+                                idx,
+                                _EMBED_COOLDOWN_REPEAT_S,
+                            )
                         else:
                             cooldown_until = _time.time() + _EMBED_COOLDOWN_S
                             _embed_cooldown_until[idx] = cooldown_until
