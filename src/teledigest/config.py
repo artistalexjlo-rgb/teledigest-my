@@ -478,6 +478,12 @@ def _parse_gemini(raw: Dict[str, Any]) -> GeminiConfig:
     g_raw = raw.get("gemini") or {}
     api_key = str(os.environ.get("GEMINI_API_KEY") or g_raw.get("api_key", "")).strip()
     api_keys = gemini_api_keys_from_env(single_fallback=api_key)
+    # Если явного одиночного GEMINI_API_KEY нет, но есть пронумерованные/comma —
+    # держим первый как primary `api_key`. Иначе legacy-гейты, проверяющие
+    # cfg.gemini.api_key (embed_pump.run_embed_pass, gemini_brain.is_configured),
+    # видят пусто и отваливаются, хотя ключи реально заданы.
+    if not api_key and api_keys:
+        api_key = api_keys[0]
     model = (
         str(g_raw.get("model", "gemini-3.1-flash-lite-preview")).strip()
         or "gemini-3.1-flash-lite-preview"

@@ -644,3 +644,17 @@ def test_gemini_keys_single_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_gemini_keys_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_gemini_env(monkeypatch)
     assert config.gemini_api_keys_from_env() == []
+
+
+def test_parse_gemini_primary_key_from_numbered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Только нумерованные ключи, явного single нет → primary api_key = первый
+    # numbered (иначе legacy-гейты на cfg.gemini.api_key отваливаются).
+    _clear_gemini_env(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY_1", "n1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "n2")
+    g = config._parse_gemini({"gemini": {}})
+    assert g.api_keys == ["n1", "n2"]
+    assert g.api_key == "n1"
+    assert g.enabled is True
