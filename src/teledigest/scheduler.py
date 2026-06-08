@@ -18,12 +18,11 @@ from .telegram_client import get_bot_client
 from .telegraph import post_to_telegraph
 
 # Embedding is gated by Gemini's free-tier RPD quota, which resets at midnight
-# America/Los_Angeles (Pacific). Trigger the embed pass just after that reset so
-# each pass starts with a full fresh daily quota, drains until the keys cap, and
-# returns well before the next reset — one clean pass per quota-day, no straddle.
+# America/Los_Angeles (Pacific). We run one pass per Pacific day, keyed on the
+# date — so it fires immediately on container start (catch-up: a mid-day
+# redeploy must NOT waste the rest of the day's quota) and again at each 00:00 PT
+# rollover with fresh quota.
 _EMBED_TZ = ZoneInfo("America/Los_Angeles")
-_EMBED_HOUR = 0
-_EMBED_MINUTE = 30
 
 
 async def _post_digest(
@@ -255,32 +254,29 @@ async def summary_scheduler():
 
 
 async def embed_scheduler() -> None:
-    """Independent daily embed pass, aligned to the Pacific RPD-quota reset.
+    """Independent embed pass — one per Pacific quota-day, with catch-up on start.
 
     Runs in its own task (see main.asyncio.gather) so a multi-hour pass never
-    blocks the summary/extraction loop. run_embed_pass drains pending wisdom +
-    wiki patterns into Qdrant until every key hits its soft cap, then returns
-    cleanly (the pump breaks on exhaustion — see embed_pump). The whole body is
-    guarded so a transient failure can never kill the loop.
+    blocks the summary/extraction loop. Fires whenever the current Pacific day
+    hasn't been processed yet: immediately on container start (so a mid-day
+    redeploy doesn't strand the rest of the day's RPD quota until next midnight)
+    and again at each 00:00 PT rollover with fresh quota. run_embed_pass drains
+    pending wisdom + wiki into Qdrant until every key hits its soft cap, then
+    returns (the pump breaks on exhaustion — see embed_pump); if keys are already
+    spent it returns fast. Body guarded so a transient failure can't kill it.
     """
     log.info(
-        "Embed scheduler started - daily pass at %02d:%02d (%s)",
-        _EMBED_HOUR,
-        _EMBED_MINUTE,
+        "Embed scheduler started - one pass per Pacific day + catch-up on start (%s)",
         _EMBED_TZ.key,
     )
     last_embed_for: dt.date | None = None
 
     while True:
         try:
-            now_pt = dt.datetime.now(_EMBED_TZ)
-            if (
-                now_pt.hour == _EMBED_HOUR
-                and now_pt.minute == _EMBED_MINUTE
-                and last_embed_for != now_pt.date()
-            ):
-                last_embed_for = now_pt.date()
-                log.info("Embed pass (PT-aligned) starting: %s", now_pt.isoformat())
+            today_pt = dt.datetime.now(_EMBED_TZ).date()
+            if last_embed_for != today_pt:
+                last_embed_for = today_pt
+                log.info("Embed pass starting (PT-day %s)", today_pt.isoformat())
                 try:
                     from .embed_pump import run_embed_pass
 
@@ -290,7 +286,8 @@ async def embed_scheduler() -> None:
                     log.error("Embed pass failed (non-fatal): %s", e)
                 await asyncio.sleep(65)
             else:
-                await asyncio.sleep(30)
+                # Idle until the Pacific day rolls over (checked ~every minute).
+                await asyncio.sleep(60)
         except Exception as e:  # never let the scheduler loop die
             log.exception("embed_scheduler loop error (continuing): %s", e)
             await asyncio.sleep(30)
