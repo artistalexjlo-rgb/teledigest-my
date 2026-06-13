@@ -35,6 +35,12 @@ from .extraction_db import (
 )
 
 
+# Per-key minimum interval (seconds) handed to compute_document_embeddings_v2.
+# Это PER-KEY: фактический сон между текстами = _PER_KEY_INTERVAL_S/len(keys),
+# так каждый ключ дёргается ~раз в 70с, а throughput растёт с числом ключей.
+_PER_KEY_INTERVAL_S = 70.0
+
+
 def _build_embed_text(country: str, title: str, tag: str, text_body: str) -> str:
     """Unified format 'Country. Title. Tag. Instruction' — совместимо с
     embed_text который Apps Script и migrate_*.py использовали в Firestore."""
@@ -89,7 +95,7 @@ def _pump_extracted_collection(
 
         try:
             vectors = compute_document_embeddings_v2(
-                texts, min_interval_s=10.0, use_persistent_quota=True
+                texts, min_interval_s=_PER_KEY_INTERVAL_S, use_persistent_quota=True
             )
         except Exception as e:
             log.warning("embed_pump extracted batch failed (%s): %s", qd_collection, e)
@@ -200,7 +206,7 @@ def _pump_wiki(batch_size: int = 50) -> tuple[int, int]:
 
         try:
             vectors = compute_document_embeddings_v2(
-                texts, min_interval_s=10.0, use_persistent_quota=True
+                texts, min_interval_s=_PER_KEY_INTERVAL_S, use_persistent_quota=True
             )
         except Exception as e:
             log.warning("embed_pump wiki batch failed: %s", e)

@@ -308,9 +308,11 @@ def _embed_v2(
 
     Optional bulk-pacing kwargs (defaults preserve fast query-path behavior):
 
-      min_interval_s: sleep after every text request (success or fail). Set
-                     to e.g. 10.0 for embed_pump runs to keep RPS well under
-                     abuse threshold.
+      min_interval_s: PER-KEY minimum interval. Actual sleep between texts is
+                     min_interval_s/len(keys) (round-robin hits each key once
+                     per cycle), so each individual key is paced ~once per
+                     min_interval_s while pool throughput scales with key count.
+                     embed_pump passes 70.0; query path passes 0 (no pacing).
       use_persistent_quota: when True, gate keys on the SQLite gemini_quota
                      table (model='gemini-embedding-2') — survives container
                      restarts. First 429 puts a key into 5min in-memory
@@ -504,9 +506,13 @@ def _embed_v2(
                 last_err,
             )
         out.append(vec)
-        # Bulk pacing: throttle aggregate RPS between texts (success or fail).
+        # Bulk pacing: min_interval_s is the PER-KEY interval (e.g. 70s). The
+        # round-robin advances one key per text, so sleeping
+        # min_interval_s/len(keys) between texts spaces each INDIVIDUAL key
+        # ~min_interval_s apart while pool throughput scales with key count.
+        # Add keys -> more throughput, each key still hit ~once / min_interval_s.
         if min_interval_s > 0:
-            _time.sleep(min_interval_s)
+            _time.sleep(min_interval_s / max(len(keys), 1))
     return out
 
 
