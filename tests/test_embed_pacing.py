@@ -82,7 +82,9 @@ def _patch_clients(monkeypatch, keys: list[str], clients_map: dict[str, MagicMoc
     monkeypatch.setattr(gemini_brain, "_get_embedding_api_keys", lambda: keys)
 
 
-def test_min_interval_sleeps_between_texts(temp_quota_db, monkeypatch):
+def test_min_interval_is_per_key(temp_quota_db, monkeypatch):
+    # min_interval_s — PER-KEY: фактический сон между текстами =
+    # min_interval_s/len(keys). 2 ключа, interval 10 → сон 5.0 на текст.
     keys = ["k1", "k2"]
     _patch_clients(monkeypatch, keys, {k: _make_ok_client() for k in keys})
     sleeps: list[float] = []
@@ -94,8 +96,9 @@ def test_min_interval_sleeps_between_texts(temp_quota_db, monkeypatch):
         ["a", "b", "c"], "RETRIEVAL_DOCUMENT", min_interval_s=10.0
     )
     assert all(v is not None for v in out)
-    # 10s sleep после каждого из 3 текстов.
-    assert sleeps.count(10.0) == 3
+    # 10/2 = 5.0 на каждый из 3 текстов → каждый ключ дёргается раз в ~10с.
+    assert sleeps.count(5.0) == 3
+    assert sleeps.count(10.0) == 0
 
 
 def test_persistent_quota_increments_on_success(temp_quota_db, monkeypatch):
