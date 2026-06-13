@@ -34,7 +34,6 @@ from .extraction_db import (
     mark_embedded,
 )
 
-
 # Per-key minimum interval (seconds) handed to compute_document_embeddings_v2.
 # Это PER-KEY: фактический сон между текстами = _PER_KEY_INTERVAL_S/len(keys),
 # так каждый ключ дёргается ~раз в 70с, а throughput растёт с числом ключей.
