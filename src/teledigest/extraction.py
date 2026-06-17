@@ -274,6 +274,37 @@ def _extract_patterns_from_response(api_resp: dict) -> list[dict]:
     return []
 
 
+# Guard: ai_lesson, в котором дешёвая модель пересказала ВОПРОС/ПУСТОТУ/ЛИСТИНГ
+# вместо извлечения факта. flash-lite на чистом вопросе не молчит (abstention —
+# слабое место мелкой модели), а выдаёт "Inquiry about X" / "User is asking…" —
+# это НЕ факт. Эмбедить нельзя: жжёт дефицитную квоту + засоряет retrieval.
+# Проверено на проде: ~12% wisdom такие. Промптом не лечится → ловим детерминированно.
+_JUNK_AI_LESSON_RE = re.compile(
+    r"\b(?:"
+    r"User (?:is asking|is looking for|wants to know|needs to know|is seeking|"
+    r"is inquiring|is requesting|asks|inquired)|"
+    r"A user (?:is asking|asks|wants|is looking|inquired)|"
+    r"Inquir(?:y|e|ing) about|"
+    r"Clarification (?:needed|is needed)|"
+    r"not (?:explicitly )?provided in the log|is not provided in the log|"
+    r"not specified in the log|"
+    r"A request for assistance|request for assistance in|"
+    r"is available for rent|(?:room|apartment|flat) is available|"
+    r"consult with .{0,40}Telegram|via their Telegram channel|"
+    r"should be researched"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_junk_ai_lesson(text: str | None) -> bool:
+    """True, если ai_lesson — пересказанный моделью вопрос/пустота/листинг, а НЕ
+    извлечённый факт. Детерминированный guard у источника (без LLM)."""
+    if not text:
+        return False
+    return bool(_JUNK_AI_LESSON_RE.search(text))
+
+
 def _persist_patterns(file_name: str, patterns: list[dict]) -> tuple[int, int]:
     """Save patterns to SQLite extracted_patterns. Returns (saved, attempted)."""
     saved = 0
@@ -293,8 +324,13 @@ def _persist_patterns(file_name: str, patterns: list[dict]) -> tuple[int, int]:
         ai_lesson = (p.get("ai_lesson") or "").strip() or None
         human_story = (p.get("human_story") or "").strip() or None
 
-        # wisdom (мухи) — assistant_only или both
-        if routing in ("both", "assistant_only") and ai_lesson:
+        # wisdom (мухи) — assistant_only или both; junk-guard режет пересказы
+        # вопросов/пустоты ("Inquiry about…", "User is asking…") у источника.
+        if (
+            routing in ("both", "assistant_only")
+            and ai_lesson
+            and not is_junk_ai_lesson(ai_lesson)
+        ):
             attempted += 1
             did = _doc_id(file_name, idx, COLLECTION_WISDOM)
             try:

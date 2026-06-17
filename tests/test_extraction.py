@@ -131,3 +131,31 @@ def test_rotator_continues_to_next_round(temp_quota_db):
     pairs = _collect(gen, 7)
     assert pairs[:6] == [("m1", "k1"), ("m1", "k2")] * 3
     assert sleeps == [extraction._INTER_MODEL_SLEEP_S] * 3
+
+
+def test_is_junk_ai_lesson_catches_inquiry_narration():
+    """Guard ловит пересказы вопросов/пустоты/листингов, но не трогает факты."""
+    junk = [
+        "Inquiry about the best pharmacy in Nha Trang for medication.",
+        "User is asking how to find Russian-speaking guides in Vietnam.",
+        "A user inquired if Visa cards can be used for payments in Vietnam.",
+        "User is looking for someone traveling to Bali to deliver a package.",
+        "Clarification needed on whether e-tickets require entry at a set time.",
+        "Information is not explicitly provided in the log; should be researched.",
+        "A room is available for rent in Vienna from July.",
+        "For Thailand real estate, consult with Pavel via their Telegram channel.",
+    ]
+    for t in junk:
+        assert extraction.is_junk_ai_lesson(t), t
+
+    good = [
+        "CPF can be issued online via Receita Federal; takes 10-30 minutes.",
+        "ATMs in Bali (BNI, BCA) usually charge no commission; limit ~3M IDR.",
+        "In France, recurring payments must be set up via automatic bank debit.",
+        "Mauritius: USD is more advantageous to exchange than CNY at the airport.",
+    ]
+    for t in good:
+        assert not extraction.is_junk_ai_lesson(t), t
+
+    assert extraction.is_junk_ai_lesson(None) is False
+    assert extraction.is_junk_ai_lesson("") is False

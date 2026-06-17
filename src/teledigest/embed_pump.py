@@ -24,6 +24,7 @@ from typing import Any
 
 from .config import get_config, log
 from .country_codes import country_full_name_en
+from .extraction import is_junk_ai_lesson
 from .extraction_db import (
     COLLECTION_WIKI,
     COLLECTION_WISDOM,
@@ -76,6 +77,13 @@ def _pump_extracted_collection(
         texts = []
         ids_payload = []
         for r in rows:
+            # Junk-guard: ai_lesson-пересказ вопроса/пустоты ("Inquiry about…")
+            # не эмбедим — дроп из pending, в Qdrant не попадёт. Ловит то, что
+            # накопилось в очереди до guard в _persist_patterns.
+            al = r.get("ai_lesson")
+            if al and is_junk_ai_lesson(al):
+                mark_embedded("extracted_patterns", [r["id"]])
+                continue
             # Для wisdom embed_text использует ai_lesson; для stories — human_story
             body = r.get("ai_lesson") or r.get("human_story") or ""
             country = r.get("country") or ""
