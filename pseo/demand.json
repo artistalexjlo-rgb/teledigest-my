@@ -1,0 +1,314 @@
+{
+ "ae": {
+  "bureaucracy": 1,
+  "finance": 1
+ },
+ "am": {
+  "finance": 1
+ },
+ "any": {
+  "bureaucracy": 209,
+  "finance": 117,
+  "health": 4,
+  "housing": 1,
+  "safety": 46,
+  "shopping": 2,
+  "transport": 5
+ },
+ "ar": {
+  "bureaucracy": 41,
+  "finance": 37,
+  "health": 3,
+  "housing": 3,
+  "safety": 8,
+  "shopping": 6,
+  "transport": 5
+ },
+ "at": {
+  "bureaucracy": 52,
+  "finance": 15,
+  "health": 2,
+  "housing": 1,
+  "safety": 3,
+  "shopping": 4
+ },
+ "au": {
+  "bureaucracy": 96,
+  "finance": 9,
+  "safety": 2
+ },
+ "be": {
+  "bureaucracy": 15,
+  "finance": 1,
+  "housing": 3,
+  "shopping": 3
+ },
+ "bg": {
+  "bureaucracy": 117,
+  "finance": 38,
+  "health": 3,
+  "housing": 1,
+  "safety": 1,
+  "shopping": 1
+ },
+ "bo": {
+  "bureaucracy": 1
+ },
+ "br": {
+  "bureaucracy": 456,
+  "finance": 425,
+  "health": 91,
+  "housing": 26,
+  "safety": 173,
+  "shopping": 33,
+  "transport": 25
+ },
+ "by": {
+  "bureaucracy": 72,
+  "finance": 43,
+  "health": 10,
+  "housing": 4,
+  "safety": 3,
+  "shopping": 5,
+  "transport": 3
+ },
+ "ch": {
+  "bureaucracy": 26,
+  "finance": 11,
+  "housing": 1,
+  "safety": 2
+ },
+ "cl": {
+  "bureaucracy": 35,
+  "finance": 4,
+  "health": 2,
+  "housing": 2,
+  "safety": 2,
+  "shopping": 1
+ },
+ "cn": {
+  "bureaucracy": 1,
+  "finance": 1,
+  "shopping": 1,
+  "transport": 1
+ },
+ "cu": {
+  "bureaucracy": 6,
+  "finance": 15,
+  "safety": 7
+ },
+ "cy": {
+  "bureaucracy": 2
+ },
+ "cz": {
+  "bureaucracy": 26,
+  "finance": 6,
+  "housing": 2,
+  "safety": 4,
+  "shopping": 1,
+  "transport": 2
+ },
+ "de": {
+  "bureaucracy": 99,
+  "finance": 35,
+  "health": 2,
+  "housing": 4,
+  "safety": 4,
+  "shopping": 3,
+  "transport": 2
+ },
+ "ee": {
+  "bureaucracy": 1,
+  "finance": 1
+ },
+ "eg": {
+  "bureaucracy": 2,
+  "finance": 11,
+  "health": 5,
+  "shopping": 2
+ },
+ "es": {
+  "bureaucracy": 3
+ },
+ "eu": {
+  "finance": 1
+ },
+ "fi": {
+  "bureaucracy": 36,
+  "finance": 4
+ },
+ "fr": {
+  "bureaucracy": 87,
+  "finance": 25,
+  "health": 4,
+  "housing": 1,
+  "safety": 5,
+  "shopping": 4,
+  "transport": 2
+ },
+ "gb": {
+  "bureaucracy": 201,
+  "finance": 42,
+  "health": 1,
+  "safety": 1,
+  "shopping": 1
+ },
+ "ge": {
+  "bureaucracy": 22,
+  "finance": 27,
+  "health": 3,
+  "safety": 4,
+  "shopping": 1,
+  "transport": 1
+ },
+ "gr": {
+  "bureaucracy": 189,
+  "finance": 4,
+  "safety": 3
+ },
+ "hr": {
+  "bureaucracy": 19,
+  "finance": 3,
+  "housing": 1,
+  "safety": 1,
+  "transport": 3
+ },
+ "hu": {
+  "bureaucracy": 88,
+  "finance": 5,
+  "safety": 1
+ },
+ "id": {
+  "bureaucracy": 83,
+  "finance": 46,
+  "health": 9,
+  "safety": 44,
+  "shopping": 5,
+  "transport": 4
+ },
+ "il": {
+  "bureaucracy": 16,
+  "finance": 9,
+  "health": 2,
+  "safety": 1
+ },
+ "in": {
+  "bureaucracy": 9,
+  "finance": 7,
+  "safety": 2,
+  "shopping": 1,
+  "transport": 1
+ },
+ "it": {
+  "bureaucracy": 1,
+  "finance": 1
+ },
+ "jp": {
+  "bureaucracy": 51,
+  "finance": 63,
+  "health": 5,
+  "safety": 8,
+  "shopping": 21,
+  "transport": 13
+ },
+ "kg": {
+  "finance": 1
+ },
+ "kr": {
+  "bureaucracy": 116,
+  "finance": 73,
+  "health": 4,
+  "safety": 5,
+  "shopping": 14,
+  "transport": 4
+ },
+ "kz": {
+  "finance": 4
+ },
+ "lk": {
+  "bureaucracy": 28,
+  "finance": 15,
+  "health": 4,
+  "safety": 11,
+  "shopping": 2,
+  "transport": 5
+ },
+ "ma": {
+  "bureaucracy": 1
+ },
+ "me": {
+  "bureaucracy": 60,
+  "finance": 32,
+  "health": 5,
+  "safety": 13,
+  "shopping": 14,
+  "transport": 8
+ },
+ "mu": {
+  "bureaucracy": 12,
+  "finance": 18,
+  "health": 1,
+  "safety": 11,
+  "shopping": 9,
+  "transport": 2
+ },
+ "mx": {
+  "safety": 1
+ },
+ "pa": {
+  "bureaucracy": 2
+ },
+ "ph": {
+  "bureaucracy": 26,
+  "finance": 37,
+  "health": 1,
+  "safety": 15,
+  "shopping": 2,
+  "transport": 2
+ },
+ "pt": {
+  "bureaucracy": 1
+ },
+ "py": {
+  "finance": 2
+ },
+ "rs": {
+  "bureaucracy": 1,
+  "finance": 1
+ },
+ "ru": {
+  "bureaucracy": 47,
+  "finance": 13,
+  "health": 3,
+  "safety": 1,
+  "transport": 1
+ },
+ "sg": {
+  "bureaucracy": 1
+ },
+ "th": {
+  "bureaucracy": 1
+ },
+ "tr": {
+  "finance": 2
+ },
+ "uk": {
+  "bureaucracy": 1
+ },
+ "us": {
+  "bureaucracy": 1
+ },
+ "ve": {
+  "finance": 1,
+  "safety": 2
+ },
+ "vn": {
+  "bureaucracy": 63,
+  "finance": 139,
+  "health": 48,
+  "housing": 15,
+  "safety": 27,
+  "shopping": 139,
+  "transport": 11
+ }
+}

@@ -1,0 +1,14 @@
+[
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Как открыть счёт без ВНЖ?","embedded_text":"Банки требуют резидентство; Caixa открывает счёт в приложении при CPF и местном номере.","source_count":3},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Чем платить?","embedded_text":"Внутри страны всё на PIX; картой выбирай crédito и вставляй чипом.","source_count":4},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Где снять наличные?","embedded_text":"Банкоматы выдают только реалы; Union Pay срабатывает в Agibank на Копакабане.","source_count":2},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Как обменять валюту?","embedded_text":"Ищи Cambio в Google Maps; в выходные обменники закрыты; доллары только новые серии.","source_count":3},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Нужен ли CPF?","embedded_text":"CPF (местный ИНН) оформляется в Receita Federal бесплатно за 10-30 минут, нужен почти везде.","source_count":5},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Карты Мир работают?","embedded_text":"Карты Мир не снять и не оплатить; вези USD или USDT.","source_count":2},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Лимиты снятия?","embedded_text":"Лимит снятия за раз обычно 2.5-3 тыс реалов, зависит от банкомата.","source_count":1},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Сбербанк PIX?","embedded_text":"Российский Сбербанк умеет платить PIX напрямую из приложения по ключу.","source_count":2},
+  {"geo":"br","geo_name":"Бразилия","topic":"finance","q":"Старые доллары?","embedded_text":"Старые купюры 90-х берут с дисконтом 15-20% или отказывают; вези новые синие серии.","source_count":3},
+
+  {"geo":"br","geo_name":"Бразилия","topic":"nightlife","q":"Где тусят?","embedded_text":"Лапа в Рио — район баров по выходным.","source_count":1},
+  {"geo":"br","geo_name":"Бразилия","topic":"nightlife","q":"Безопасно ночью?","embedded_text":"Ночью держись людных улиц, телефон не свети.","source_count":1}
+]

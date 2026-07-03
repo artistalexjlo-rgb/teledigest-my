@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="g" cx="30%" cy="25%" r="90%">
+      <stop offset="0" stop-color="#2bb6f2"/>
+      <stop offset="0.7" stop-color="#0a4f8c"/>
+      <stop offset="1" stop-color="#063256"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="#3ad8ff" stroke-opacity="0.5" stroke-width="1.5"/>
+  <text x="24" y="41" font-family="'Segoe UI',sans-serif" font-size="26" font-weight="800" fill="#ffffff" text-anchor="middle">A</text>
+  <text x="43" y="37" font-family="'Segoe UI',sans-serif" font-size="20" font-weight="800" fill="#ffffff" text-anchor="middle">文</text>
+  <text x="45" y="52" font-family="'Segoe UI',sans-serif" font-size="11" font-weight="700" fill="#fbbf24" text-anchor="middle">من</text>
+</svg>
