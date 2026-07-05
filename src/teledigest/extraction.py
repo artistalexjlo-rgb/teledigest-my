@@ -281,10 +281,10 @@ def _extract_patterns_from_response(api_resp: dict) -> list[dict]:
 # Проверено на проде: ~12% wisdom такие. Промптом не лечится → ловим детерминированно.
 _JUNK_AI_LESSON_RE = re.compile(
     r"\b(?:"
-    r"User (?:is asking|is looking for|wants to know|needs to know|is seeking|"
-    r"is inquiring|is requesting|asks|inquired)|"
+    r"User (?:is asking|is looking (?:for|to)|wants to know|needs to know|is seeking|"
+    r"is inquiring|is requesting|asks|inquired|wants information)|"
     r"A user (?:is asking|asks|wants|is looking|inquired)|"
-    r"Inquir(?:y|e|ing) about|"
+    r"Inquir(?:y|ies) (?:about|is|are)|"  # только сущ.-наррация (не «inquire/for inquiries regarding» = совет)
     r"Clarification (?:needed|is needed)|"
     r"not (?:explicitly )?provided in the log|is not provided in the log|"
     r"not specified in the log|"
@@ -296,13 +296,30 @@ _JUNK_AI_LESSON_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Второй слой — «опенер-наррации»: ai_lesson НАЧИНАЕТСЯ с описания запроса/темы, а не
+# факта («Information on purchasing…», «Provide instructions…», «Seeking…»). Якорь на
+# начало строки, чтобы НЕ задеть факты, где эти слова стоят в середине.
+_JUNK_OPENER_RE = re.compile(
+    r"^\s*(?:"
+    r"Information (?:on|about|regarding)|"
+    r"Provide (?:information|instructions|details|guidance|an overview)|"
+    r"Details (?:on|about|regarding)|"
+    r"Inquir(?:y|ies|ing)\b|"
+    r"Seeking\b|Looking for\b|Request(?:ing)? (?:for|information)|"
+    r"Question(?:s)? (?:about|regarding|on)|"
+    r"(?:The |A )?[Uu]ser (?:is|wants|needs|seeks|asks)|"
+    r"Guidance (?:on|is)|Advice (?:is )?(?:sought|requested)"
+    r")",
+)
+
 
 def is_junk_ai_lesson(text: str | None) -> bool:
     """True, если ai_lesson — пересказанный моделью вопрос/пустота/листинг, а НЕ
-    извлечённый факт. Детерминированный guard у источника (без LLM)."""
+    извлечённый факт. Детерминированный guard у источника (без LLM).
+    Два слоя: фразы-маркеры где угодно + опенер-наррации в начале строки."""
     if not text:
         return False
-    return bool(_JUNK_AI_LESSON_RE.search(text))
+    return bool(_JUNK_AI_LESSON_RE.search(text) or _JUNK_OPENER_RE.match(text))
 
 
 def _persist_patterns(file_name: str, patterns: list[dict]) -> tuple[int, int]:
