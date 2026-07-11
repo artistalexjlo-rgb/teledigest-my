@@ -4,12 +4,14 @@ sentinel.py — ДЕТЕРМИНИРОВАННЫЙ сторож (не LLM-«Ва
 
 Проверки (все — правила, без интеллекта):
   1. Живой сайт: обход внутренних /ru/ ссылок от главной → каждая 200? (тухлые/битые ссылки)
-  2. Билдер: status.json — state=stopped/failed>0/завис (ts>6ч при running).
+  2. Билдер: status.json — МАССОВЫЙ провал (сбоев >=3 И >=30%) или завис (ts>6ч). Единичный
+     сбой/парк — НЕ фатально, в лог, не пинг. Движок в канал не пишет вовсе (только sentinel).
   3. Квота: max_key близко к кэпу (билдер объедает прод-резерв).
 LLM тут НЕ нужен — это HTTP-коды и пороги. Эскалация в дайджест только по факту срабатывания.
 
 Запуск (VPS): /root/embed_ab/venv/bin/python sentinel.py   (cron, напр. каждые 6ч)
 """
+
 import json
 import re
 import subprocess
@@ -33,7 +35,10 @@ def fetch(url):
     try:
         r = subprocess.run(
             ["curl", "-sS", "-m", "20", url, "-w", "\n__ST__%{http_code}"],
-            capture_output=True, text=True, timeout=25)
+            capture_output=True,
+            text=True,
+            timeout=25,
+        )
         out = r.stdout
         body, _, code = out.rpartition("__ST__")
         return (int(code) if code.strip().isdigit() else 0), body
@@ -67,16 +72,24 @@ def check_builder():
         st = json.loads(open(STATUS, encoding="utf-8").read())
     except Exception:
         return ["status.json нечитаем — билдер не рапортует"]
-    if st.get("failed", 0) > 0:
-        issues.append(f"билдер: ошибок {st['failed']} ({', '.join(st.get('fails', [])[:4])})")
-    if st.get("state") == "stopped":
-        issues.append("билдер остановлен (STOP)")
+    # Фатально = МАССОВЫЙ провал (систематика), не 1-2 ячейки (это рутина, resume/парк).
+    # Порог: сбоев >=3 И >=30% батча. Единичный сбой — в лог, не пинг. Парк — не сбой вовсе.
+    failed, total = st.get("failed", 0), max(st.get("total", 1), 1)
+    if failed >= 3 and failed / total >= 0.30:
+        issues.append(
+            f"билдер: МАССОВЫЙ провал {failed}/{total} ({', '.join(st.get('fails', [])[:4])}) — систематика"
+        )
+    # state=stopped НЕ алярмим: STOP инициирует человек, он и так знает.
     if st.get("state") == "running":
         try:
-            ts = datetime.strptime(st["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            ts = datetime.strptime(st["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
+            )
             age = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
             if age > STALE_HOURS:
-                issues.append(f"билдер завис: running, но статус {age:.0f}ч не обновлялся")
+                issues.append(
+                    f"билдер завис: running, но статус {age:.0f}ч не обновлялся"
+                )
         except Exception:
             pass
     return issues
@@ -85,10 +98,15 @@ def check_builder():
 def check_quota():
     try:
         out = subprocess.check_output(
-            ["sqlite3", DB,
-             "SELECT COALESCE(MAX(count),0) FROM gemini_quota "
-             "WHERE date_utc=date('now') AND model='gemini-3.1-flash-lite';"],
-            text=True, timeout=15).strip()
+            [
+                "sqlite3",
+                DB,
+                "SELECT COALESCE(MAX(count),0) FROM gemini_quota "
+                "WHERE date_utc=date('now') AND model='gemini-3.1-flash-lite';",
+            ],
+            text=True,
+            timeout=15,
+        ).strip()
         mx = int(out or 0)
     except Exception:
         return []

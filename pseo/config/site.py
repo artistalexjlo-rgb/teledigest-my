@@ -15,9 +15,9 @@ SITE = {
     # ПОМОЩНИКА, когда появится URL-параметр режима (см. model_luky_funnel_cta).
     "cta_luky_url": "https://multyspeak.online",
     "telegram_url": "https://t.me/luky_channel",  # footer: канал + чат
-    "languages": ["ru", "en", "pt"],
+    "languages": ["ru", "en", "es"],
     "year": 2026,
     # draft=True → на всех страницах <meta robots noindex>. Пока строим — True.
     # На лаунче (реальное наполнение прошло гейт) → False + sitemap + GSC.
-    "draft": True,
+    "draft": False,
 }

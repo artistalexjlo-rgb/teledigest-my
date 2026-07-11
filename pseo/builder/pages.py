@@ -1,0 +1,665 @@
+"""pages.py — из BUILT-данных гео (out_facet[_<lang>]/<geo>.json + out_questions[_<lang>]/<geo>.json)
+собирает portal-схему data/ (октагон-шаблон): гео-хаб + факт-тема-страницы + вопрос-хаб/темы.
+Оба контура, единообразно. Дизайн гарантирован шаблоном (page/qlist/index.html.j2).
+
+Мультиязык: lang="ru" читает out_facet/, любой другой — out_facet_<lang>/ (структура ×1, текст из
+оригинала). Копия страниц — из COPY[lang]. render.py сам подхватит i18n/<lang>.json по page.lang.
+
+Запуск: python pages.py <geo> [<geo2> ...]   (или --all по out_facet/*.json; строит ВСЕ языки, у кого
+есть built-данные). Дальше — render.py --all + валидация (readycheck).
+"""
+
+import glob
+import hashlib
+import json
+import os
+import re
+import sys
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
+DATA = f"{BASE}/data"
+# built-данные лежат либо локально (pull с VPS), либо укажи путь
+BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
+
+GEO_NAMES = {
+    "ru": {
+        "br": "Бразилия",
+        "vn": "Вьетнам",
+        "me": "Черногория",
+        "id": "Индонезия",
+        "gr": "Греция",
+        "kr": "Южная Корея",
+        "ph": "Филиппины",
+        "de": "Германия",
+        "gb": "Великобритания",
+        "bg": "Болгария",
+        "jp": "Япония",
+        "by": "Беларусь",
+        "fr": "Франция",
+        "au": "Австралия",
+        "ar": "Аргентина",
+        "hu": "Венгрия",
+        "at": "Австрия",
+        "ru": "Россия",
+        "cl": "Чили",
+        "fi": "Финляндия",
+        "ge": "Грузия",
+        "cz": "Чехия",
+        "mu": "Маврикий",
+        "lk": "Шри-Ланка",
+    },
+    "en": {
+        "br": "Brazil",
+        "vn": "Vietnam",
+        "me": "Montenegro",
+        "id": "Indonesia",
+        "gr": "Greece",
+        "kr": "South Korea",
+        "ph": "Philippines",
+        "de": "Germany",
+        "gb": "United Kingdom",
+        "bg": "Bulgaria",
+        "jp": "Japan",
+        "by": "Belarus",
+        "fr": "France",
+        "au": "Australia",
+        "ar": "Argentina",
+        "hu": "Hungary",
+        "at": "Austria",
+        "ru": "Russia",
+        "cl": "Chile",
+        "fi": "Finland",
+        "ge": "Georgia",
+        "cz": "Czechia",
+        "mu": "Mauritius",
+        "lk": "Sri Lanka",
+        "be": "Belgium",
+        "ch": "Switzerland",
+        "cn": "China",
+        "cu": "Cuba",
+        "eg": "Egypt",
+        "hr": "Croatia",
+        "il": "Israel",
+        "in": "India",
+        "kz": "Kazakhstan",
+        "tr": "Turkey",
+        "kg": "Kyrgyzstan",
+    },
+    "es": {
+        "br": "Brasil",
+        "vn": "Vietnam",
+        "me": "Montenegro",
+        "id": "Indonesia",
+        "gr": "Grecia",
+        "kr": "Corea del Sur",
+        "ph": "Filipinas",
+        "de": "Alemania",
+        "gb": "Reino Unido",
+        "bg": "Bulgaria",
+        "jp": "Japón",
+        "by": "Bielorrusia",
+        "fr": "Francia",
+        "au": "Australia",
+        "ar": "Argentina",
+        "hu": "Hungría",
+        "at": "Austria",
+        "ru": "Rusia",
+        "cl": "Chile",
+        "fi": "Finlandia",
+        "ge": "Georgia",
+        "cz": "Chequia",
+        "mu": "Mauricio",
+        "lk": "Sri Lanka",
+        "be": "Bélgica",
+        "ch": "Suiza",
+        "cn": "China",
+        "cu": "Cuba",
+        "eg": "Egipto",
+        "hr": "Croacia",
+        "il": "Israel",
+        "in": "India",
+        "kz": "Kazajistán",
+        "tr": "Turquía",
+        "kg": "Kirguistán",
+    },
+}
+GEO_FLAG = {
+    "br": "🇧🇷",
+    "vn": "🇻🇳",
+    "me": "🇲🇪",
+    "id": "🇮🇩",
+    "gr": "🇬🇷",
+    "kr": "🇰🇷",
+    "ph": "🇵🇭",
+    "de": "🇩🇪",
+    "gb": "🇬🇧",
+    "bg": "🇧🇬",
+    "jp": "🇯🇵",
+    "by": "🇧🇾",
+    "fr": "🇫🇷",
+    "au": "🇦🇺",
+    "ar": "🇦🇷",
+    "hu": "🇭🇺",
+    "at": "🇦🇹",
+    "ru": "🇷🇺",
+    "cl": "🇨🇱",
+    "fi": "🇫🇮",
+    "ge": "🇬🇪",
+    "cz": "🇨🇿",
+    "mu": "🇲🇺",
+    "lk": "🇱🇰",
+    "be": "🇧🇪",
+    "ch": "🇨🇭",
+    "cn": "🇨🇳",
+    "cu": "🇨🇺",
+    "eg": "🇪🇬",
+    "hr": "🇭🇷",
+    "il": "🇮🇱",
+    "in": "🇮🇳",
+    "kz": "🇰🇿",
+    "tr": "🇹🇷",
+    "kg": "🇰🇬",
+}
+ICON = {
+    "документ": "🛂",
+    "виз": "🛂",
+    "внж": "🛂",
+    "деньг": "💰",
+    "банк": "💰",
+    "финанс": "💰",
+    "обмен": "💱",
+    "перевод": "💱",
+    "жиль": "🏠",
+    "аренд": "🏠",
+    "безопас": "🛡",
+    "транспорт": "🚕",
+    "логист": "🚕",
+    "здоров": "🩺",
+    "медиц": "🩺",
+    "прививк": "🩺",
+    "покупк": "🛒",
+    "связ": "📶",
+    "интернет": "📶",
+    "sim": "📶",
+    "еда": "🍽",
+    "пита": "🍽",
+    "посмотреть": "🗺",
+    "достоприм": "🗺",
+    "путешеств": "🗺",
+    "досуг": "🗺",
+    "культур": "🗣",
+    "язык": "🗣",
+    "работ": "💼",
+    "налог": "💼",
+    "образован": "🎓",
+    "почт": "📦",
+    "посылк": "📦",
+    "билет": "🎟",
+    "развлеч": "🎟",
+    # английские ключи (EN-метки)
+    "document": "🛂",
+    "visa": "🛂",
+    "money": "💰",
+    "bank": "💰",
+    "financ": "💰",
+    "exchange": "💱",
+    "transfer": "💱",
+    "hous": "🏠",
+    "rent": "🏠",
+    "safet": "🛡",
+    "transport": "🚕",
+    "logist": "🚕",
+    "health": "🩺",
+    "medic": "🩺",
+    "shop": "🛒",
+    "internet": "📶",
+    "food": "🍽",
+    "eat": "🍽",
+    "sightsee": "🗺",
+    "travel": "🗺",
+    "leisure": "🗺",
+    "cultur": "🗣",
+    "languag": "🗣",
+    "work": "💼",
+    "tax": "💼",
+    "educ": "🎓",
+    "post": "📦",
+    "parcel": "📦",
+    "ticket": "🎟",
+    "entertain": "🎟",
+}
+
+# Копия страниц по языкам. {name}=страна, {t}=тема, {n}=число. RU — дословно как было.
+COPY = {
+    "ru": {
+        "FHEAD": [
+            "{t} в {g}: живой опыт из чатов",
+            "{t}: как это в {g} — из первых рук",
+            "{t} в {g}: что реально важно знать",
+        ],
+        "QHEAD": [
+            "{t}: что спрашивают в чатах",
+            "{t}: частые вопросы из живых чатов",
+            "{t}: что спрашивают в чатах часто, но не всегда получают ответ",
+        ],
+        "fact_title": "{name}: {tl} — живой опыт · Luky",
+        "fact_desc": "Живой опыт из чатов про {tl} в {name}: как есть, из первых рук. Под твой случай — у Luky.",
+        "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» в {name} — как есть, без воды. Под свой случай — <strong>спроси Luky</strong>.",
+        "fact_list_label": "Из живого опыта",
+        "fact_blurb": "{n} советов из чатов",
+        "q_title": "{name}: {tl} — что спрашивают · Luky",
+        "q_desc": "Реальные вопросы про {tl} в {name} из живых чатов. Ответ под твой случай — у Luky.",
+        "q_intro": "Живые вопросы из чатов сообществ — с чем реально сталкиваются. Узнаёшь свой? Ответ под твой случай — <strong>спроси Luky</strong>.",
+        "q_list_label": "Вопросы из чатов",
+        "q_blurb": "{n} вопросов из чатов",
+        "qhub_title": "{name}: что спрашивают в чатах — реальные вопросы · Luky",
+        "qhub_desc": "Реальные вопросы про {name} из живых чатов: визы, деньги, жильё, безопасность. Ответ под твой случай — у Luky.",
+        "qhub_h1": "Что спрашивают в чатах",
+        "qhub_intro": "Сотни людей — одни и те же непонятки. Выбери тему, посмотри реальные вопросы. Ответы у людей находятся не сразу… а у <strong>Luky</strong> — сразу.",
+        "bridge_title": "Что спрашивают в чатах",
+        "bridge_blurb": "Реальные вопросы людей — под свой случай спроси Luky",
+        "hub_title": "{name}: документы, деньги, жильё — живой опыт из чатов · Luky",
+        "hub_desc": "Живой опыт по {name} из чатов сообществ: документы, деньги, жильё, безопасность, транспорт. Без воды, под твой случай.",
+        "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <strong>спроси Luky</strong>.",
+        "list_label_topics": "Темы",
+        "lower": True,  # темы в тайтле в нижнем регистре (русский стиль)
+    },
+    "en": {
+        "FHEAD": [
+            "{t} in {g}: real experience from chats",
+            "{t}: how it works in {g} — first-hand",
+            "{t} in {g}: what actually matters to know",
+        ],
+        "QHEAD": [
+            "{t}: what people ask in chats",
+            "{t}: common questions from live chats",
+            "{t}: what people often ask in chats but don't always get answered",
+        ],
+        "fact_title": "{name}: {tl} — real experience · Luky",
+        "fact_desc": "Real experience from chats about {tl} in {name}: as it is, first-hand. For your case — ask Luky.",
+        "fact_intro": "Real experience of people from chats on «{tl}» in {name} — as it is, no fluff. For your case — <strong>ask Luky</strong>.",
+        "fact_list_label": "From real experience",
+        "fact_blurb": "{n} tips from chats",
+        "q_title": "{name}: {tl} — what people ask · Luky",
+        "q_desc": "Real questions about {tl} in {name} from live chats. An answer for your case — ask Luky.",
+        "q_intro": "Live questions from community chats — what people actually run into. Recognise yours? An answer for your case — <strong>ask Luky</strong>.",
+        "q_list_label": "Questions from chats",
+        "q_blurb": "{n} questions from chats",
+        "qhub_title": "{name}: what people ask in chats — real questions · Luky",
+        "qhub_desc": "Real questions about {name} from live chats: visas, money, housing, safety. An answer for your case — ask Luky.",
+        "qhub_h1": "What people ask in chats",
+        "qhub_intro": "Hundreds of people — the same confusions. Pick a topic, see the real questions. People find answers slowly… but <strong>Luky</strong> — right away.",
+        "bridge_title": "What people ask in chats",
+        "bridge_blurb": "Real questions from people — for your case ask Luky",
+        "hub_title": "{name}: documents, money, housing — real experience from chats · Luky",
+        "hub_desc": "Real experience for {name} from community chats: documents, money, housing, safety, transport. No fluff, for your case.",
+        "hub_intro": "Real experience of those who actually went through it — to the point, no fluff. Pick a topic, and for your case <strong>ask Luky</strong>.",
+        "list_label_topics": "Topics",
+        "lower": False,  # английские заголовки — как есть (Title-case меток)
+    },
+    "es": {
+        "FHEAD": [
+            "{t} en {g}: experiencia real de los chats",
+            "{t}: cómo es en {g} — de primera mano",
+            "{t} en {g}: lo que de verdad importa saber",
+        ],
+        "QHEAD": [
+            "{t}: qué preguntan en los chats",
+            "{t}: preguntas frecuentes de chats reales",
+            "{t}: lo que preguntan seguido pero no siempre responden",
+        ],
+        "fact_title": "{name}: {tl} — experiencia real · Luky",
+        "fact_desc": "Experiencia real de los chats sobre {tl} en {name}: tal cual, de primera mano. Para tu caso — pregúntale a Luky.",
+        "fact_intro": "Experiencia real de gente de los chats sobre «{tl}» en {name} — tal cual, sin relleno. Para tu caso — <strong>pregúntale a Luky</strong>.",
+        "fact_list_label": "De la experiencia real",
+        "fact_blurb": "{n} consejos de los chats",
+        "q_title": "{name}: {tl} — qué preguntan · Luky",
+        "q_desc": "Preguntas reales sobre {tl} en {name} de chats en vivo. Una respuesta para tu caso — pregúntale a Luky.",
+        "q_intro": "Preguntas en vivo de chats de comunidades — con lo que la gente realmente se topa. ¿Reconoces la tuya? Una respuesta para tu caso — <strong>pregúntale a Luky</strong>.",
+        "q_list_label": "Preguntas de los chats",
+        "q_blurb": "{n} preguntas de los chats",
+        "qhub_title": "{name}: qué preguntan en los chats — preguntas reales · Luky",
+        "qhub_desc": "Preguntas reales sobre {name} de chats en vivo: visas, dinero, vivienda, seguridad. Una respuesta para tu caso — pregúntale a Luky.",
+        "qhub_h1": "Qué preguntan en los chats",
+        "qhub_intro": "Cientos de personas — las mismas dudas. Elige un tema, mira las preguntas reales. La gente encuentra respuestas despacio… pero <strong>Luky</strong> — al instante.",
+        "bridge_title": "Qué preguntan en los chats",
+        "bridge_blurb": "Preguntas reales de la gente — para tu caso pregúntale a Luky",
+        "hub_title": "{name}: documentos, dinero, vivienda — experiencia real de los chats · Luky",
+        "hub_desc": "Experiencia real de {name} de chats de comunidades: documentos, dinero, vivienda, seguridad, transporte. Sin relleno, para tu caso.",
+        "hub_intro": "Experiencia real de quienes ya pasaron por ello — al grano, sin relleno. Elige un tema, y para tu caso <strong>pregúntale a Luky</strong>.",
+        "list_label_topics": "Temas",
+        "lower": False,
+    },
+}
+
+# home + about по языкам (нав ссылается на /<lang>/ и /<lang>/about/)
+HOME_ABOUT = {
+    "ru": {
+        "home_title": "Luky — живой опыт по странам: деньги, документы, жильё",
+        "home_desc": "Инфопортал Luky: реальный опыт из чатов сообществ по странам — деньги, документы, жильё, безопасность. Без воды, под твой случай.",
+        "home_h1": "Куда едешь?",
+        "home_intro": "Реальный опыт тех, кто уже прошёл через местные непонятки — по делу, без воды. Выбери страну, а под свой случай <strong>спроси Luky</strong>.",
+        "home_list_label": "Страны",
+        "geo_blurb": "живой опыт",
+        "about_crumb": "О проекте",
+        "about_title": "О проекте · Luky",
+        "about_desc": "Luky собирает живой опыт из открытых чатов сообществ по странам — по делу, без воды.",
+        "about_h1": "О проекте",
+        "about_body": "<p><strong>Luky</strong> — это опыт живых людей, а не сухая теория. Мы собираем реальные советы из открытых чатов сообществ: как что устроено на месте, чего избегать, что работает сейчас.</p><p>Портал — витрина этого опыта по темам и странам. А под твой конкретный случай можно спросить <strong>Luky</strong> — он подскажет по недавним отзывам людей.</p>",
+    },
+    "en": {
+        "home_title": "Luky — real experience by country: money, documents, housing",
+        "home_desc": "Luky info portal: real experience from community chats by country — money, documents, housing, safety. No fluff, for your case.",
+        "home_h1": "Where are you headed?",
+        "home_intro": "Real experience of those who already went through the local confusions — to the point, no fluff. Pick a country, and for your case <strong>ask Luky</strong>.",
+        "home_list_label": "Countries",
+        "geo_blurb": "real experience",
+        "about_crumb": "About",
+        "about_title": "About · Luky",
+        "about_desc": "Luky gathers real experience from open community chats by country — to the point, no fluff.",
+        "about_h1": "About",
+        "about_body": "<p><strong>Luky</strong> is the experience of real people, not dry theory. We gather real tips from open community chats: how things actually work on the ground, what to avoid, what works right now.</p><p>The portal is a showcase of that experience by topic and country. And for your specific case you can <strong>ask Luky</strong> — it answers from people's recent reports.</p>",
+    },
+    "es": {
+        "home_title": "Luky — experiencia real por país: dinero, documentos, vivienda",
+        "home_desc": "Portal de info Luky: experiencia real de chats de comunidades por país — dinero, documentos, vivienda, seguridad. Sin relleno, para tu caso.",
+        "home_h1": "¿A dónde vas?",
+        "home_intro": "Experiencia real de quienes ya pasaron por los líos locales — al grano, sin relleno. Elige un país, y para tu caso <strong>pregúntale a Luky</strong>.",
+        "home_list_label": "Países",
+        "geo_blurb": "experiencia real",
+        "about_crumb": "Acerca de",
+        "about_title": "Acerca de · Luky",
+        "about_desc": "Luky reúne experiencia real de chats abiertos de comunidades por país — al grano, sin relleno.",
+        "about_h1": "Acerca de",
+        "about_body": "<p><strong>Luky</strong> es la experiencia de gente real, no teoría seca. Reunimos consejos reales de chats abiertos de comunidades: cómo funcionan las cosas sobre el terreno, qué evitar, qué funciona ahora mismo.</p><p>El portal es un escaparate de esa experiencia por tema y país. Y para tu caso concreto puedes <strong>preguntarle a Luky</strong> — responde según reportes recientes de la gente.</p>",
+    },
+}
+
+
+def icon(t):
+    tl = t.lower()
+    for k, v in ICON.items():
+        if k in tl:
+            return v
+    return "•"
+
+
+def slug(t):
+    return re.sub(r"[^a-z0-9а-яё]+", "-", t.lower()).strip("-")[:40] or "tema"
+
+
+def pick(pool, seed):
+    return pool[int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(pool)]
+
+
+def load(p):
+    try:
+        return json.load(open(p, encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def write(name, obj):
+    json.dump(
+        obj, open(f"{DATA}/{name}", "w", encoding="utf-8"), ensure_ascii=False, indent=1
+    )
+
+
+def chips_for(cur_slug, siblings):
+    return [
+        {"icon": icon(s["tema"]), "label": s["tema"], "url": s["url"], "soon": False}
+        for s in siblings
+        if s["slug"] != cur_slug
+    ][:6]
+
+
+def _facet_dir(lang):
+    return f"{BUILT}/out_facet" if lang == "ru" else f"{BUILT}/out_facet_{lang}"
+
+
+def _ques_dir(lang):
+    return f"{BUILT}/out_questions" if lang == "ru" else f"{BUILT}/out_questions_{lang}"
+
+
+def build_geo(geo, lang="ru"):
+    C = COPY[lang]
+    name = GEO_NAMES.get(lang, {}).get(geo, geo)
+    facts = load(f"{_facet_dir(lang)}/{geo}.json")
+    ques = load(f"{_ques_dir(lang)}/{geo}.json")
+    n = 0
+
+    def tl(t):
+        return t.lower() if C["lower"] else t
+
+    # --- ФАКТ-ТЕМЫ (советы-список, ≥4 факта = страница) ---
+    fact_tiles, fact_sibs = [], []
+    fviews = sorted(
+        (facts or {}).get("views_by_task", []), key=lambda v: -len(v["items"])
+    )
+    fviews = [v for v in fviews if len(v["items"]) >= 4]
+    if (
+        lang != "ru"
+    ):  # страховка: непереведённая (кириллическая) метка → не плодим кириллический URL
+        fviews = [v for v in fviews if not re.search("[а-яёА-ЯЁ]", v["zadacha"])]
+    for v in fviews:
+        s = slug(v["zadacha"])
+        fact_sibs.append(
+            {"tema": v["zadacha"], "slug": s, "url": f"/{lang}/{geo}/{s}/"}
+        )
+    for v in fviews:
+        tema = v["zadacha"]
+        s = slug(tema)
+        items = [it["text"] for it in v["items"]]
+        page = {
+            "lang": lang,
+            "template": "qlist.html.j2",
+            "path": f"/{lang}/{geo}/{s}/",
+            "geo": geo,
+            "geo_name": name,
+            "intent_name": tema,
+            "updated": "07.2026",
+            "title": C["fact_title"].format(name=name, tl=tl(tema)),
+            "meta_desc": C["fact_desc"].format(name=name, tl=tl(tema)),
+            "h1": pick(C["FHEAD"], geo + s).format(t=tema, g=name),
+            "intro": C["fact_intro"].format(name=name, tl=tl(tema)),
+            "list_label": C["fact_list_label"],
+            "questions": items,
+            "chips": chips_for(s, fact_sibs),
+        }
+        write(f"{lang}_{geo}_{s}.json", page)
+        n += 1
+        fact_tiles.append(
+            {
+                "icon": icon(tema),
+                "title": tema,
+                "blurb": C["fact_blurb"].format(n=len(items)),
+                "url": f"/{lang}/{geo}/{s}/",
+            }
+        )
+
+    # --- ВОПРОС-КОНТУР (хаб + темы под /<lang>/<geo>/q/) ---
+    q_ok = False
+    qgroups = [g for g in (ques or {}).get("groups", []) if len(g["questions"]) >= 4]
+    if qgroups:
+        q_ok = True
+        q_sibs = [
+            {
+                "tema": g["tema"],
+                "slug": slug(g["tema"]),
+                "url": f"/{lang}/{geo}/q/{slug(g['tema'])}/",
+            }
+            for g in qgroups
+        ]
+        for g in qgroups:
+            s = slug(g["tema"])
+            page = {
+                "lang": lang,
+                "template": "qlist.html.j2",
+                "path": f"/{lang}/{geo}/q/{s}/",
+                "geo": geo,
+                "geo_name": name,
+                "intent_name": g["tema"],
+                "updated": "07.2026",
+                "title": C["q_title"].format(name=name, tl=tl(g["tema"])),
+                "meta_desc": C["q_desc"].format(name=name, tl=tl(g["tema"])),
+                "h1": pick(C["QHEAD"], geo + s + "q").format(t=g["tema"]),
+                "intro": C["q_intro"],
+                "list_label": C["q_list_label"],
+                "questions": g["questions"],
+                "chips": [
+                    {
+                        "icon": icon(x["tema"]),
+                        "label": x["tema"],
+                        "url": x["url"],
+                        "soon": False,
+                    }
+                    for x in q_sibs
+                    if x["slug"] != s
+                ][:6],
+            }
+            write(f"{lang}_{geo}_q_{s}.json", page)
+            n += 1
+        qtiles = [
+            {
+                "icon": icon(g["tema"]),
+                "title": g["tema"],
+                "blurb": C["q_blurb"].format(n=len(g["questions"])),
+                "url": f"/{lang}/{geo}/q/{slug(g['tema'])}/",
+            }
+            for g in qgroups
+        ]
+        write(
+            f"{lang}_{geo}_q_hub.json",
+            {
+                "lang": lang,
+                "template": "index.html.j2",
+                "path": f"/{lang}/{geo}/q/",
+                "geo": geo,
+                "geo_name": name,
+                "updated": "07.2026",
+                "title": C["qhub_title"].format(name=name),
+                "meta_desc": C["qhub_desc"].format(name=name),
+                "h1": C["qhub_h1"],
+                "intro": C["qhub_intro"],
+                "list_label": C["list_label_topics"],
+                "tiles": qtiles,
+            },
+        )
+        n += 1
+
+    # --- ГЕО-ХАБ (тайлы фактов + мостик вопросов) ---
+    tiles = list(fact_tiles)
+    if q_ok:
+        tiles.insert(
+            0,
+            {
+                "icon": "❓",
+                "title": C["bridge_title"],
+                "blurb": C["bridge_blurb"],
+                "url": f"/{lang}/{geo}/q/",
+            },
+        )
+    write(
+        f"{lang}_{geo}_hub.json",
+        {
+            "lang": lang,
+            "template": "index.html.j2",
+            "path": f"/{lang}/{geo}/",
+            "geo": geo,
+            "geo_name": name,
+            "updated": "07.2026",
+            "title": C["hub_title"].format(name=name),
+            "meta_desc": C["hub_desc"].format(name=name),
+            "h1": name,
+            "intro": C["hub_intro"],
+            "list_label": C["list_label_topics"],
+            "tiles": tiles,
+        },
+    )
+    n += 1
+    return n, len(fact_tiles), len(qgroups) if q_ok else 0
+
+
+def langs_for(geo):
+    """Языки, у которых есть built-данные фактов для гео."""
+    out = []
+    for lang in COPY:
+        if os.path.exists(f"{_facet_dir(lang)}/{geo}.json"):
+            out.append(lang)
+    return out
+
+
+def build_home(lang, geos):
+    """Главная /<lang>/ — плитки стран, у которых собрались страницы."""
+    HA = HOME_ABOUT[lang]
+    tiles = [
+        {
+            "icon": GEO_FLAG.get(g, "•"),
+            "title": GEO_NAMES.get(lang, {}).get(g, g),
+            "blurb": HA["geo_blurb"],
+            "url": f"/{lang}/{g}/",
+        }
+        for g in geos
+    ]
+    write(
+        f"{lang}_home.json",
+        {
+            "lang": lang,
+            "template": "index.html.j2",
+            "path": f"/{lang}/",
+            "updated": "07.2026",
+            "crumb_label": None,
+            "title": HA["home_title"],
+            "meta_desc": HA["home_desc"],
+            "h1": HA["home_h1"],
+            "intro": HA["home_intro"],
+            "list_label": HA["home_list_label"],
+            "tiles": tiles,
+        },
+    )
+
+
+def build_about(lang):
+    HA = HOME_ABOUT[lang]
+    write(
+        f"{lang}_about.json",
+        {
+            "lang": lang,
+            "template": "index.html.j2",
+            "path": f"/{lang}/about/",
+            "updated": "07.2026",
+            "crumb_label": HA["about_crumb"],
+            "title": HA["about_title"],
+            "meta_desc": HA["about_desc"],
+            "h1": HA["about_h1"],
+            "body": HA["about_body"],
+        },
+    )
+
+
+if __name__ == "__main__":
+    geos = sys.argv[1:]
+    if not geos or geos == ["--all"]:
+        geos = sorted(
+            {os.path.basename(f)[:-5] for f in glob.glob(f"{BUILT}/out_facet/*.json")}
+            | {
+                os.path.basename(f)[:-5]
+                for f in glob.glob(f"{BUILT}/out_facet_*/*.json")
+            }
+        )
+    total = 0
+    built = {}  # lang -> [geos]
+    for g in geos:
+        for lang in langs_for(g):
+            n, nf, nq = build_geo(g, lang)
+            total += n
+            built.setdefault(lang, []).append(g)
+            print(f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq})")
+    # home+about для не-ru языков (ru_home/ru_about — живые, генерит wire.py, не трогаем)
+    for lang, gl in built.items():
+        if lang == "ru":
+            continue
+        build_home(lang, sorted(gl))
+        build_about(lang)
+        print(f"{lang}: home + about ({len(gl)} стран)")
+    print(f"ИТОГО data-страниц: {total} (дальше render.py --all)")

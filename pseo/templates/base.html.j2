@@ -104,6 +104,10 @@ details .src{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.06em;
 .chip:hover{color:var(--hud);text-decoration:none} .chip:hover .oct path{stroke:var(--hud)}
 .chip.soon{color:var(--muted);cursor:default;pointer-events:none}
 .chip.soon::after{content:'· скоро';opacity:.7;margin-left:6px}
+.qlist{list-style:none;padding:0;margin:10px 0}
+.qlist li{padding:14px 2px 14px 28px;border-bottom:1px solid var(--border);font-size:1.04rem;
+  font-weight:600;position:relative}
+.qlist li::before{content:'«';position:absolute;left:2px;top:11px;color:var(--hud);font-size:1.3rem}
 
 /* ── Хаб-сетка (index): карточки-октагоны ── */
 .grid{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}
