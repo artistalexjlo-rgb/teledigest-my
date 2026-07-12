@@ -27,9 +27,9 @@ import render as R  # noqa: E402  (render_page/build, единый шаблон-
 # ── config (config-as-code; на VPS вынести в config/builder.py) ──────────────
 CFG = {
     "qdrant_collection": "wisdom_base",
-    "gate_min_facts": 6,          # планка на ГЛУБИНУ (не 4-минимум) — «больше контента»
-    "gate_min_cluster": 8,        # тема живёт только при достаточном фактаже
-    "languages": ["ru"],          # на VPS: широкий список (генерим broad + гейты + прунинг)
+    "gate_min_facts": 6,  # планка на ГЛУБИНУ (не 4-минимум) — «больше контента»
+    "gate_min_cluster": 8,  # тема живёт только при достаточном фактаже
+    "languages": ["ru"],  # на VPS: широкий список (генерим broad + гейты + прунинг)
     "staging_dir": BASE / "out" / "staging",
     "built_hashes": BASE / "out" / ".built_hashes.json",
 }
@@ -60,7 +60,9 @@ def load_qa(geo: str, fixture: pathlib.Path | None):
     # TODO(VPS): Qdrant scroll по CFG["qdrant_collection"], payload country==geo,
     # with_vectors=True. Поле опыта: `ai_lesson`, читать через `embedded_text` как
     # primary (см. memory gotcha_wisdom_payload_fields).
-    raise NotImplementedError("load_qa: подключить Qdrant scroll на VPS (или дать --fixture)")
+    raise NotImplementedError(
+        "load_qa: подключить Qdrant scroll на VPS (или дать --fixture)"
+    )
 
 
 # ── 2. taxonomy: кластеры по эмбеддингам + Claude-нейминг (ШИРОКО, не чеклист) ─
@@ -99,15 +101,19 @@ def extract_facts(topic_entries: list, *, dry: bool) -> list:
             if h in seen:
                 continue
             seen.add(h)
-            facts.append({
-                "q": e.get("q", "Вопрос"),
-                "a": text, "a_plain": text,
-                "n": e.get("source_count", 1), "n_word": "ответа",
-                "fact_hash": h,
-                "value_tag": e.get("value_tag", "hot_intent"),
-                "content_date": e.get("content_date", ""),
-                "source_count": e.get("source_count", 1),
-            })
+            facts.append(
+                {
+                    "q": e.get("q", "Вопрос"),
+                    "a": text,
+                    "a_plain": text,
+                    "n": e.get("source_count", 1),
+                    "n_word": "ответа",
+                    "fact_hash": h,
+                    "value_tag": e.get("value_tag", "hot_intent"),
+                    "content_date": e.get("content_date", ""),
+                    "source_count": e.get("source_count", 1),
+                }
+            )
         return facts
     return claude_agent(_extract_prompt(topic_entries), schema=None, dry=False)
 
@@ -126,10 +132,15 @@ def gate(facts: list) -> tuple[bool, str]:
 
 # ── 5/6. сборка page-data под render.py + стейджинг ──────────────────────────
 def build_page_data(geo, geo_name, intent_key, intent_name, facts, lang, updated):
-    chips = []  # перелинковка на соседние темы — заполнится из taxonomy на полном прогоне
+    chips = (
+        []
+    )  # перелинковка на соседние темы — заполнится из taxonomy на полном прогоне
     return {
-        "lang": lang, "geo": geo, "intent": intent_key,
-        "geo_name": geo_name, "intent_name": intent_name,
+        "lang": lang,
+        "geo": geo,
+        "intent": intent_key,
+        "geo_name": geo_name,
+        "intent_name": intent_name,
         "path": f"/{lang}/{geo}/{intent_key}/",
         "updated": updated,  # реальная дата прогона (freshness)
         "title": f"{intent_name} в {geo_name} — живой опыт · Luky",
@@ -157,11 +168,15 @@ def _load_hashes() -> dict:
 
 def _save_hashes(h: dict) -> None:
     CFG["built_hashes"].parent.mkdir(parents=True, exist_ok=True)
-    CFG["built_hashes"].write_text(json.dumps(h, ensure_ascii=False, indent=0), encoding="utf-8")
+    CFG["built_hashes"].write_text(
+        json.dumps(h, ensure_ascii=False, indent=0), encoding="utf-8"
+    )
 
 
 def topic_hash(facts: list) -> str:
-    return hashlib.md5("".join(sorted(f["fact_hash"] for f in facts)).encode()).hexdigest()
+    return hashlib.md5(
+        "".join(sorted(f["fact_hash"] for f in facts)).encode()
+    ).hexdigest()
 
 
 # ── оркестрация ──────────────────────────────────────────────────────────────
@@ -171,7 +186,13 @@ def run(geo: str, *, dry: bool, fixture: pathlib.Path | None, updated: str):
     geo_name = entries[0].get("geo_name", geo.upper()) if entries else geo.upper()
     tax = taxonomy(entries, geo, dry=dry)
     hashes = _load_hashes()
-    stats = {"collected": len(entries), "built": 0, "gated": 0, "skipped_fresh": 0, "review": []}
+    stats = {
+        "collected": len(entries),
+        "built": 0,
+        "gated": 0,
+        "skipped_fresh": 0,
+        "review": [],
+    }
 
     for ikey, t in tax.items():
         if len(t["entries"]) < CFG["gate_min_cluster"]:
@@ -196,8 +217,10 @@ def run(geo: str, *, dry: bool, fixture: pathlib.Path | None, updated: str):
         hashes[f"{geo}/{ikey}"] = h
 
     _save_hashes(hashes)
-    notify(f"done geo={geo}: собрано {stats['collected']} / тем-в-ревью {stats['built']} / "
-           f"гейт отсёк {stats['gated']} / свежих-скип {stats['skipped_fresh']}")
+    notify(
+        f"done geo={geo}: собрано {stats['collected']} / тем-в-ревью {stats['built']} / "
+        f"гейт отсёк {stats['gated']} / свежих-скип {stats['skipped_fresh']}"
+    )
     # TODO(VPS): первый прогон — НЕ автопаблиш; ревью в превью → деплой (git push в multyspeak-pages).
     return stats
 

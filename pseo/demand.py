@@ -6,6 +6,7 @@ demand.py — снимает матрицу спроса с VPS в demand.json =
 ВАЖНО: в SQL строковый литерал — ОДИНАРНЫЕ кавычки ('id'), т.к. "id" = имя колонки
 (в extracted_patterns есть колонка id) → "country=\"id\"" молча даёт 0 строк.
 """
+
 import json
 import pathlib
 import subprocess
@@ -16,22 +17,34 @@ VPS = "root@199.195.252.114"
 # Грязный tag (669 значений) → канонические темы. Travel НЕ тема (помойка, Этап 4).
 TAG2TOPIC = {
     "Finance": "finance",
-    "Bureaucracy": "bureaucracy", "Visa": "bureaucracy", "Immigration": "bureaucracy",
+    "Bureaucracy": "bureaucracy",
+    "Visa": "bureaucracy",
+    "Immigration": "bureaucracy",
     "Safety": "safety",
-    "Shopping": "shopping", "Commerce": "shopping",
+    "Shopping": "shopping",
+    "Commerce": "shopping",
     "Health": "health",
-    "Transport": "transport", "Logistics": "transport",
-    "Housing": "housing", "Real Estate": "housing",
+    "Transport": "transport",
+    "Logistics": "transport",
+    "Housing": "housing",
+    "Real Estate": "housing",
 }
 
 
 def pull():
-    sql = ("SELECT country || '|' || tag || '|' || COUNT(*) "
-           "FROM extracted_patterns "
-           "WHERE ai_lesson IS NOT NULL AND length(ai_lesson) > 140 "
-           "GROUP BY country, tag;")
-    cmd = ["ssh", "-o", "ConnectTimeout=25", VPS,
-           f'sqlite3 /home/teledigest/data/messages_fts.db "{sql}"']
+    sql = (
+        "SELECT country || '|' || tag || '|' || COUNT(*) "
+        "FROM extracted_patterns "
+        "WHERE ai_lesson IS NOT NULL AND length(ai_lesson) > 140 "
+        "GROUP BY country, tag;"
+    )
+    cmd = [
+        "ssh",
+        "-o",
+        "ConnectTimeout=25",
+        VPS,
+        f'sqlite3 /home/teledigest/data/messages_fts.db "{sql}"',
+    ]
     out = subprocess.check_output(cmd, text=True, encoding="utf-8")
     demand = {}
     for ln in out.splitlines():
@@ -45,7 +58,9 @@ def pull():
         d = demand.setdefault(geo, {})
         d[topic] = d.get(topic, 0) + cnt
     (BASE / "demand.json").write_text(
-        json.dumps(demand, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+        json.dumps(demand, ensure_ascii=False, indent=1, sort_keys=True),
+        encoding="utf-8",
+    )
     return demand
 
 

@@ -22,14 +22,13 @@ import hashlib
 import json
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
-
-import socket
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -63,11 +62,26 @@ CLAUDE_ENV = "/root/.claude_env"
 GATE_PACE = 6.0  # пауза после вызова гейта — беречь подписку юзера
 
 GEO_NAME = {
-    "br": "Бразилия", "vn": "Вьетнам", "me": "Черногория", "id": "Индонезия",
-    "gr": "Греция", "kr": "Южная Корея", "ph": "Филиппины", "de": "Германия",
-    "gb": "Великобритания", "bg": "Болгария", "jp": "Япония", "by": "Беларусь",
-    "fr": "Франция", "au": "Австралия", "ar": "Аргентина", "hu": "Венгрия",
-    "at": "Австрия", "ru": "Россия", "cl": "Чили", "fi": "Финляндия",
+    "br": "Бразилия",
+    "vn": "Вьетнам",
+    "me": "Черногория",
+    "id": "Индонезия",
+    "gr": "Греция",
+    "kr": "Южная Корея",
+    "ph": "Филиппины",
+    "de": "Германия",
+    "gb": "Великобритания",
+    "bg": "Болгария",
+    "jp": "Япония",
+    "by": "Беларусь",
+    "fr": "Франция",
+    "au": "Австралия",
+    "ar": "Аргентина",
+    "hu": "Венгрия",
+    "at": "Австрия",
+    "ru": "Россия",
+    "cl": "Чили",
+    "fi": "Финляндия",
 }
 
 

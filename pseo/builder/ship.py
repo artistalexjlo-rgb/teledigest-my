@@ -149,14 +149,17 @@ def step_push(dry, only=None):
         srcp = f"{OUT}/ru/{extra}"
         if os.path.exists(srcp):
             shutil.copy2(srcp, f"{PAGES_REPO}/ru/{extra}")
-    # МУЛЬТИЯЗЫК: en/es целыми деревьями (стамп-гейт только для RU; en/es чисты по readycheck)
-    for lang in ("en", "es"):
-        src = f"{OUT}/{lang}"
-        if os.path.isdir(src):
-            dst = f"{PAGES_REPO}/{lang}"
-            if os.path.isdir(dst):
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+    # МУЛЬТИЯЗЫК: все не-ru языковые деревья целиком (стамп-гейт только для RU; чисты по readycheck)
+    langs = [
+        d
+        for d in os.listdir(OUT)
+        if d != "ru" and re.fullmatch(r"[a-z]{2}", d) and os.path.isdir(f"{OUT}/{d}")
+    ]
+    for lang in langs:
+        dst = f"{PAGES_REPO}/{lang}"
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(f"{OUT}/{lang}", dst)
     for f in ("sitemap.xml", "robots.txt"):
         if os.path.exists(f"{OUT}/{f}"):
             shutil.copy2(f"{OUT}/{f}", f"{PAGES_REPO}/{f}")

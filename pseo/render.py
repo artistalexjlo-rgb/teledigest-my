@@ -100,15 +100,17 @@ def build_all(lastmod: str = "") -> dict:
             n_noindex += 1
 
     lm = f"\n    <lastmod>{lastmod}</lastmod>" if lastmod else ""
-    body = "\n".join(
-        f"  <url>\n    <loc>{u}</loc>{lm}\n  </url>" for u, _ in urls
+    body = "\n".join(f"  <url>\n    <loc>{u}</loc>{lm}\n  </url>" for u, _ in urls)
+    sm = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{body}\n</urlset>\n"
     )
-    sm = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-          '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-          f"{body}\n</urlset>\n")
     (BASE / "out" / "sitemap.xml").write_text(sm, encoding="utf-8")
-    robots = ("User-agent: *\nAllow: /\nDisallow: /landing/\n\n"
-              f"Sitemap: {SITE['domain']}/sitemap.xml\n")
+    robots = (
+        "User-agent: *\nAllow: /\nDisallow: /landing/\n\n"
+        f"Sitemap: {SITE['domain']}/sitemap.xml\n"
+    )
     (BASE / "out" / "robots.txt").write_text(robots, encoding="utf-8")
     return {"rendered": n_rendered, "indexed": len(urls), "skipped_noindex": n_noindex}
 
@@ -117,9 +119,11 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--all":
         lm = sys.argv[2] if len(sys.argv) > 2 else ""
         stat = build_all(lastmod=lm)
-        print(f"build_all: rendered={stat['rendered']} "
-              f"indexed={stat['indexed']} noindex={stat['skipped_noindex']} "
-              f"(draft={SITE.get('draft')})")
+        print(
+            f"build_all: rendered={stat['rendered']} "
+            f"indexed={stat['indexed']} noindex={stat['skipped_noindex']} "
+            f"(draft={SITE.get('draft')})"
+        )
     else:
         src = sys.argv[1] if len(sys.argv) > 1 else "data/ru_br_finance.json"
         path = build(src)

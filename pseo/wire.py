@@ -23,15 +23,51 @@ def load_demand():
     f = BASE / "demand.json"
     return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
 
-GEO_NAME = {"br": "Бразилия", "vn": "Вьетнам", "me": "Черногория", "id": "Индонезия",
-            "gr": "Греция", "kr": "Южная Корея", "ph": "Филиппины", "de": "Германия",
-            "gb": "Великобритания", "bg": "Болгария", "jp": "Япония", "by": "Беларусь",
-            "fr": "Франция", "au": "Австралия", "ar": "Аргентина", "hu": "Венгрия",
-            "at": "Австрия", "ru": "Россия", "cl": "Чили", "fi": "Финляндия"}
-GEO_FLAG = {"br": "🇧🇷", "vn": "🇻🇳", "me": "🇲🇪", "id": "🇮🇩", "gr": "🇬🇷", "kr": "🇰🇷",
-            "ph": "🇵🇭", "de": "🇩🇪", "gb": "🇬🇧", "bg": "🇧🇬", "jp": "🇯🇵", "by": "🇧🇾",
-            "fr": "🇫🇷", "au": "🇦🇺", "ar": "🇦🇷", "hu": "🇭🇺", "at": "🇦🇹", "ru": "🇷🇺",
-            "cl": "🇨🇱", "fi": "🇫🇮"}
+
+GEO_NAME = {
+    "br": "Бразилия",
+    "vn": "Вьетнам",
+    "me": "Черногория",
+    "id": "Индонезия",
+    "gr": "Греция",
+    "kr": "Южная Корея",
+    "ph": "Филиппины",
+    "de": "Германия",
+    "gb": "Великобритания",
+    "bg": "Болгария",
+    "jp": "Япония",
+    "by": "Беларусь",
+    "fr": "Франция",
+    "au": "Австралия",
+    "ar": "Аргентина",
+    "hu": "Венгрия",
+    "at": "Австрия",
+    "ru": "Россия",
+    "cl": "Чили",
+    "fi": "Финляндия",
+}
+GEO_FLAG = {
+    "br": "🇧🇷",
+    "vn": "🇻🇳",
+    "me": "🇲🇪",
+    "id": "🇮🇩",
+    "gr": "🇬🇷",
+    "kr": "🇰🇷",
+    "ph": "🇵🇭",
+    "de": "🇩🇪",
+    "gb": "🇬🇧",
+    "bg": "🇧🇬",
+    "jp": "🇯🇵",
+    "by": "🇧🇾",
+    "fr": "🇫🇷",
+    "au": "🇦🇺",
+    "ar": "🇦🇷",
+    "hu": "🇭🇺",
+    "at": "🇦🇹",
+    "ru": "🇷🇺",
+    "cl": "🇨🇱",
+    "fi": "🇫🇮",
+}
 
 # Каталог тем (slug, icon, title, blurb) — единый порядок хаба/чипов.
 TOPICS = [
@@ -64,48 +100,69 @@ def write_hub(geo, topics_have, demand):
     dgeo = demand.get(geo, {})
     for slug, ic, title, blurb in TOPICS:
         if slug in topics_have:
-            soon = False                       # страница есть → живая ссылка
+            soon = False  # страница есть → живая ссылка
         elif dgeo.get(slug, 0) >= THRESHOLD:
-            soon = True                        # данные есть, страницы нет → честное «СКОРО»
+            soon = True  # данные есть, страницы нет → честное «СКОРО»
         else:
-            continue                           # данных нет → не обещаем (анти-протухание)
-        tiles.append({
-            "icon": ic, "title": title, "blurb": blurb,
-            "url": f"/ru/{geo}/{slug}/", "soon": soon,
-        })
+            continue  # данных нет → не обещаем (анти-протухание)
+        tiles.append(
+            {
+                "icon": ic,
+                "title": title,
+                "blurb": blurb,
+                "url": f"/ru/{geo}/{slug}/",
+                "soon": soon,
+            }
+        )
     hub = {
-        "lang": "ru", "geo": geo, "geo_name": GEO_NAME.get(geo, geo),
-        "template": "index.html.j2", "path": f"/ru/{geo}/", "updated": "06.2026",
+        "lang": "ru",
+        "geo": geo,
+        "geo_name": GEO_NAME.get(geo, geo),
+        "template": "index.html.j2",
+        "path": f"/ru/{geo}/",
+        "updated": "06.2026",
         "title": f"{GEO_NAME.get(geo, geo)}: деньги, документы, жильё — живой опыт · Luky",
         "meta_desc": f"Гайды по {GEO_NAME.get(geo, geo)} из живого опыта чатов сообществ: "
-                     "деньги, документы, жильё, безопасность, транспорт. Без воды.",
+        "деньги, документы, жильё, безопасность, транспорт. Без воды.",
         "h1": GEO_NAME.get(geo, geo),
         "intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. "
-                 "Выбери тему, а под свой конкретный случай <strong>спроси Luky</strong>.",
-        "list_label": "Темы", "tiles": tiles,
+        "Выбери тему, а под свой конкретный случай <strong>спроси Luky</strong>.",
+        "list_label": "Темы",
+        "tiles": tiles,
     }
     (DATA / f"ru_{geo}_hub.json").write_text(
-        json.dumps(hub, ensure_ascii=False, indent=1), encoding="utf-8")
+        json.dumps(hub, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
 
 
 def write_home(geos, have):
-    tiles = [{
-        "icon": GEO_FLAG.get(g, "•"), "title": GEO_NAME.get(g, g),
-        "blurb": f"{len(have[g])} тем · живой опыт", "url": f"/ru/{g}/",
-    } for g in geos]
+    tiles = [
+        {
+            "icon": GEO_FLAG.get(g, "•"),
+            "title": GEO_NAME.get(g, g),
+            "blurb": f"{len(have[g])} тем · живой опыт",
+            "url": f"/ru/{g}/",
+        }
+        for g in geos
+    ]
     home = {
-        "lang": "ru", "template": "index.html.j2", "path": "/ru/", "updated": "06.2026",
+        "lang": "ru",
+        "template": "index.html.j2",
+        "path": "/ru/",
+        "updated": "06.2026",
         "crumb_label": None,
         "title": "Luky — живой опыт по странам: деньги, документы, жильё",
         "meta_desc": "Инфопортал Luky: реальный опыт из чатов сообществ по странам — "
-                     "деньги, документы, жильё, безопасность. Без воды, под твой случай.",
+        "деньги, документы, жильё, безопасность. Без воды, под твой случай.",
         "h1": "Куда едешь?",
         "intro": "Реальный опыт тех, кто уже прошёл через местные непонятки — по делу, без воды. "
-                 "Выбери страну, а под свой случай <strong>спроси Luky</strong>.",
-        "list_label": "Страны", "tiles": tiles,
+        "Выбери страну, а под свой случай <strong>спроси Luky</strong>.",
+        "list_label": "Страны",
+        "tiles": tiles,
     }
     (DATA / "ru_home.json").write_text(
-        json.dumps(home, ensure_ascii=False, indent=1), encoding="utf-8")
+        json.dumps(home, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
 
 
 def normalize_chips(have, demand):
@@ -145,5 +202,9 @@ if __name__ == "__main__":
     print(f"wired: {len(geos)} гео-хабов + главная (порог данных СКОРО = {THRESHOLD}).")
     for g in geos:
         dgeo = demand.get(g, {})
-        soon = [s for s, _, _, _ in TOPICS if s not in have[g] and dgeo.get(s, 0) >= THRESHOLD]
+        soon = [
+            s
+            for s, _, _, _ in TOPICS
+            if s not in have[g] and dgeo.get(s, 0) >= THRESHOLD
+        ]
         print(f"  {g}: live={sorted(have[g])} soon(data-backed)={soon}")
