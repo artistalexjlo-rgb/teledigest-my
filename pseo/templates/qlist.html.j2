@@ -1,0 +1,46 @@
+{% extends "base.html.j2" %}
+
+{% block crumbs %}
+  <nav class="crumbs">
+    <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
+    <a href="/{{ t.html_lang }}/{{ page.geo }}/">{{ page.geo_name }}</a> /
+    <b>{{ page.intent_name }}</b>
+  </nav>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ page.h1 }}</h1>
+
+  {%- if page.intro %}
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.intro | safe }}</div></div>
+  {%- endif %}
+
+  <h2>{{ page.list_label | default('Вопросы из чатов') }}</h2>
+  <ul class="qlist">
+    {%- for q in page.questions %}
+    <li>{{ q }}</li>
+    {%- endfor %}
+  </ul>
+
+  {%- if page.chips %}
+  <h2>{{ t.label_related }}</h2>
+  <div class="chips">
+    {%- for c in page.chips %}
+    <a class="chip" href="{{ c.url }}">{{ oct(OCT_CHIP, 6, 2) }}<span>{{ c.icon }} {{ c.label }}</span></a>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+
+  <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+  {%- if cta %}
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+  {%- else %}
+    <h2>{{ t.cta_hook }}</h2>
+    <p>{{ page.cta_text }}</p>
+  {%- endif %}
+    <a class="btn" href="{{ site.cta_luky_url }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
+{% endblock %}

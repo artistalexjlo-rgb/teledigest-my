@@ -1,0 +1,128 @@
+[
+ {
+  "geo": "br",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "br",
+  "tag": "Shopping",
+  "slug": "shopping",
+  "intent_name": "Покупки и цены"
+ },
+ {
+  "geo": "vn",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "vn",
+  "tag": "Shopping",
+  "slug": "shopping",
+  "intent_name": "Покупки и цены"
+ },
+ {
+  "geo": "gb",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "kr",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "gr",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "id",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "bg",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "jp",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "de",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "by",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "me",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "fr",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "au",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "ar",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "hu",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "at",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "ru",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "cl",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ },
+ {
+  "geo": "fi",
+  "tag": "Bureaucracy",
+  "slug": "bureaucracy",
+  "intent_name": "Документы и бюрократия"
+ }
+]

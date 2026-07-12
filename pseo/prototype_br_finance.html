@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Деньги и банки в Бразилии: счёт, наличные, PIX — Luky</title>
+<meta name="description" content="Как открыть счёт, снять наличные, обменять валюту и платить через PIX в Бразилии. Реальные ответы из чатов, без воды.">
+<!-- hreflang stub (фаза SEO-обвязки): ru/en/pt + x-default -->
+<link rel="canonical" href="https://info.multyspeak.online/ru/br/finance/">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ═══ Luky tokens (скопированы из DS, чтобы файл был standalone) ═══ */
+:root{
+  --bg:#06080d; --card:#0f1620; --border:#21303f; --text:#e8f1f8; --muted:#6b8299;
+  --glass:linear-gradient(162deg,rgba(17,26,38,0.96),rgba(7,11,18,0.98));
+  --hud:#3ad8ff; --hud-dim:rgba(58,216,255,0.42);
+  --accent:#a78bfa; --green:#4ade80; --yellow:#fbbf24; --amber-edge:#f59e0b; --red:#f87171;
+  --font-display:'Orbitron','JetBrains Mono',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --oct-card:url(#round-oct);   /* скруглённый октагон ДС (плиты/карточки) */
+  --oct-btn:url(#round-oct-btn); /* скруглённый октагон ДС (кнопки/чипы) */
+  --maxw:720px;
+}
+/* ═══ Light theme override (тумблер) ═══ */
+[data-theme="light"]{
+  --bg:#eef2f6; --card:#ffffff; --border:#cfdae5; --text:#16212e; --muted:#5a6b7d;
+  --glass:linear-gradient(162deg,#ffffff,#f3f7fb);
+  --hud:#0a87b8; --hud-dim:rgba(10,135,184,0.30);
+  --accent:#6d4bd8; --green:#1f9d57; --yellow:#b9760a; --amber-edge:#b9760a;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--font-body);font-weight:500;line-height:1.62;
+  font-size:17px;color:var(--text);background-color:var(--bg);
+  background-image:
+    radial-gradient(120% 70% at 50% -8%,rgba(58,216,255,0.10),transparent 60%),
+    radial-gradient(90% 60% at 100% 108%,rgba(124,58,237,0.08),transparent 60%),
+    repeating-linear-gradient(62deg,transparent 0 46px,rgba(58,216,255,0.035) 46px 47px,transparent 47px 92px),
+    repeating-linear-gradient(-62deg,transparent 0 60px,rgba(124,58,237,0.03) 60px 61px,transparent 61px 122px),
+    linear-gradient(180deg,#080b12,#05070b);
+  background-attachment:fixed;}
+[data-theme="light"] body{background-image:
+    radial-gradient(120% 70% at 50% -8%,rgba(10,135,184,0.06),transparent 60%),
+    linear-gradient(180deg,#eef2f6,#e7edf3);}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:18px 18px 80px}
+a{color:var(--hud);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ── top bar: brand + theme toggle ── */
+.top{display:flex;align-items:center;justify-content:space-between;padding:10px 0 18px}
+.brand{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.brand-row{display:flex;align-items:center;gap:12px}
+.brand .coin{width:42px;height:42px;flex:none;display:grid;place-items:center;border-radius:8px;
+  background:radial-gradient(120% 120% at 30% 25%,#2bb6f2,#0a4f8c 70%,#063256);color:#fff;
+  font-size:1.05rem;font-weight:800;box-shadow:0 0 14px rgba(58,216,255,.45),inset 0 1px 2px rgba(255,255,255,.4)}
+.lk-name{font-family:var(--font-display);font-weight:800;font-size:1.55rem;letter-spacing:.01em}
+.lk-name b{color:var(--hud);text-shadow:0 0 12px var(--hud-dim)}
+.brand-sub{font-family:var(--font-mono);font-weight:700;font-size:.58rem;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.brand-sub i{color:var(--hud);font-style:normal;opacity:.85}
+.toggle{font-family:var(--font-mono);font-weight:700;font-size:.72rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--text);cursor:pointer;padding:8px 12px;
+  background:var(--card);border:1px solid var(--border);clip-path:var(--oct-btn)}
+.toggle:hover{border-color:var(--hud);color:var(--hud)}
+
+/* ── breadcrumbs ── */
+.crumbs{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;color:var(--muted);
+  text-transform:uppercase;margin-bottom:14px}
+.crumbs a{color:var(--muted)} .crumbs b{color:var(--hud)}
+
+h1{font-family:var(--font-display);font-weight:800;font-size:1.9rem;line-height:1.15;
+  letter-spacing:.01em;margin:.2em 0 .4em;text-transform:uppercase}
+h2{font-family:var(--font-display);font-weight:700;font-size:1.15rem;letter-spacing:.05em;
+  text-transform:uppercase;margin:2.2em 0 .7em;color:var(--text)}
+.section-label{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--hud);margin-bottom:6px;display:block}
+
+/* ── plate (octagon card) ── */
+.plate{position:relative;isolation:isolate;clip-path:var(--oct-card);
+  background:var(--edge,var(--hud-dim));padding:0;margin:16px 0}
+.plate::before{content:'';position:absolute;inset:1.4px;clip-path:var(--oct-inner,var(--oct-card));
+  background:var(--fill,var(--glass));z-index:-1}
+[data-theme="light"] .plate::before{background:var(--card)}
+.plate .pad{padding:18px 20px}
+
+/* ── short answer (под сниппет/LLM) ── */
+.answer{--edge:var(--hud-dim)}
+.answer .pad{font-size:1.05rem;line-height:1.6}
+.answer strong{color:var(--hud)}
+.num{font-family:var(--font-mono);font-weight:700;color:var(--hud)}
+
+/* ── FAQ ── */
+details{border-bottom:1px solid var(--border);padding:14px 2px}
+details summary{cursor:pointer;font-weight:700;font-size:1.02rem;list-style:none;
+  display:flex;justify-content:space-between;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:'+';font-family:var(--font-mono);color:var(--hud);font-size:1.2rem}
+details[open] summary::after{content:'\2212'}
+details .a{padding-top:10px;color:var(--text);opacity:.92}
+details .src{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.06em;
+  color:var(--muted);text-transform:uppercase;margin-top:8px}
+
+/* ── interlink chips ── */
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0}
+.chip{position:relative;isolation:isolate;font-family:var(--font-mono);font-size:.74rem;letter-spacing:.06em;
+  text-transform:uppercase;padding:9px 14px;color:var(--text);background:var(--hud-dim);clip-path:var(--oct-btn)}
+.chip::before{content:"";position:absolute;inset:1.4px;clip-path:var(--oct-inner,var(--oct-btn));background:var(--glass);z-index:-1}
+[data-theme="light"] .chip::before{background:var(--card)}
+.chip:hover{background:var(--hud);text-decoration:none}
+
+/* ── CTA door into Luky (полный HUD, amber=ассистент) ── */
+.cta{--edge:var(--amber-edge);margin-top:34px}
+.cta::before{background:linear-gradient(162deg,rgba(40,30,12,.96),rgba(18,12,4,.98))}
+[data-theme="light"] .cta::before{background:linear-gradient(162deg,#fff8ec,#fdf1d8)}
+.cta .pad{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.cta h2{margin:0;color:var(--yellow);text-shadow:0 0 14px rgba(245,158,11,.4)}
+.cta p{margin:0;color:var(--text);opacity:.9}
+.cta .btn{position:relative;isolation:isolate;font-family:var(--font-body);font-weight:800;font-size:1rem;
+  letter-spacing:.02em;text-transform:uppercase;color:#ffe8c2;background:var(--amber-edge);padding:15px 22px;
+  clip-path:var(--oct-btn);cursor:pointer;border:none;text-decoration:none;display:inline-block;
+  text-shadow:0 0 12px rgba(245,158,11,.7);filter:drop-shadow(0 0 7px rgba(245,158,11,.4));transition:transform .1s}
+.cta .btn::before{content:"";position:absolute;inset:1.4px;clip-path:var(--oct-inner,var(--oct-btn));
+  background:linear-gradient(180deg,rgba(45,25,4,.97),rgba(22,12,2,.98));z-index:-1}
+.cta .btn:hover{transform:scale(.98);text-decoration:none}
+
+footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--border);color:var(--muted)}
+.f-brand{font-family:var(--font-display);font-weight:800;font-size:.95rem;letter-spacing:.02em;color:var(--text)}
+.f-brand b{color:var(--hud)}
+.f-links{display:flex;flex-wrap:wrap;gap:18px;margin:12px 0}
+.f-links a{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.f-links a:hover{color:var(--hud)}
+.f-disc{font-size:.82rem;line-height:1.5;max-width:560px;margin:10px 0}
+.f-copy{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;margin-top:10px}
+</style>
+</head>
+<body class="luky-surface">
+<svg id="luky-oct-defs" width="0" height="0" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<clipPath id="round-oct" clipPathUnits="objectBoundingBox"><path d="M0.105,0 L0.895,0 Q0.92,0 0.937,0.019 L0.981,0.076 Q1,0.095 1,0.12 L1,0.88 Q1,0.905 0.981,0.924 L0.937,0.981 Q0.92,1 0.895,1 L0.105,1 Q0.08,1 0.063,0.981 L0.019,0.924 Q0,0.905 0,0.88 L0,0.12 Q0,0.095 0.019,0.076 L0.063,0.019 Q0.08,0 0.105,0 Z"/></clipPath>
+<clipPath id="round-oct-btn" clipPathUnits="objectBoundingBox"><path d="M0.0287,0 L0.9713,0 Q0.979,0 0.9845,0.0424 L0.9945,0.1176 Q1,0.16 1,0.22 L1,0.78 Q1,0.84 0.9945,0.8824 L0.9845,0.9576 Q0.979,1 0.9713,1 L0.0287,1 Q0.021,1 0.0155,0.9576 L0.0055,0.8824 Q0,0.84 0,0.78 L0,0.22 Q0,0.16 0.0055,0.1176 L0.0155,0.0424 Q0.021,0 0.0287,0 Z"/></clipPath>
+</defs></svg>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand">
+      <span class="brand-row">
+        <span class="coin">A文</span>
+        <span class="lk-name">Lu<b>ky</b></span>
+      </span>
+      <span class="brand-sub"><i>инфопортал</i> · в любой стране · без воды</span>
+    </div>
+    <button class="toggle" id="themeBtn" aria-label="Сменить тему">◐ Ночь</button>
+  </div>
+
+  <nav class="crumbs"><a href="#">Главная</a> / <a href="#">Бразилия</a> / <b>Финансы</b></nav>
+
+  <h1>Деньги и банки в Бразилии: счёт, наличные, PIX</h1>
+
+  <span class="section-label">Короткий ответ</span>
+  <div class="plate answer"><div class="pad">
+    Без <strong>CPF</strong> (местный ИНН) почти ничего не открыть — оформите его первым,
+    бесплатно в отделении <strong>Receita Federal</strong> за <span class="num">10–30 мин</span>.
+    Платежи внутри страны — мгновенный <strong>PIX</strong>. Наличные с карт «Мир» не снять;
+    везите <strong>USD</strong> или USDT, меняйте по запросу «Cambio». Доллары — только новые
+    купюры (старые берут на <span class="num">15–20%</span> хуже).
+  </div></div>
+
+  <h2>Частые вопросы</h2>
+
+  <details open><summary>Как открыть счёт без ВНЖ?<span></span></summary>
+    <div class="a">Гарантированно — никак: банки требуют резидентство. Но <b>Caixa Econômica
+    Federal</b> открывает счёт прямо в приложении при наличии CPF, местного номера и чёткой
+    биометрии. Banco do Brasil — через отделение, проси «chefe», если менеджер отказывает.
+    <div class="src">✓ 3 совпадающих ответа из чатов</div></div>
+  </details>
+
+  <details><summary>Чем платить: карта, наличные или QR?<span></span></summary>
+    <div class="a">Внутри Бразилии всё на <b>PIX</b> (мгновенный перевод по ключу). Картой —
+    всегда выбирай «crédito», вставляй чипом; если не проходит — банк счёл Бразилию зоной риска,
+    звони снимать лимиты. Российский Сбербанк умеет платить PIX напрямую из приложения.
+    <div class="src">✓ 4 ответа из чатов</div></div>
+  </details>
+
+  <details><summary>Где и как снять наличные?<span></span></summary>
+    <div class="a">Банкоматы выдают только реалы (USD не снять). Union Pay от Россельхозбанка
+    срабатывает в <b>Agibank</b> на Копакабане (комиссия ~<span class="num">32 BRL</span> за
+    1000 + конвертация). Bradesco — отказывает. Лимит снятия за раз обычно
+    <span class="num">2.5–3 млн</span> рупий-эквивалента.
+    <div class="src">✓ 2 ответа из чатов</div></div>
+  </details>
+
+  <details><summary>Как обменять валюту выгодно?<span></span></summary>
+    <div class="a">Ищи «Cambio» в Google Maps. В выходные обменники закрыты — меняй в отелях
+    (курс хуже) или заранее. Доллары — только новые «синие» серии; старые 90-х берут с
+    дисконтом или отказывают.
+    <div class="src">✓ 3 ответа из чатов</div></div>
+  </details>
+
+  <h2>Смежные темы по Бразилии</h2>
+  <div class="chips">
+    <a class="chip" href="#">🛂 Документы и виза</a>
+    <a class="chip" href="#">🏠 Жильё и аренда</a>
+    <a class="chip" href="#">🛡 Безопасность</a>
+    <a class="chip" href="#">🚕 Транспорт</a>
+    <a class="chip" href="#">🩺 Медицина</a>
+  </div>
+
+  <!-- CTA: дверь в продукт, полный HUD -->
+  <div class="plate cta"><div class="pad">
+    <h2>Не нашёл свой случай?</h2>
+    <p>Твоя ситуация особая? Спроси ассистента Luky на своём языке — без воды.
+       Базу пополняем каждый день: если по твоему вопросу есть живой опыт, он его найдёт.</p>
+    <button class="btn" onclick="alert('→ переход в Luky / mini-app')">Спросить Luky →</button>
+  </div></div>
+
+  <footer>
+    <div class="f-brand">Lu<b>ky</b> — инфопортал о любой стране, на твоём языке</div>
+    <nav class="f-links">
+      <a href="#">О проекте</a>
+      <a href="#">Все темы</a>
+      <a href="#">Страны</a>
+      <a href="#">Языки</a>
+      <a href="https://t.me/luky_channel" target="_blank" rel="noopener">Telegram</a>
+    </nav>
+    <p class="f-disc">Ответы собраны из открытых чатов сообществ — это живой опыт людей,
+       а не официальная консультация. Перед важными решениями проверяйте актуальность.</p>
+    <div class="f-copy">© 2026 MultySpeak · обновлено 06.2026</div>
+  </footer>
+
+</div>
+
+<!-- SEO: structured data -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"Как открыть счёт без ВНЖ в Бразилии?","acceptedAnswer":{"@type":"Answer","text":"Caixa Econômica Federal открывает счёт в приложении при наличии CPF, местного номера и биометрии; Banco do Brasil — через отделение."}},
+{"@type":"Question","name":"Чем платить в Бразилии?","acceptedAnswer":{"@type":"Answer","text":"Внутри страны — PIX. Картой выбирай crédito и вставляй чипом."}}
+]}
+</script>
+
+<script>
+(function(){
+  var root=document.documentElement, btn=document.getElementById('themeBtn');
+  function get(){try{return localStorage.getItem('ms-theme');}catch(e){return null;}}
+  function set(v){try{localStorage.setItem('ms-theme',v);}catch(e){}}
+  var saved=get(); if(saved){root.setAttribute('data-theme',saved);}
+  function label(){btn.textContent = root.getAttribute('data-theme')==='light' ? '☀ День' : '◐ Ночь';}
+  label();
+  btn.addEventListener('click',function(){
+    var next = root.getAttribute('data-theme')==='light' ? 'dark' : 'light';
+    root.setAttribute('data-theme',next); set(next); label();
+  });
+})();
+</script>
+<script>
+/* px-true скруглённый октагон: фикс скос (px) + 3px радиус, под реальный размер.
+   Снимает искажение objectBoundingBox (скос больше не тянется за коробкой). */
+(function(){
+  function rp(pts,r){var n=pts.length,d="";for(var i=0;i<n;i++){var p1=pts[i],p0=pts[(i-1+n)%n],p2=pts[(i+1)%n];
+    function u(a,b){var dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy)||1;return[dx/L,dy/L];}
+    var u0=u(p1,p0),u2=u(p1,p2),l0=Math.hypot(p0[0]-p1[0],p0[1]-p1[1]),l2=Math.hypot(p2[0]-p1[0],p2[1]-p1[1]),rr=Math.min(r,l0/2,l2/2);
+    var a=[p1[0]+u0[0]*rr,p1[1]+u0[1]*rr],b=[p1[0]+u2[0]*rr,p1[1]+u2[1]*rr];
+    d+=(i?"L":"M")+a[0].toFixed(2)+","+a[1].toFixed(2)+"Q"+p1[0].toFixed(2)+","+p1[1].toFixed(2)+" "+b[0].toFixed(2)+","+b[1].toFixed(2);}
+    return d+"Z";}
+  function pts(w,h,c){return[[c,0],[w-c,0],[w,c],[w,h-c],[w-c,h],[c,h],[0,h-c],[0,c]];}
+  function ap(el,c){var w=el.offsetWidth,h=el.offsetHeight;if(w<2*c||h<2*c)return;
+    el.style.clipPath="path('"+rp(pts(w,h,c),3)+"')";
+    el.style.setProperty('--oct-inner',"path('"+rp(pts(w-2.8,h-2.8,c),3)+"')");}
+  function run(){document.querySelectorAll('.plate').forEach(function(e){ap(e,12);});
+    document.querySelectorAll('.chip,.cta .btn,.toggle').forEach(function(e){ap(e,8);});}
+  if(document.readyState!=='loading')run();else addEventListener('DOMContentLoaded',run);
+  addEventListener('load',run);var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(run,150);});
+})();
+</script>
+</body>
+</html>

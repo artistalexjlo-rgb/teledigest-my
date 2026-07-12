@@ -1,0 +1,13 @@
+# генерируемые билд-артефакты (пул с VPS + рендер) — не в git
+builder/out_facet/
+builder/out_facet_*/
+builder/out_questions/
+builder/runner_stamps.json
+ready.json
+out_facet_preview/
+taxonomy_summary.json
+# залётное
+.claude/
+.claude-launch-note.txt
+_archive_precanon/
+out/

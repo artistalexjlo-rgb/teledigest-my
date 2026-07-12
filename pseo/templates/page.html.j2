@@ -1,0 +1,58 @@
+{% extends "base.html.j2" %}
+
+{% block crumbs %}
+  <nav class="crumbs">
+    <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
+    <a href="/{{ t.html_lang }}/{{ page.geo }}/">{{ page.geo_name }}</a> /
+    <b>{{ page.intent_name }}</b>
+  </nav>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ page.h1 }}</h1>
+
+  <span class="section-label">{{ t.label_short_answer }}</span>
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.short_answer | safe }}</div></div>
+
+  <h2>{{ t.label_faq }}</h2>
+  {%- for f in page.faqs %}
+  <details{% if loop.first %} open{% endif %}><summary>{{ f.q }}<span></span></summary>
+    <div class="a">{{ f.a | safe }}
+    <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
+  </details>
+  {%- endfor %}
+
+  <h2>{{ t.label_related }}</h2>
+  <div class="chips">
+    {%- for c in page.chips %}
+    {%- if c.soon %}
+    <span class="chip soon">{{ oct(OCT_CHIP, 6, 2) }}<span>{{ c.icon }} {{ c.label }}</span></span>
+    {%- else %}
+    <a class="chip" href="{{ c.url }}">{{ oct(OCT_CHIP, 6, 2) }}<span>{{ c.icon }} {{ c.label }}</span></a>
+    {%- endif %}
+    {%- endfor %}
+  </div>
+
+  <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+  {%- if cta %}
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+  {%- else %}
+    <h2>{{ t.cta_hook }}</h2>
+    <p>{{ page.cta_text }}</p>
+  {%- endif %}
+    <a class="btn" href="{{ site.cta_luky_url }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
+{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+{%- for f in page.faqs %}
+{"@type":"Question","name":{{ f.q | tojson }},"acceptedAnswer":{"@type":"Answer","text":{{ f.a_plain | tojson }}}}{{ "," if not loop.last }}
+{%- endfor %}
+]}
+</script>
+{% endblock %}

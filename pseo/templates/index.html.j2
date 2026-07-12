@@ -1,0 +1,53 @@
+{% extends "base.html.j2" %}
+
+{% block crumbs %}
+  {%- if page.geo %}
+  <nav class="crumbs">
+    <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
+    <b>{{ page.geo_name }}</b>
+  </nav>
+  {%- elif page.crumb_label %}
+  <nav class="crumbs">
+    <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
+    <b>{{ page.crumb_label }}</b>
+  </nav>
+  {%- endif %}
+{% endblock %}
+
+{% block content %}
+  <h1>{{ page.h1 }}</h1>
+
+  {%- if page.intro %}
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.intro | safe }}</div></div>
+  {%- endif %}
+
+  {%- if page.body %}
+  <div class="prose">{{ page.body | safe }}</div>
+  {%- endif %}
+
+  {%- if page.tiles %}
+  {%- if page.list_label %}<h2>{{ page.list_label }}</h2>{% endif %}
+  <div class="grid">
+    {%- for it in page.tiles %}
+    {%- if it.soon %}
+    <span class="card soon">{{ oct(OCT_BOX, 12, 3) }}<span class="ti">{{ it.icon }} {{ it.title }}</span>{% if it.blurb %}<span class="ds">{{ it.blurb }}</span>{% endif %}</span>
+    {%- else %}
+    <a class="card" href="{{ it.url }}">{{ oct(OCT_BOX, 12, 3) }}<span class="ti">{{ it.icon }} {{ it.title }}</span>{% if it.blurb %}<span class="ds">{{ it.blurb }}</span>{% endif %}</a>
+    {%- endif %}
+    {%- endfor %}
+  </div>
+  {%- endif %}
+
+  <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+  {%- if cta %}
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+  {%- else %}
+    <h2>{{ t.cta_hook }}</h2>
+    <p>{{ page.cta_text }}</p>
+  {%- endif %}
+    <a class="btn" href="{{ site.cta_luky_url }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
+{% endblock %}
