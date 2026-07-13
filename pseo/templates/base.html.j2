@@ -197,10 +197,12 @@ footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--border);color
       <span class="brand-sub">{{ t.brand_sub | safe }}</span>
     </div>
     <div class="ctrls">
-      {%- set ltail = page.path.split('/')[2:] | join('/') %}
+      {#- слаги контента между языками РАЗНЫЕ (ru≠en≠…) → tail-swap дал бы 404.
+          Свитчер ведёт на гарантированно существующее: гео-хаб /<lang>/<geo>/ или /<lang>/. #}
+      {%- set lbase = (page.geo ~ '/') if page.geo else '' %}
       <div class="langs">
         {%- for l in site.languages %}
-        <a class="{{ 'on' if l == t.html_lang else '' }}" href="/{{ l }}/{{ ltail }}">{{ oct(OCT_TOGGLE, 5, 2) }}{{ l | upper }}</a>
+        <a class="{{ 'on' if l == t.html_lang else '' }}" href="/{{ l }}/{{ lbase }}">{{ oct(OCT_TOGGLE, 5, 2) }}{{ l | upper }}</a>
         {%- endfor %}
       </div>
       <button class="toggle" id="themeBtn" aria-label="theme">{{ oct(OCT_TOGGLE, 6, 2) }}<span id="themeLbl">{{ t.theme_night }}</span></button>
