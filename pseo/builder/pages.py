@@ -281,23 +281,23 @@ COPY = {
         ],
         "fact_title": "{name}: {tl} — живой опыт · Luky",
         "fact_desc": "Живой опыт из чатов про {tl} в {name}: как есть, из первых рук. Под твой случай — у Luky.",
-        "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» в {name} — как есть, без воды. Под свой случай — <strong>спроси Luky</strong>.",
+        "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» в {name} — как есть, без воды. Под свой случай — <a href='#luky'>спроси Luky</a>.",
         "fact_list_label": "Из живого опыта",
         "fact_blurb": "{n} советов из чатов",
         "q_title": "{name}: {tl} — что спрашивают · Luky",
         "q_desc": "Реальные вопросы про {tl} в {name} из живых чатов. Ответ под твой случай — у Luky.",
-        "q_intro": "Живые вопросы из чатов сообществ — с чем реально сталкиваются. Узнаёшь свой? Ответ под твой случай — <strong>спроси Luky</strong>.",
+        "q_intro": "Живые вопросы из чатов сообществ — с чем реально сталкиваются. Узнаёшь свой? Ответ под твой случай — <a href='#luky'>спроси Luky</a>.",
         "q_list_label": "Вопросы из чатов",
         "q_blurb": "{n} вопросов из чатов",
         "qhub_title": "{name}: что спрашивают в чатах — реальные вопросы · Luky",
         "qhub_desc": "Реальные вопросы про {name} из живых чатов: визы, деньги, жильё, безопасность. Ответ под твой случай — у Luky.",
         "qhub_h1": "Что спрашивают в чатах",
-        "qhub_intro": "Сотни людей — одни и те же непонятки. Выбери тему, посмотри реальные вопросы. Ответы у людей находятся не сразу… а у <strong>Luky</strong> — сразу.",
+        "qhub_intro": "Сотни людей — одни и те же непонятки. Выбери тему, посмотри реальные вопросы. Ответы у людей находятся не сразу… а у <a href='#luky'>Luky</a> — сразу.",
         "bridge_title": "Что спрашивают в чатах",
         "bridge_blurb": "Реальные вопросы людей — под свой случай спроси Luky",
         "hub_title": "{name}: документы, деньги, жильё — живой опыт из чатов · Luky",
         "hub_desc": "Живой опыт по {name} из чатов сообществ: документы, деньги, жильё, безопасность, транспорт. Без воды, под твой случай.",
-        "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <strong>спроси Luky</strong>.",
+        "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <a href='#luky'>спроси Luky</a>.",
         "list_label_topics": "Темы",
         "lower": True,  # темы в тайтле в нижнем регистре (русский стиль)
     },
@@ -314,23 +314,23 @@ COPY = {
         ],
         "fact_title": "{name}: {tl} — real experience · Luky",
         "fact_desc": "Real experience from chats about {tl} in {name}: as it is, first-hand. For your case — ask Luky.",
-        "fact_intro": "Real experience of people from chats on «{tl}» in {name} — as it is, no fluff. For your case — <strong>ask Luky</strong>.",
+        "fact_intro": "Real experience of people from chats on «{tl}» in {name} — as it is, no fluff. For your case — <a href='#luky'>ask Luky</a>.",
         "fact_list_label": "From real experience",
         "fact_blurb": "{n} tips from chats",
         "q_title": "{name}: {tl} — what people ask · Luky",
         "q_desc": "Real questions about {tl} in {name} from live chats. An answer for your case — ask Luky.",
-        "q_intro": "Live questions from community chats — what people actually run into. Recognise yours? An answer for your case — <strong>ask Luky</strong>.",
+        "q_intro": "Live questions from community chats — what people actually run into. Recognise yours? An answer for your case — <a href='#luky'>ask Luky</a>.",
         "q_list_label": "Questions from chats",
         "q_blurb": "{n} questions from chats",
         "qhub_title": "{name}: what people ask in chats — real questions · Luky",
         "qhub_desc": "Real questions about {name} from live chats: visas, money, housing, safety. An answer for your case — ask Luky.",
         "qhub_h1": "What people ask in chats",
-        "qhub_intro": "Hundreds of people — the same confusions. Pick a topic, see the real questions. People find answers slowly… but <strong>Luky</strong> — right away.",
+        "qhub_intro": "Hundreds of people — the same confusions. Pick a topic, see the real questions. People find answers slowly… but <a href='#luky'>Luky</a> — right away.",
         "bridge_title": "What people ask in chats",
         "bridge_blurb": "Real questions from people — for your case ask Luky",
         "hub_title": "{name}: documents, money, housing — real experience from chats · Luky",
         "hub_desc": "Real experience for {name} from community chats: documents, money, housing, safety, transport. No fluff, for your case.",
-        "hub_intro": "Real experience of those who actually went through it — to the point, no fluff. Pick a topic, and for your case <strong>ask Luky</strong>.",
+        "hub_intro": "Real experience of those who actually went through it — to the point, no fluff. Pick a topic, and for your case <a href='#luky'>ask Luky</a>.",
         "list_label_topics": "Topics",
         "lower": False,  # английские заголовки — как есть (Title-case меток)
     },
@@ -347,23 +347,23 @@ COPY = {
         ],
         "fact_title": "{name}: {tl} — experiencia real · Luky",
         "fact_desc": "Experiencia real de los chats sobre {tl} en {name}: tal cual, de primera mano. Para tu caso — pregúntale a Luky.",
-        "fact_intro": "Experiencia real de gente de los chats sobre «{tl}» en {name} — tal cual, sin relleno. Para tu caso — <strong>pregúntale a Luky</strong>.",
+        "fact_intro": "Experiencia real de gente de los chats sobre «{tl}» en {name} — tal cual, sin relleno. Para tu caso — <a href='#luky'>pregúntale a Luky</a>.",
         "fact_list_label": "De la experiencia real",
         "fact_blurb": "{n} consejos de los chats",
         "q_title": "{name}: {tl} — qué preguntan · Luky",
         "q_desc": "Preguntas reales sobre {tl} en {name} de chats en vivo. Una respuesta para tu caso — pregúntale a Luky.",
-        "q_intro": "Preguntas en vivo de chats de comunidades — con lo que la gente realmente se topa. ¿Reconoces la tuya? Una respuesta para tu caso — <strong>pregúntale a Luky</strong>.",
+        "q_intro": "Preguntas en vivo de chats de comunidades — con lo que la gente realmente se topa. ¿Reconoces la tuya? Una respuesta para tu caso — <a href='#luky'>pregúntale a Luky</a>.",
         "q_list_label": "Preguntas de los chats",
         "q_blurb": "{n} preguntas de los chats",
         "qhub_title": "{name}: qué preguntan en los chats — preguntas reales · Luky",
         "qhub_desc": "Preguntas reales sobre {name} de chats en vivo: visas, dinero, vivienda, seguridad. Una respuesta para tu caso — pregúntale a Luky.",
         "qhub_h1": "Qué preguntan en los chats",
-        "qhub_intro": "Cientos de personas — las mismas dudas. Elige un tema, mira las preguntas reales. La gente encuentra respuestas despacio… pero <strong>Luky</strong> — al instante.",
+        "qhub_intro": "Cientos de personas — las mismas dudas. Elige un tema, mira las preguntas reales. La gente encuentra respuestas despacio… pero <a href='#luky'>Luky</a> — al instante.",
         "bridge_title": "Qué preguntan en los chats",
         "bridge_blurb": "Preguntas reales de la gente — para tu caso pregúntale a Luky",
         "hub_title": "{name}: documentos, dinero, vivienda — experiencia real de los chats · Luky",
         "hub_desc": "Experiencia real de {name} de chats de comunidades: documentos, dinero, vivienda, seguridad, transporte. Sin relleno, para tu caso.",
-        "hub_intro": "Experiencia real de quienes ya pasaron por ello — al grano, sin relleno. Elige un tema, y para tu caso <strong>pregúntale a Luky</strong>.",
+        "hub_intro": "Experiencia real de quienes ya pasaron por ello — al grano, sin relleno. Elige un tema, y para tu caso <a href='#luky'>pregúntale a Luky</a>.",
         "list_label_topics": "Temas",
         "lower": False,
     },
@@ -380,23 +380,23 @@ COPY = {
         ],
         "fact_title": "{name}: {tl} — experiência real · Luky",
         "fact_desc": "Experiência real dos chats sobre {tl} em {name}: como é, em primeira mão. Para o seu caso — pergunte ao Luky.",
-        "fact_intro": "Experiência real de pessoas dos chats sobre «{tl}» em {name} — como é, sem enrolação. Para o seu caso — <strong>pergunte ao Luky</strong>.",
+        "fact_intro": "Experiência real de pessoas dos chats sobre «{tl}» em {name} — como é, sem enrolação. Para o seu caso — <a href='#luky'>pergunte ao Luky</a>.",
         "fact_list_label": "Da experiência real",
         "fact_blurb": "{n} dicas dos chats",
         "q_title": "{name}: {tl} — o que perguntam · Luky",
         "q_desc": "Perguntas reais sobre {tl} em {name} de chats ao vivo. Uma resposta para o seu caso — pergunte ao Luky.",
-        "q_intro": "Perguntas ao vivo de chats de comunidades — com o que as pessoas realmente se deparam. Reconhece a sua? Uma resposta para o seu caso — <strong>pergunte ao Luky</strong>.",
+        "q_intro": "Perguntas ao vivo de chats de comunidades — com o que as pessoas realmente se deparam. Reconhece a sua? Uma resposta para o seu caso — <a href='#luky'>pergunte ao Luky</a>.",
         "q_list_label": "Perguntas dos chats",
         "q_blurb": "{n} perguntas dos chats",
         "qhub_title": "{name}: o que perguntam nos chats — perguntas reais · Luky",
         "qhub_desc": "Perguntas reais sobre {name} de chats ao vivo: vistos, dinheiro, moradia, segurança. Uma resposta para o seu caso — pergunte ao Luky.",
         "qhub_h1": "O que perguntam nos chats",
-        "qhub_intro": "Centenas de pessoas — as mesmas dúvidas. Escolha um tema, veja as perguntas reais. As pessoas acham respostas devagar… mas o <strong>Luky</strong> — na hora.",
+        "qhub_intro": "Centenas de pessoas — as mesmas dúvidas. Escolha um tema, veja as perguntas reais. As pessoas acham respostas devagar… mas o <a href='#luky'>Luky</a> — na hora.",
         "bridge_title": "O que perguntam nos chats",
         "bridge_blurb": "Perguntas reais das pessoas — para o seu caso pergunte ao Luky",
         "hub_title": "{name}: documentos, dinheiro, moradia — experiência real dos chats · Luky",
         "hub_desc": "Experiência real de {name} de chats de comunidades: documentos, dinheiro, moradia, segurança, transporte. Sem enrolação, para o seu caso.",
-        "hub_intro": "Experiência real de quem já passou por isso — direto ao ponto, sem enrolação. Escolha um tema, e para o seu caso <strong>pergunte ao Luky</strong>.",
+        "hub_intro": "Experiência real de quem já passou por isso — direto ao ponto, sem enrolação. Escolha um tema, e para o seu caso <a href='#luky'>pergunte ao Luky</a>.",
         "list_label_topics": "Temas",
         "lower": False,
     },
@@ -408,55 +408,206 @@ HOME_ABOUT = {
         "home_title": "Luky — живой опыт по странам: деньги, документы, жильё",
         "home_desc": "Инфопортал Luky: реальный опыт из чатов сообществ по странам — деньги, документы, жильё, безопасность. Без воды, под твой случай.",
         "home_h1": "Куда едешь?",
-        "home_intro": "Реальный опыт тех, кто уже прошёл через местные непонятки — по делу, без воды. Выбери страну, а под свой случай <strong>спроси Luky</strong>.",
+        "home_intro": "Реальный опыт тех, кто уже прошёл через местные непонятки — по делу, без воды. Выбери страну, а под свой случай <a href='#luky'>спроси Luky</a>.",
         "home_list_label": "Страны",
         "geo_blurb": "живой опыт",
         "about_crumb": "О проекте",
         "about_title": "О проекте · Luky",
         "about_desc": "Luky собирает живой опыт из открытых чатов сообществ по странам — по делу, без воды.",
         "about_h1": "О проекте",
-        "about_body": "<p><strong>Luky</strong> — это опыт живых людей, а не сухая теория. Мы собираем реальные советы из открытых чатов сообществ: как что устроено на месте, чего избегать, что работает сейчас.</p><p>Портал — витрина этого опыта по темам и странам. А под твой конкретный случай можно спросить <strong>Luky</strong> — он подскажет по недавним отзывам людей.</p>",
+        "about_body": "<p><a href='#luky'>Luky</a> — это опыт живых людей, а не сухая теория. Мы собираем реальные советы из открытых чатов сообществ: как что устроено на месте, чего избегать, что работает сейчас.</p><p>Портал — витрина этого опыта по темам и странам. А под твой конкретный случай можно спросить <a href='#luky'>Luky</a> — он подскажет по недавним отзывам людей.</p>",
     },
     "en": {
         "home_title": "Luky — real experience by country: money, documents, housing",
         "home_desc": "Luky info portal: real experience from community chats by country — money, documents, housing, safety. No fluff, for your case.",
         "home_h1": "Where are you headed?",
-        "home_intro": "Real experience of those who already went through the local confusions — to the point, no fluff. Pick a country, and for your case <strong>ask Luky</strong>.",
+        "home_intro": "Real experience of those who already went through the local confusions — to the point, no fluff. Pick a country, and for your case <a href='#luky'>ask Luky</a>.",
         "home_list_label": "Countries",
         "geo_blurb": "real experience",
         "about_crumb": "About",
         "about_title": "About · Luky",
         "about_desc": "Luky gathers real experience from open community chats by country — to the point, no fluff.",
         "about_h1": "About",
-        "about_body": "<p><strong>Luky</strong> is the experience of real people, not dry theory. We gather real tips from open community chats: how things actually work on the ground, what to avoid, what works right now.</p><p>The portal is a showcase of that experience by topic and country. And for your specific case you can <strong>ask Luky</strong> — it answers from people's recent reports.</p>",
+        "about_body": "<p><a href='#luky'>Luky</a> is the experience of real people, not dry theory. We gather real tips from open community chats: how things actually work on the ground, what to avoid, what works right now.</p><p>The portal is a showcase of that experience by topic and country. And for your specific case you can <a href='#luky'>ask Luky</a> — it answers from people's recent reports.</p>",
     },
     "es": {
         "home_title": "Luky — experiencia real por país: dinero, documentos, vivienda",
         "home_desc": "Portal de info Luky: experiencia real de chats de comunidades por país — dinero, documentos, vivienda, seguridad. Sin relleno, para tu caso.",
         "home_h1": "¿A dónde vas?",
-        "home_intro": "Experiencia real de quienes ya pasaron por los líos locales — al grano, sin relleno. Elige un país, y para tu caso <strong>pregúntale a Luky</strong>.",
+        "home_intro": "Experiencia real de quienes ya pasaron por los líos locales — al grano, sin relleno. Elige un país, y para tu caso <a href='#luky'>pregúntale a Luky</a>.",
         "home_list_label": "Países",
         "geo_blurb": "experiencia real",
         "about_crumb": "Acerca de",
         "about_title": "Acerca de · Luky",
         "about_desc": "Luky reúne experiencia real de chats abiertos de comunidades por país — al grano, sin relleno.",
         "about_h1": "Acerca de",
-        "about_body": "<p><strong>Luky</strong> es la experiencia de gente real, no teoría seca. Reunimos consejos reales de chats abiertos de comunidades: cómo funcionan las cosas sobre el terreno, qué evitar, qué funciona ahora mismo.</p><p>El portal es un escaparate de esa experiencia por tema y país. Y para tu caso concreto puedes <strong>preguntarle a Luky</strong> — responde según reportes recientes de la gente.</p>",
+        "about_body": "<p><a href='#luky'>Luky</a> es la experiencia de gente real, no teoría seca. Reunimos consejos reales de chats abiertos de comunidades: cómo funcionan las cosas sobre el terreno, qué evitar, qué funciona ahora mismo.</p><p>El portal es un escaparate de esa experiencia por tema y país. Y para tu caso concreto puedes <a href='#luky'>preguntarle a Luky</a> — responde según reportes recientes de la gente.</p>",
     },
     "pt": {
         "home_title": "Luky — experiência real por país: dinheiro, documentos, moradia",
         "home_desc": "Portal de info Luky: experiência real de chats de comunidades por país — dinheiro, documentos, moradia, segurança. Sem enrolação, para o seu caso.",
         "home_h1": "Para onde você vai?",
-        "home_intro": "Experiência real de quem já passou pelas confusões locais — direto ao ponto, sem enrolação. Escolha um país, e para o seu caso <strong>pergunte ao Luky</strong>.",
+        "home_intro": "Experiência real de quem já passou pelas confusões locais — direto ao ponto, sem enrolação. Escolha um país, e para o seu caso <a href='#luky'>pergunte ao Luky</a>.",
         "home_list_label": "Países",
         "geo_blurb": "experiência real",
         "about_crumb": "Sobre",
         "about_title": "Sobre · Luky",
         "about_desc": "O Luky reúne experiência real de chats abertos de comunidades por país — direto ao ponto, sem enrolação.",
         "about_h1": "Sobre",
-        "about_body": "<p><strong>Luky</strong> é a experiência de pessoas reais, não teoria seca. Reunimos dicas reais de chats abertos de comunidades: como as coisas funcionam na prática, o que evitar, o que funciona agora.</p><p>O portal é uma vitrine dessa experiência por tema e país. E para o seu caso concreto você pode <strong>perguntar ao Luky</strong> — ele responde a partir de relatos recentes das pessoas.</p>",
+        "about_body": "<p><a href='#luky'>Luky</a> é a experiência de pessoas reais, não teoria seca. Reunimos dicas reais de chats abertos de comunidades: como as coisas funcionam na prática, o que evitar, o que funciona agora.</p><p>O portal é uma vitrine dessa experiência por tema e país. E para o seu caso concreto você pode <a href='#luky'>perguntar ao Luky</a> — ele responde a partir de relatos recentes das pessoas.</p>",
     },
 }
+
+
+# ── Портал-home: регионы + образные вайбы стран ──
+REGION_ORDER = ["la", "eu", "asia", "mea", "cis", "oce"]
+CODE2REGION = {
+    "br": "la",
+    "ar": "la",
+    "cl": "la",
+    "cu": "la",
+    "de": "eu",
+    "gb": "eu",
+    "fr": "eu",
+    "at": "eu",
+    "be": "eu",
+    "ch": "eu",
+    "cz": "eu",
+    "bg": "eu",
+    "hu": "eu",
+    "fi": "eu",
+    "hr": "eu",
+    "gr": "eu",
+    "me": "eu",
+    "vn": "asia",
+    "id": "asia",
+    "ph": "asia",
+    "kr": "asia",
+    "jp": "asia",
+    "cn": "asia",
+    "in": "asia",
+    "lk": "asia",
+    "kz": "asia",
+    "kg": "asia",
+    "ge": "asia",
+    "tr": "mea",
+    "eg": "mea",
+    "il": "mea",
+    "mu": "mea",
+    "ru": "cis",
+    "by": "cis",
+    "au": "oce",
+}
+REGION_NAMES = {
+    "ru": {
+        "la": "Латинская Америка",
+        "eu": "Европа",
+        "asia": "Азия",
+        "mea": "Ближний Восток и Африка",
+        "cis": "СНГ",
+        "oce": "Океания",
+        "oth": "Другие",
+    },
+    "en": {
+        "la": "Latin America",
+        "eu": "Europe",
+        "asia": "Asia",
+        "mea": "Middle East & Africa",
+        "cis": "CIS",
+        "oce": "Oceania",
+        "oth": "Other",
+    },
+    "es": {
+        "la": "América Latina",
+        "eu": "Europa",
+        "asia": "Asia",
+        "mea": "Oriente Medio y África",
+        "cis": "CEI",
+        "oce": "Oceanía",
+        "oth": "Otros",
+    },
+    "pt": {
+        "la": "América Latina",
+        "eu": "Europa",
+        "asia": "Ásia",
+        "mea": "Oriente Médio e África",
+        "cis": "CEI",
+        "oce": "Oceania",
+        "oth": "Outros",
+    },
+}
+# Образный блёрб «характер страны в двух мазках» — seed-тон (roadmap_portal_skeleton).
+# Пока только ru (34); прочие языки — без вайба (флаг+имя), перевод = отдельный шаг билдера.
+VIBE = {
+    "ru": {
+        "br": "Карнавалы и фавелы. Самба и футбол",
+        "vn": "Байки и фо. Джунгли и океан",
+        "me": "Горы над Адриатикой. Евро без ЕС",
+        "id": "Вулканы и рис. Бали и сёрф",
+        "gr": "Острова и руины. Оливки и сиеста",
+        "kr": "Кимчи и небоскрёбы. K-pop и корпорации",
+        "ph": "Пальмы и острова. Рис и тайфуны",
+        "de": "Орднунг и автобаны. Пиво и бумаги",
+        "gb": "Туман и пабы. Очереди и вежливость",
+        "bg": "Море и горы. Баница и ракия",
+        "jp": "Синкансэны и храмы. Вежливость и неон",
+        "by": "Драники и зубры. Тишь и порядок",
+        "fr": "Багеты и вино. Забастовки и шарм",
+        "au": "Кенгуру и сёрф. Простор и солнце",
+        "ar": "Танго и стейки. Футбол и инфляция",
+        "hu": "Купальни и гуляш. Дунай и Токай",
+        "at": "Горы и вальсы. Кофейни и порядок",
+        "ru": "Простор и берёзы. Дачи и электрички",
+        "cl": "Анды и океан. Вино и пустыня",
+        "fi": "Озёра и сауна. Тишина и северное сияние",
+        "ge": "Горы и вино. Хачапури и гостеприимство",
+        "cz": "Пиво и замки. Прага и мосты",
+        "mu": "Пляжи и лагуны. Океан и пальмы",
+        "lk": "Чай и слоны. Пляжи и муссоны",
+        "be": "Вафли и пиво. Шоколад и еврочиновники",
+        "ch": "Горы и часы. Сыр и банки",
+        "cn": "Мегаполисы и древность. Чай и скорость",
+        "cu": "Ром и сигары. Сальса и ретро-авто",
+        "eg": "Пирамиды и Нил. Пустыня и базары",
+        "hr": "Адриатика и стены. Острова и солнце",
+        "il": "Пустыня и вера. Хайтек и базары",
+        "in": "Специи и хаос. Тадж и краски",
+        "kz": "Степь и космодром. Простор и бешбармак",
+        "tr": "Базары и Босфор. Всё включено",
+        "kg": "Горы и юрты. Озёра и кочевники",
+    },
+}
+
+
+def home_data(lang, geos, counts):
+    """Портал-данные главной: популярные (по числу тем) + регионы + поиск-индекс.
+    Единый источник для ru (pages) и прочих языков — форма одинаковая."""
+    names = GEO_NAMES.get(lang, {})
+
+    def nm(g):
+        return names.get(g, g)
+
+    def tile(g):
+        return {"flag": GEO_FLAG.get(g, "•"), "name": nm(g), "url": f"/{lang}/{g}/"}
+
+    gs = sorted(geos, key=nm)
+    search_index = [tile(g) for g in gs]
+    pop_codes = sorted(geos, key=lambda g: (-counts.get(g, 0), nm(g)))[:12]
+    vibe = VIBE.get(lang, {})
+    popular = [{**tile(g), "vibe": vibe.get(g, "")} for g in pop_codes]
+    rn = REGION_NAMES.get(lang, REGION_NAMES["en"])
+    groups = {}
+    for g in geos:
+        groups.setdefault(CODE2REGION.get(g, "oth"), []).append(g)
+    regions = []
+    for rk in REGION_ORDER + ["oth"]:
+        gl = groups.get(rk)
+        if not gl:
+            continue
+        regions.append(
+            {"name": rn.get(rk, rk), "geos": [tile(g) for g in sorted(gl, key=nm)]}
+        )
+    return popular, regions, search_index
 
 
 def icon(t):
@@ -672,23 +823,16 @@ def langs_for(geo):
     return out
 
 
-def build_home(lang, geos):
-    """Главная /<lang>/ — плитки стран, у которых собрались страницы."""
+def build_home(lang, geos, counts=None):
+    """Главная /<lang>/ — портал-вход: поиск + популярные (образный блёрб) + регионы.
+    counts: {geo: число тем} для ранжирования «популярных» (из build_geo)."""
     HA = HOME_ABOUT[lang]
-    tiles = [
-        {
-            "icon": GEO_FLAG.get(g, "•"),
-            "title": GEO_NAMES.get(lang, {}).get(g, g),
-            "blurb": HA["geo_blurb"],
-            "url": f"/{lang}/{g}/",
-        }
-        for g in geos
-    ]
+    popular, regions, search_index = home_data(lang, geos, counts or {})
     write(
         f"{lang}_home.json",
         {
             "lang": lang,
-            "template": "index.html.j2",
+            "template": "home.html.j2",
             "path": f"/{lang}/",
             "updated": "07.2026",
             "crumb_label": None,
@@ -696,8 +840,9 @@ def build_home(lang, geos):
             "meta_desc": HA["home_desc"],
             "h1": HA["home_h1"],
             "intro": HA["home_intro"],
-            "list_label": HA["home_list_label"],
-            "tiles": tiles,
+            "popular": popular,
+            "regions": regions,
+            "search_index": search_index,
         },
     )
 
@@ -732,17 +877,19 @@ if __name__ == "__main__":
         )
     total = 0
     built = {}  # lang -> [geos]
+    counts = {}  # lang -> {geo: число факт-тем} (ранжир «популярных» на home)
     for g in geos:
         for lang in langs_for(g):
             n, nf, nq = build_geo(g, lang)
             total += n
             built.setdefault(lang, []).append(g)
+            counts.setdefault(lang, {})[g] = nf
             print(f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq})")
-    # home+about для не-ru языков (ru_home/ru_about — живые, генерит wire.py, не трогаем)
+    # home — портал-вход для ВСЕХ языков (включая ru: pages владеет home, wire делегирует сюда).
+    # about — только не-ru (ru_about живой, не трогаем).
     for lang, gl in built.items():
-        if lang == "ru":
-            continue
-        build_home(lang, sorted(gl))
-        build_about(lang)
-        print(f"{lang}: home + about ({len(gl)} стран)")
+        build_home(lang, sorted(gl), counts.get(lang, {}))
+        if lang != "ru":
+            build_about(lang)
+        print(f"{lang}: home{'' if lang == 'ru' else ' + about'} ({len(gl)} стран)")
     print(f"ИТОГО data-страниц: {total} (дальше render.py --all)")

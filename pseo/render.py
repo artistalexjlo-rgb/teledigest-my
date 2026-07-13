@@ -63,7 +63,10 @@ def render_page(page: dict, lang: str | None = None) -> str:
     t = load_i18n(lang)
     cta = build_cta(t, page)
     tmpl = _env.get_template(page.get("template", "page.html.j2"))
-    return tmpl.render(site=SITE, t=t, page=page, lang=lang, cta=cta)
+    html = tmpl.render(site=SITE, t=t, page=page, lang=lang, cta=cta)
+    # Маркер #luky в текстах (интро/проза) → реальная дверь в продукт (единый источник — site.py).
+    door = f'href="{SITE["cta_luky_url"]}" target="_blank" rel="noopener"'
+    return html.replace("href='#luky'", door).replace('href="#luky"', door)
 
 
 def build(data_path: str) -> pathlib.Path:

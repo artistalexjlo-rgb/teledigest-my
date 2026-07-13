@@ -10,9 +10,13 @@ wire.py — единый источник правды для навигации
 
 import json
 import pathlib
+import sys
 
 BASE = pathlib.Path(__file__).parent
 DATA = BASE / "data"
+# портал-home — единый источник (pages.build_home): поиск + популярные + регионы
+sys.path.insert(0, str(BASE / "builder"))
+from pages import build_home as _portal_build_home  # noqa: E402
 
 # «СКОРО» обещаем ТОЛЬКО если под тему есть данных ≥ порога (data-backed, реально в очереди).
 # Ниже порога — плитки нет (не вешаем ложное обещание). См. BUILD_PLAN «Инвариант навигации».
@@ -126,7 +130,7 @@ def write_hub(geo, topics_have, demand):
         "деньги, документы, жильё, безопасность, транспорт. Без воды.",
         "h1": GEO_NAME.get(geo, geo),
         "intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. "
-        "Выбери тему, а под свой конкретный случай <strong>спроси Luky</strong>.",
+        "Выбери тему, а под свой конкретный случай <a href='#luky'>спроси Luky</a>.",
         "list_label": "Темы",
         "tiles": tiles,
     }
@@ -136,6 +140,14 @@ def write_hub(geo, topics_have, demand):
 
 
 def write_home(geos, have):
+    # Портал-home — единый источник (pages.build_home): поиск + популярные + регионы.
+    # counts = число тем на гео (ранжир «популярных»). ru_home.json пишется туда же (DATA).
+    counts = {g: len(have.get(g, ())) for g in geos}
+    _portal_build_home("ru", geos, counts)
+    return
+
+
+def _legacy_write_home(geos, have):
     tiles = [
         {
             "icon": GEO_FLAG.get(g, "•"),
@@ -156,7 +168,7 @@ def write_home(geos, have):
         "деньги, документы, жильё, безопасность. Без воды, под твой случай.",
         "h1": "Куда едешь?",
         "intro": "Реальный опыт тех, кто уже прошёл через местные непонятки — по делу, без воды. "
-        "Выбери страну, а под свой случай <strong>спроси Luky</strong>.",
+        "Выбери страну, а под свой случай <a href='#luky'>спроси Luky</a>.",
         "list_label": "Страны",
         "tiles": tiles,
     }

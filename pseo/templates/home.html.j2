@@ -1,0 +1,73 @@
+{% extends "base.html.j2" %}
+{#- Портал-home: поиск + Luky CTA + Популярные (образный блёрб) + По регионам (аккордеон).
+    Масштабируемо до 70+ стран: не плоская сетка, а поиск/популярные/регионы. #}
+
+{% block content %}
+  <h1>{{ page.h1 }}</h1>
+
+  {%- if page.intro %}
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.intro | safe }}</div></div>
+  {%- endif %}
+
+  <div class="search">{{ oct(OCT_BOX, 10, 3) }}
+    <input id="q" placeholder="{{ t.home_search_ph }}" autocomplete="off" aria-label="{{ t.home_search_ph }}">
+  </div>
+  <div id="sugg"></div>
+
+  <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+  {%- if cta %}
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+  {%- else %}
+    <h2>{{ t.cta_hook }}</h2>
+  {%- endif %}
+    <a class="btn" href="{{ site.cta_luky_url }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
+
+  {%- if page.popular %}
+  <h2>{{ t.home_countries_label }}</h2>
+  <span class="section-label">{{ t.home_popular }}</span>
+  <div class="grid">
+    {%- for c in page.popular %}
+    <a class="card" href="{{ c.url }}">{{ oct(OCT_BOX, 12, 3) }}<span class="ti"><span class="fl">{{ c.flag }}</span> {{ c.name }}</span>{% if c.vibe %}<span class="ds">{{ c.vibe }}</span>{% endif %}</a>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+
+  {%- if page.regions %}
+  <span class="section-label" style="margin-top:22px;display:block">{{ t.home_by_region }}</span>
+  <div class="regions">
+    {%- for r in page.regions %}
+    <details class="reg"><summary>{{ r.name }}<span class="cnt">{{ r.geos | length }}</span></summary>
+      <div class="rlist">
+        {%- for c in r.geos %}
+        <a href="{{ c.url }}">{{ c.flag }} {{ c.name }}</a>
+        {%- endfor %}
+      </div>
+    </details>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* поиск по странам: подсказки → страница страны */
+(function(){
+  var IDX={{ page.search_index | tojson }};
+  var q=document.getElementById('q'), sg=document.getElementById('sugg');
+  if(!q) return;
+  q.addEventListener('input',function(){
+    var v=q.value.trim().toLowerCase(); if(!v){sg.style.display='none';return;}
+    var m=IDX.filter(function(c){return c.name.toLowerCase().indexOf(v)>=0}).slice(0,8);
+    sg.innerHTML = m.length
+      ? m.map(function(c){return '<a href="'+c.url+'">'+c.flag+' '+c.name+'</a>'}).join('')
+      : '<a class="nores">'+{{ t.home_search_none | tojson }}+'</a>';
+    sg.style.display='block';
+  });
+  document.addEventListener('click',function(e){if(!e.target.closest('.search')&&e.target.id!=='q')sg.style.display='none';});
+})();
+</script>
+{% endblock %}
