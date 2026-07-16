@@ -14,18 +14,19 @@ import sqlite3
 import sys
 
 from keybroker import call
-from runner import in_window, pool_state  # ПЕРЕИСПОЛЬЗУЕМ готовый governor RU-раннера
+from runner import (
+    in_window,
+)  # окно экстракции (часы); КВОТУ держит мозг keybroker, не pool_state
 
 DB = "/home/teledigest/data/messages_fts.db"
 HERE = "/root/pseo_builder"
 
 
 def budget_ok():
-    """Тот же предохранитель, что у runner.py: не в окне экстракции И пул ниже soft."""
-    if in_window():
-        return False
-    used, soft = pool_state()
-    return used < soft
+    """Только окно экстракции (часы). Квоту/пул теперь держит мозг keybroker (сосок call
+    отдаёт None на капе → рот сам отложит гео). Второго квота-источника (pool_state/gemini_quota) НЕТ.
+    """
+    return not in_window()
 
 
 LANG_NAME = {
@@ -117,13 +118,15 @@ def translate_labels(labels, lang):
 
 def translate_texts(id_text, lang):
     """{id: english} → {id: target}. Батчи по 50 (канон 4.1: запрос ≈10К ток = 60% окна).
-    Возвращает (out, complete): complete=False если остановились по бюджету (pool-soft/окно) —
-    тогда гео НЕ пишем, доделаем в другой день (без шторма).
+    Возвращает (out, complete): complete=False если остановились (окно экстракции ИЛИ мозг отдал
+    None на капе) — тогда гео НЕ пишем, доделаем в другой день (без шторма).
     """
     items = list(id_text.items())
     out = {}
     for i in range(0, len(items), 50):
-        if not budget_ok():  # governor: дошли до soft или окно → стоп, гео отложить
+        if (
+            not budget_ok()
+        ):  # только окно экстракции → стоп, гео отложить (кап держит мозг ниже)
             return out, False
         batch = dict(items[i : i + 50])
         r = call(
@@ -147,8 +150,10 @@ def run(geo, lang):
     if os.path.exists(out_path):
         print(f"{geo}/{lang}: уже готов, скип", flush=True)
         return True
-    if lang != "en" and not budget_ok():  # не начинаем гео, если бюджет уже выбран/окно
-        print(f"{geo}/{lang}: бюджет/окно — отложен", flush=True)
+    if (
+        lang != "en" and not budget_ok()
+    ):  # не начинаем гео в окне экстракции (кап держит мозг)
+        print(f"{geo}/{lang}: окно экстракции — отложен", flush=True)
         return False
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
     views = [
@@ -167,12 +172,14 @@ def run(geo, lang):
     if lang == "en":
         text = en_text
     else:
-        text, complete = translate_texts(en_text, lang)  # ПЛАТНАЯ часть, под governor
+        text, complete = translate_texts(
+            en_text, lang
+        )  # ПЛАТНАЯ часть, квоту держит мозг
         if (
             not complete
-        ):  # остановились по бюджету → гео НЕ пишем, доделаем позже (без шторма)
+        ):  # окно экстракции ИЛИ мозг на капе → гео НЕ пишем, доделаем позже (без шторма)
             print(
-                f"{geo}/{lang}: pool-soft/окно — стоп, гео отложен (перевёл {len(text)})",
+                f"{geo}/{lang}: окно/кап мозга — стоп, гео отложен (перевёл {len(text)})",
                 flush=True,
             )
             return False

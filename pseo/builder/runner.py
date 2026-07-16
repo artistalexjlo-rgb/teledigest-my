@@ -29,12 +29,9 @@ MIN_LEN = (
 )
 CHUNK = 50  # новых мух на гео за проход (пейсинг)
 PASS_SLEEP = 1200  # пауза между проходами, сек
-# КВОТА-ОСОЗНАННЫЙ потолок: не число мух, а доля дневного пула flash-lite.
-# Читаем gemini_quota (билдер+вечерняя экстракция суммарно). Дошли до SOFT → стоп до суток,
-# оставив запас экстракции. Резерв 80/ключ и так в gemini_json (прод не голодает). Модель RPD 500.
-POOL_SOFT_FRAC = 0.55  # жрём до 55% пула, ~45% + резерв оставляем вечерней экстракции
-RESERVE = 120  # выровнено с build.py: RPD-запас под потолок 500/проект
-RPD = 500
+# КВОТУ держит МОЗГ (keybroker): per-ключ RPD-кап (RPD−RESERVE) + per-рот кап. Раннерского
+# pool_state (чтение gemini_quota) БОЛЬШЕ НЕТ — второго квота-источника быть не должно.
+# Осталось только окно экстракции (in_window, часы) — защита от RPM-коллизии с вечерним прода.
 
 
 def now():
@@ -59,20 +56,6 @@ def geos():
     ).fetchall()
     m.close()
     return rows
-
-
-def pool_state():
-    """Сегодняшний расход flash-lite (билдер+экстракция) и мягкий потолок пула.
-    Потолок = число_ключей × (RPD − резерв) × доля. Возвращает (used, soft)."""
-    m = sqlite3.connect(DB, timeout=5)
-    keys, used = m.execute(
-        "SELECT COUNT(DISTINCT key_hash), COALESCE(SUM(count),0) FROM gemini_quota "
-        "WHERE model LIKE '%flash-lite%' AND date_utc=date('now')"
-    ).fetchone()
-    m.close()
-    keys = keys or 13  # если сегодня ещё пусто — берём известное число ключей
-    soft = int(keys * (RPD - RESERVE) * POOL_SOFT_FRAC)
-    return used, soft
 
 
 def progress():
@@ -148,31 +131,13 @@ def main():
             time.sleep(600)
             continue
 
-        used, soft = pool_state()
-        if (
-            used >= soft
-        ):  # общий расход пула дошёл до мягкого потолка → отступаем до суток
-            save(
-                STATUS,
-                {
-                    "state": "pool-soft-reached",
-                    "pool_used": used,
-                    "soft": soft,
-                    "ts": now(),
-                },
-            )
-            time.sleep(1800)
-            continue
-
         stamps = load(STAMPS, {})
         for geo, cnt, mx in geos():
             if os.path.exists(STOP) or in_window():
                 break
             if stamps.get(geo) == mx:
                 continue  # гео полностью тегнут при этих данных → скип
-            used, soft = pool_state()
-            if used >= soft:
-                break  # пул почти выбран (билдер+экстракция) → стоп до суток
+            # КВОТА — на мозге: build_facet зовёт рты через keybroker.call, тот сам режет на капе.
             new_n, remaining = build_facet(geo, CHUNK)
             if new_n < 0:
                 break  # окно
@@ -187,19 +152,14 @@ def main():
                     "state": "building",
                     "geo": geo,
                     "new": new_n,
-                    "pool_used": used,
-                    "soft": soft,
                     "прогресс": progress(),
                     "ts": now(),
                 },
             )
-        used, soft = pool_state()
         save(
             STATUS,
             {
                 "state": "idle",
-                "pool_used": used,
-                "soft": soft,
                 "geos_stamped": len(stamps),
                 "прогресс": progress(),
                 "ts": now(),
