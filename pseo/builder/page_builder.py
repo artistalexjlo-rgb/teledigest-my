@@ -1,6 +1,6 @@
 """page_builder.py — БИЛДЕР как ИНСТРУМЕНТ. Одна пара (гео, категория) → одна страница.
 
-Молоко (капля) ВПРЫСКИВАЕТСЯ: drop(user, sysprompt) -> dict|None.
+Молоко (капля) ВПРЫСКИВАЕТСЯ: drop(user, sysprompt, consumer) -> dict|None.
 Инструмент НЕ знает, откуда капля — ключей, квот, пейсинга, cooldown, HTTP тут НЕТ.
 Всё это держит сиська (keybroker); она же кормит. См. __main__: drop = keybroker.call.
 
@@ -182,7 +182,7 @@ def write_faq(group, geo_name, topic, drop):
     group = dedupe(group)[:20]  # разные пункты, кап под токены
     cand = [{"id": f"P{i}", "text": g["lesson"][:400]} for i, g in enumerate(group)]
     user = "ФАКТЫ:\n" + "\n".join(f'{c["id"]}: {c["text"]}' for c in cand)
-    out = drop(user, WRITE_SYS.format(geo=geo_name, topic=topic))
+    out = drop(user, WRITE_SYS.format(geo=geo_name, topic=topic), consumer="faq")
     items = out.get("items") if out else None
     if not items:
         return None
@@ -276,7 +276,7 @@ SYNTH_SYS = (
 
 def synth(faqs, geo_name, topic, drop):
     body = "\n".join(f'- {f["q"]} {f["a_plain"]}' for f in faqs)
-    out = drop(body, SYNTH_SYS.format(geo=geo_name, topic=topic))
+    out = drop(body, SYNTH_SYS.format(geo=geo_name, topic=topic), consumer="synth")
     return out or {}
 
 

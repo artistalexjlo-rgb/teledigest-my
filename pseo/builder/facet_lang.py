@@ -2,7 +2,7 @@
   lang=en → текст = оригинал ai_lesson (английский, бесплатно), метки RU→EN.
   иначе   → текст = перевод ai_lesson→lang (платно), метки RU→lang.
 Только виды ≥4 фактов (что станут страницами) — так и стоимость ограничена сама собой.
-Пейсинг/резерв/429 — внутри build.gemini_json, отдельный runner не нужен.
+Пейсинг/резерв/429/кап — внутри keybroker.call (сосок мозга), отдельный runner не нужен.
 
 Запуск: facet_lang.py br es   → out_facet_es/br.json
 """
@@ -13,7 +13,7 @@ import re
 import sqlite3
 import sys
 
-from build import gemini_json
+from keybroker import call
 from runner import in_window, pool_state  # ПЕРЕИСПОЛЬЗУЕМ готовый governor RU-раннера
 
 DB = "/home/teledigest/data/messages_fts.db"
@@ -103,8 +103,10 @@ def translate_labels(labels, lang):
         if not todo:
             break
         for i in range(0, len(todo), 60):
-            out = gemini_json(
-                json.dumps(todo[i : i + 60], ensure_ascii=False), labels_sys(lang)
+            out = call(
+                json.dumps(todo[i : i + 60], ensure_ascii=False),
+                labels_sys(lang),
+                consumer="labels",
             )
             for k, v in ((out or {}).get("map") or {}).items():
                 if v and v.strip() and not _has_cyr(v):
@@ -114,16 +116,19 @@ def translate_labels(labels, lang):
 
 
 def translate_texts(id_text, lang):
-    """{id: english} → {id: target}. Батчи по 8. Возвращает (out, complete): complete=False если
-    остановились по бюджету (pool-soft/окно) — тогда гео НЕ пишем, доделаем в другой день (без шторма).
+    """{id: english} → {id: target}. Батчи по 50 (канон 4.1: запрос ≈10К ток = 60% окна).
+    Возвращает (out, complete): complete=False если остановились по бюджету (pool-soft/окно) —
+    тогда гео НЕ пишем, доделаем в другой день (без шторма).
     """
     items = list(id_text.items())
     out = {}
-    for i in range(0, len(items), 8):
+    for i in range(0, len(items), 50):
         if not budget_ok():  # governor: дошли до soft или окно → стоп, гео отложить
             return out, False
-        batch = dict(items[i : i + 8])
-        r = gemini_json(json.dumps(batch, ensure_ascii=False), text_sys(lang))
+        batch = dict(items[i : i + 50])
+        r = call(
+            json.dumps(batch, ensure_ascii=False), text_sys(lang), consumer="translate"
+        )
         if (
             r is None
         ):  # None = исчерпание ключей/провал вызова (НЕ пустой батч!) → стоп, incomplete

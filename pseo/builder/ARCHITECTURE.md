@@ -116,7 +116,7 @@ consumer_usage(consumer, pt_day, count, PK(consumer,pt_day))  -- счёт дня
 ## Статус проводки (меняется по мере работы)
 
 - **Сосок (`call`)** — построен (Шаг 1). Ключи в мозге, `acquire/report` не тронуты.
-- **Рты** — пока зовут старый `gemini_json` из `build.py` (in-process дверь). **Шаг 2** — перенаправить все 7 на `keybroker.call` + каждый называет `consumer`/`model`.
+- **Рты присосаны (✅ Шаг 2)** — `facet`/`facet_lang`/`questions_page`/`page_builder` зовут `keybroker.call(..., consumer=…)`, `from build import gemini_json` убран. translate батч 8→50. **НЕ запускалось на боевых ключах** (нужен worst-case + разрешение юзера).
 - **Кап по рту** — ✅ построен + засеян + логирование аномалий (см. выше). Остаток: выпил `RPM_DIVISOR=4` при проводке translate.
 - **Экстрактор** — не подключён (по плану, позже).
 

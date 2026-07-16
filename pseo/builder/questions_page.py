@@ -8,7 +8,8 @@ import json
 import sqlite3
 import sys
 
-from facet import DB, gemini_json, guard_prod_window, is_junk
+from facet import DB, guard_prod_window, is_junk
+from keybroker import call
 
 SYS = (
     "Вот НАРРАЦИИ-запросы из чатов (модель пересказала, что человек спрашивал). Для КАЖДОЙ верни:\n"
@@ -42,7 +43,7 @@ def run(geo, limit=45):
     for i in range(0, len(narr), 15):
         batch = narr[i : i + 15]
         payload = "\n".join(f"{j + 1}. {t}" for j, t in enumerate(batch))
-        out = gemini_json(payload, SYS)
+        out = call(payload, SYS, consumer="questions")
         for it in (out or {}).get("items", []):
             if it.get("q") and it.get("tema"):
                 items.append({"q": it["q"].strip(), "tema": it["tema"].strip()})
