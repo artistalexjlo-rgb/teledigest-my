@@ -71,5 +71,10 @@
   "nav_telegram": "Telegram",
   "theme_night": "◐ Ночь",
   "theme_day": "☀ День",
-  "crumbs_home": "Главная"
+  "crumbs_home": "Главная",
+  "home_countries_label": "Страны",
+  "home_popular": "Популярные",
+  "home_by_region": "По регионам",
+  "home_search_ph": "Начни печатать страну…",
+  "home_search_none": "ничего не найдено"
 }

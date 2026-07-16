@@ -71,5 +71,10 @@
   "nav_telegram": "Telegram",
   "theme_night": "◐ Noche",
   "theme_day": "☀ Día",
-  "crumbs_home": "Inicio"
+  "crumbs_home": "Inicio",
+  "home_countries_label": "Países",
+  "home_popular": "Populares",
+  "home_by_region": "Por región",
+  "home_search_ph": "Empieza a escribir un país…",
+  "home_search_none": "nada encontrado"
 }
