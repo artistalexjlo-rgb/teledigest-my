@@ -27,7 +27,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 
-from build import gemini_json
+from keybroker import call
 
 DB = "/home/teledigest/data/messages_fts.db"
 MIN_LEN = 140
@@ -136,7 +136,7 @@ def facet_one(fid, lesson):
     """Возвращает (status, rec): "ok"+запись | "bad"+None (муха непереваримая — к дед-леттеру) |
     "infra"+None (gemini_json ничего не отдал — бюджет/429/таймаут, НЕ вина мухи, не пенализировать).
     """
-    out = gemini_json(lesson, FACET_SYS)  # build.gemini_json(user, sysprompt)
+    out = call(lesson, FACET_SYS, consumer="facet")  # сосок мозга, рот=facet
     if out is None:
         return ("infra", None)  # инфра-сбой — муху не виним
     if "perevod" not in out or "zadachi" not in out:
@@ -175,7 +175,11 @@ def consolidate(labels):
     mp = {}
     for i in range(0, len(uniq), 120):
         batch = uniq[i : i + 120]
-        out = gemini_json(json.dumps(batch, ensure_ascii=False), CONSOLIDATE_SYS)
+        out = call(
+            json.dumps(batch, ensure_ascii=False),
+            CONSOLIDATE_SYS,
+            consumer="consolidate",
+        )
         mp.update((out or {}).get("map") or {})
     return {x: _norm(mp.get(x, x)) for x in uniq}
 
