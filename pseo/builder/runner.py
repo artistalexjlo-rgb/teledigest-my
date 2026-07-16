@@ -22,7 +22,6 @@ STATUS = f"{HERE}/runner_status.json"
 STOP = f"{HERE}/RUNNER_STOP"
 STAMPS = f"{HERE}/runner_stamps.json"
 BUDGET = f"{HERE}/runner_budget.json"
-BLOCK_UTC = (20, 23)
 MIN_FLIES = 40
 MIN_LEN = (
     140  # тот же порог длины ai_lesson, что в facet (для счёта корпуса в progress)
@@ -31,7 +30,7 @@ CHUNK = 50  # новых мух на гео за проход (пейсинг)
 PASS_SLEEP = 1200  # пауза между проходами, сек
 # КВОТУ держит МОЗГ (keybroker): per-ключ RPD-кап (RPD−RESERVE) + per-рот кап. Раннерского
 # pool_state (чтение gemini_quota) БОЛЬШЕ НЕТ — второго квота-источника быть не должно.
-# Осталось только окно экстракции (in_window, часы) — защита от RPM-коллизии с вечерним прода.
+# Окна экстракции тоже НЕТ: коэкзистенцию держит резерв мозга (60/ключ) + per-ключ шаг + abuse.
 
 
 def now():
@@ -40,10 +39,6 @@ def now():
 
 def today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-def in_window():
-    return BLOCK_UTC[0] <= datetime.now(timezone.utc).hour < BLOCK_UTC[1]
 
 
 def geos():
@@ -126,14 +121,10 @@ def main():
         if os.path.exists(STOP):
             save(STATUS, {"state": "stopped", "ts": now()})
             return
-        if in_window():
-            save(STATUS, {"state": "paused-window", "ts": now()})
-            time.sleep(600)
-            continue
 
         stamps = load(STAMPS, {})
         for geo, cnt, mx in geos():
-            if os.path.exists(STOP) or in_window():
+            if os.path.exists(STOP):
                 break
             if stamps.get(geo) == mx:
                 continue  # гео полностью тегнут при этих данных → скип

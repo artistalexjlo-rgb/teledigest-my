@@ -11,7 +11,6 @@ import os
 import subprocess
 import time
 
-from facet_lang import budget_ok  # для перепроверки на ложный rc3
 
 PY = "/root/embed_ab/venv/bin/python"
 HERE = "/root/pseo_builder"
@@ -94,11 +93,9 @@ def main():
             rc = build_one(geo, lang)
             if (
                 rc == 3
-            ):  # facet_lang сказал бюджет/окно — но ПЕРЕПРОВЕРИМ (бывает ложно)
-                if budget_ok():
-                    continue  # ложная тревога — бюджет есть, идём дальше без сна
+            ):  # мозг на капе/исчерпании (call вернул None) → гео отложен, досыпаем
                 save_status(
-                    {"state": "budget-sleep", "осталось": len(pending), "ts": now()}
+                    {"state": "cap-sleep", "осталось": len(pending), "ts": now()}
                 )
                 stalled = True
                 break

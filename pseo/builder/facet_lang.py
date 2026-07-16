@@ -14,19 +14,11 @@ import sqlite3
 import sys
 
 from keybroker import call
-from runner import (
-    in_window,
-)  # окно экстракции (часы); КВОТУ держит мозг keybroker, не pool_state
 
 DB = "/home/teledigest/data/messages_fts.db"
 HERE = "/root/pseo_builder"
-
-
-def budget_ok():
-    """Только окно экстракции (часы). Квоту/пул теперь держит мозг keybroker (сосок call
-    отдаёт None на капе → рот сам отложит гео). Второго квота-источника (pool_state/gemini_quota) НЕТ.
-    """
-    return not in_window()
+# Ни квоты (мозг), ни окна (коэкзистенцию держит резерв мозга) — рот просто зовёт call,
+# тот отдаёт None на капе → гео откладывается сам.
 
 
 LANG_NAME = {
@@ -124,10 +116,6 @@ def translate_texts(id_text, lang):
     items = list(id_text.items())
     out = {}
     for i in range(0, len(items), 50):
-        if (
-            not budget_ok()
-        ):  # только окно экстракции → стоп, гео отложить (кап держит мозг ниже)
-            return out, False
         batch = dict(items[i : i + 50])
         r = call(
             json.dumps(batch, ensure_ascii=False), text_sys(lang), consumer="translate"
@@ -150,11 +138,6 @@ def run(geo, lang):
     if os.path.exists(out_path):
         print(f"{geo}/{lang}: уже готов, скип", flush=True)
         return True
-    if (
-        lang != "en" and not budget_ok()
-    ):  # не начинаем гео в окне экстракции (кап держит мозг)
-        print(f"{geo}/{lang}: окно экстракции — отложен", flush=True)
-        return False
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
     views = [
         v for v in src["views_by_task"] if len(v["items"]) >= 4

@@ -11,7 +11,7 @@ control_pix.py — КОНТРОЛЬ метода до масштаба (BUILDER_
 
 import sqlite3
 
-from facet import DB, facet_one, guard_prod_window
+from facet import DB, facet_one
 
 PIX_HINT = ("pix", "пикс")
 
@@ -24,7 +24,6 @@ def has_pix_tag(r):
 
 
 def main():
-    guard_prod_window()
     m = sqlite3.connect(DB)
     rows = m.execute(
         "SELECT id, ai_lesson FROM extracted_patterns "

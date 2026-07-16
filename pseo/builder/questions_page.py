@@ -8,7 +8,7 @@ import json
 import sqlite3
 import sys
 
-from facet import DB, guard_prod_window, is_junk
+from facet import DB, is_junk
 from keybroker import call
 
 SYS = (
@@ -37,7 +37,6 @@ def load_questions(geo, limit):
 
 
 def run(geo, limit=45):
-    guard_prod_window()
     narr = load_questions(geo, limit)
     items = []
     for i in range(0, len(narr), 15):
