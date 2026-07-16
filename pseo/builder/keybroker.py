@@ -505,4 +505,4 @@ def stats(hours=24):
 if __name__ == "__main__":
     init()
     seed_caps()
-    print("keybroker init OK:", DB, "| капы:", CAPS)
+    print("keybroker init OK:", DB, "| caps seeded:", len(CAPS))  # ASCII: не падать под C-локалью
