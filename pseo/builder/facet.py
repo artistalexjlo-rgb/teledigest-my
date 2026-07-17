@@ -17,7 +17,7 @@ single-bucket'а (там один неверный выбор = не та стр
 Задачи именуются из текста мухи → пасс консолидации сводит ярлыки к одному грайну (не косинус).
 
 Запуск (VPS): /root/embed_ab/venv/bin/python facet.py <geo> [--limit N]
-Плуминг Gemini (пейсинг/квота/IPv4) переиспользуется из build.py.
+Плуминг Gemini (пейсинг/квота/429/IPv4) — внутри keybroker.call (сосок мозга). build.py снесён.
 """
 
 import json
@@ -25,7 +25,6 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import datetime, timezone
 
 from keybroker import call
 
