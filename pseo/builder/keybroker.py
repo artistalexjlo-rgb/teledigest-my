@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -27,6 +28,14 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# ТОЛЬКО IPv4 — дословно из build.py. У VPS IPv6 к generativelanguage = чёрная дыра (коннект
+# виснет). Без этого urllib идёт по дефолту ОС (IPv6 первым) → HTTP зависает, call не доходит
+# до report. Фильтруем getaddrinfo до AF_INET, чтоб urllib физически не лез в IPv6.
+_orig_gai = socket.getaddrinfo
+socket.getaddrinfo = lambda *a, **k: [
+    r for r in _orig_gai(*a, **k) if r[0] == socket.AF_INET
+]
 
 DB = os.environ.get("KB_DB", "/root/pseo_builder/keybroker.db")
 PT = ZoneInfo("America/Los_Angeles")
@@ -505,4 +514,6 @@ def stats(hours=24):
 if __name__ == "__main__":
     init()
     seed_caps()
-    print("keybroker init OK:", DB, "| капы:", CAPS)
+    print(
+        "keybroker init OK:", DB, "| caps seeded:", len(CAPS)
+    )  # ASCII: не падать под C-локалью

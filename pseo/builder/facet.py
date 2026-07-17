@@ -63,21 +63,8 @@ def is_junk(t):
     return bool(t and (_JUNK.search(t) or _OPENER.match(t)))
 
 
-BLOCK_UTC = (
-    20,
-    23,
-)  # прод-окно вечернего «разделителя» — те же flash-ключи, НЕ жжём тут
-
-
-def guard_prod_window():
-    """Отказ работать в 20-23 UTC: ключи делит вечерняя экстракция прода
-    ([[feedback_shared_key_budget_discipline]]). Обойти осознанно: env PSEO_FORCE=1."""
-    h = datetime.now(timezone.utc).hour
-    if BLOCK_UTC[0] <= h < BLOCK_UTC[1] and os.environ.get("PSEO_FORCE") != "1":
-        raise SystemExit(
-            f"⛔ {h}:00 UTC — прод-окно 20-23 (общий бюджет ключей). Не запускаю. "
-            "Вне окна, либо PSEO_FORCE=1 осознанно."
-        )
+# Окно экстракции УБРАНО: коэкзистенцию с экстрактором держит мозг (резерв 60/ключ +
+# per-ключ шаг + abuse-пауза), временнОе разделение не нужно. Мозг — единственный раздатчик.
 
 
 FACET_SYS = (
@@ -188,7 +175,6 @@ def run(geo, limit=None):
     """Накопительный прогон: догружает УЖЕ тегнутое (tags/<geo>.json), тегает СЛЕДУЮЩИЕ
     ≤limit мух, мёржит, пересобирает виды. Возвращает число НОВЫХ тегнутых (для темпа).
     """
-    guard_prod_window()
     os.makedirs("tags", exist_ok=True)
     tags_fn = f"tags/{geo}.json"
     tagged = []
