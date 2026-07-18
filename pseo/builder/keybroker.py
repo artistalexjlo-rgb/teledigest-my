@@ -414,7 +414,13 @@ _KEYS = None
 
 def get_keys():
     """Ключи из env бот-контейнера. Кэш на процесс — это чтение env, НЕ состояние пейсинга
-    (то в SQLite, переживает спавн)."""
+    (то в SQLite, переживает спавн).
+
+    Порядок как у `config.gemini_api_keys_from_env` (CLAUDE.md): numbered `GEMINI_API_KEY_N`
+    → legacy `GEMINI_API_KEYS` (comma) → single `GEMINI_API_KEY`. ⚠️ РАНЬШЕ грепал
+    `startswith("GEMINI_API_KEY")` и хватал ЛЕГАСИ `GEMINI_API_KEYS` как ЛИШНИЙ богус-ключ →
+    400 API_KEY_INVALID на ~1/N запросов (диагностика 2026-07-18). Теперь через precedence.
+    """
     global _KEYS
     if _KEYS is None:
         cid = subprocess.check_output(
@@ -423,11 +429,27 @@ def get_keys():
             text=True,
         ).strip()
         env = subprocess.check_output(["docker", "exec", cid, "printenv"], text=True)
-        _KEYS = [
-            ln.split("=", 1)[1]
-            for ln in env.splitlines()
-            if ln.startswith("GEMINI_API_KEY") and "=" in ln
+        vals = {}
+        for ln in env.splitlines():
+            if "=" in ln:
+                name, val = ln.split("=", 1)
+                vals[name] = val
+        numbered = [
+            vals[k]
+            for k in sorted(
+                (k for k in vals if re.fullmatch(r"GEMINI_API_KEY_\d+", k)),
+                key=lambda k: int(k.rsplit("_", 1)[1]),
+            )
+            if vals[k].strip()
         ]
+        if numbered:  # numbered есть → легаси/single ИГНОРИРУЕМ (как хелпер)
+            _KEYS = numbered
+        elif vals.get("GEMINI_API_KEYS", "").strip():
+            _KEYS = [k.strip() for k in vals["GEMINI_API_KEYS"].split(",") if k.strip()]
+        elif vals.get("GEMINI_API_KEY", "").strip():
+            _KEYS = [vals["GEMINI_API_KEY"].strip()]
+        else:
+            _KEYS = []
         if not _KEYS:
             sys.exit("no GEMINI keys in container env")
     return _KEYS
