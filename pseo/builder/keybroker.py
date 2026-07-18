@@ -68,9 +68,9 @@ COOLDOWN_FIRST = (
     300.0  # _EMBED_COOLDOWN_S: 1-й 429 = транзиент → 5мин (НЕ убивать ключ)
 )
 COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (после cooldown) → 30мин, НЕ дневной бан
-ABUSE_THRESHOLD = 3  # _EMBED_ABUSE_THRESHOLD: ≥3 ответа 429 за окно
-ABUSE_WINDOW = 60.0  # _EMBED_ABUSE_WINDOW_S
-ABUSE_PAUSE = 1800.0  # _EMBED_ABUSE_PAUSE_S: тогда ГЛОБАЛЬНАЯ пауза всему пулу 30мин (не жечь каждый ключ)
+# ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
+# Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
+# залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
 RESERVE = int(os.environ.get("KB_RESERVE", "60"))
 # ↑ канон п.2 (резерв primary) + ФАКТ A2 (экстрактор мерено ~22 запр/ключ/ночь, логи 2026-07-14).
 #   60 = ~22 + запас. НЕ 120 из build.py.
@@ -82,13 +82,14 @@ RPM_DIVISOR = float(
 STEP_UNVERIFIED = 30.0  # модель с неизвестным RPM → консервативно 30с (2 RPM), пока не подтвердишь скрином
 _FORCE_STEP = os.environ.get("KB_FORCE_STEP")  # только для тестов (фиксированный шаг)
 
-# ГЛОБАЛЬНЫЙ пол между ЛЮБЫМИ двумя выдачами (независимо от ключа) — как extraction._INTER_FILE_PAUSE_S=4.5.
-# Канон НИКОГДА не шлёт back-to-back: даже при мгновенных 429 нельзя прожечь пул машинганом за секунду.
-GLOBAL_FLOOR = float(os.environ.get("KB_GLOBAL_FLOOR", "4.5"))
-_GLOBAL = "__global__"  # спец-ключ в key_clock: next_free = когда можно ЛЮБУЮ следующую выдачу
+# ⛔ ГЛОБАЛЬНЫЙ пол (GLOBAL_FLOOR/_GLOBAL) ВЫЧИЩЕН (канон §5, подвал; 2026-07-18): был мой выдуманный
+# глобальный аггрегат-дроссель (1 выдача/4.5с на весь пул = ~13/мин) — приблуда из
+# extraction._INTER_FILE_PAUSE_S (пауза ВНУТРИ процесса, не глоб-пол). Канон ЗАПРЕЩАЕТ аггрегат поверх
+# независимых проектов («душил бы 12 как 1»). Темп держит per-key шаг (step_for). RPM_DIVISOR НЕ трогаю —
+# это отдельная (впритык vs запас), гейтчена на 429-body.
 
 # ── ПРЕДОХРАНИТЕЛЬ per-РОТ: рот не съест больше своей доли (защита от runaway → осушения пула).
-# Не оптимизация — колпак. Тротл (GLOBAL_FLOOR+шаг+abuse) держит катастрофу (429-шторм); этот кап
+# Не оптимизация — колпак. Тротл (per-key шаг + cooldown) держит катастрофу (429-шторм); этот кап
 # держит «один сломанный рот медленно выел весь пул и заморил остальных».
 # Реальные капы ртов задаёт ЮЗЕР через set_cap() (числа не выдумка кода). Незаписанный рот →
 # этот дефолт, НИКОГДА не uncapped. Консервативно (дневной приток ~300 мух); юзер уточняет.
@@ -141,7 +142,7 @@ def set_cap(consumer, rpd_cap, rpm_cap=None):
 
 def _log_event(consumer, model, event, status=0):
     """Записать аномалию в request_log отдельным коннектом (чтоб говно было ВИДНО в stats):
-    cap_block (рот упёрся в кап) / parse_fail (200, но мусор) / abuse_pause (пул встал).
+    cap_block (рот упёрся в кап) / parse_fail (200, но мусор).
     """
     try:
         c = _conn()
@@ -229,10 +230,6 @@ def init():
         );
         CREATE INDEX IF NOT EXISTS ix_log_ts ON request_log(ts);
         CREATE INDEX IF NOT EXISTS ix_log_429 ON request_log(status, ts);
-        CREATE TABLE IF NOT EXISTS broker_global(
-            id INTEGER PRIMARY KEY CHECK(id=1),
-            abuse_pause_until REAL DEFAULT 0
-        );
         CREATE TABLE IF NOT EXISTS consumer_cap(
             consumer TEXT PRIMARY KEY,
             rpd_cap  INTEGER NOT NULL,
@@ -267,14 +264,6 @@ def acquire(consumer, role, model, keys):
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
-        # ГЛОБАЛЬНАЯ abuse-пауза (эталон): если недавно ≥3 ответа 429 в окне — весь пул отдыхает,
-        # НЕ выпиливаем каждый ключ по отдельности. Снимает смерть-спираль из short-leg 2026-07-14.
-        gp = c.execute(
-            "SELECT abuse_pause_until FROM broker_global WHERE id=1"
-        ).fetchone()
-        if gp and gp[0] > now:
-            c.execute("ROLLBACK")
-            return (None, gp[0] - now)
         # ПРЕДОХРАНИТЕЛЬ per-РОТ: рот выбрал дневную долю → отказ (как per-ключ кап). Не даём
         # одному сломанному рту осушить весь пул и заморить остальных.
         crow = c.execute(
@@ -291,11 +280,6 @@ def acquire(consumer, role, model, keys):
                 "SELECT key_hash, next_free, cooldown_until FROM key_clock"
             )
         }
-        # ГЛОБАЛЬНЫЙ пол: между любыми двумя выдачами ≥ GLOBAL_FLOOR — не даём машинган по пулу.
-        gnext = clocks.get(_GLOBAL, (0.0, 0.0))[0]
-        if gnext > now:
-            c.execute("ROLLBACK")
-            return (None, gnext - now)
         used = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -328,11 +312,6 @@ def acquire(consumer, role, model, keys):
             "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
             (kh, now + step),
         )
-        c.execute(  # глобальный пол — следующая ЛЮБАЯ выдача не раньше now+GLOBAL_FLOOR
-            "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
-            "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
-            (_GLOBAL, now + GLOBAL_FLOOR),
-        )
         c.execute(
             "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "
             "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET count=count+1",
@@ -354,10 +333,9 @@ def acquire(consumer, role, model, keys):
 
 
 def report(consumer, key, model, status):
-    """Отчёт об исходе — эскалация 429 ДОСЛОВНО из эталона gemini_brain:
+    """Отчёт об исходе — per-key эскалация 429 (из эталона gemini_brain, БЕЗ глоб-abuse §2.5):
     1-й 429 → cooldown 300с + пометка was_cd;  повторный 429 → 1800с (НЕ дневной бан);
-    успех(200) → прощение: сброс cooldown И истории was_cd;
-    abuse: ≥3 ответа 429 за 60с → глобальная пауза 1800с всему пулу.
+    успех(200) → прощение (разбан): сброс cooldown И истории was_cd.
     """
     kh = _kh(key)
     now = time.time()
@@ -381,22 +359,7 @@ def report(consumer, key, model, status):
                 "ON CONFLICT(key_hash) DO UPDATE SET cooldown_until=excluded.cooldown_until, was_cd=1",
                 (kh, now + cd),
             )
-            # abuse-окно: текущий 429 уже в логе, считаем все 429-репорты за ABUSE_WINDOW
-            n = c.execute(
-                "SELECT COUNT(*) FROM request_log WHERE event='report' AND status=429 AND ts>=?",
-                (now - ABUSE_WINDOW,),
-            ).fetchone()[0]
-            if n >= ABUSE_THRESHOLD:
-                c.execute(
-                    "INSERT INTO broker_global(id, abuse_pause_until) VALUES(1,?) "
-                    "ON CONFLICT(id) DO UPDATE SET abuse_pause_until=excluded.abuse_pause_until",
-                    (now + ABUSE_PAUSE,),
-                )
-                c.execute(  # пул встал — видно в stats
-                    "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) "
-                    "VALUES(?,?,?,?,'abuse_pause',?)",
-                    (now, consumer, "", model, n),
-                )
+            # abuse-пауза вычищена (§2.5): per-key cooldown выше уже остудил виновный ключ.
         elif status == 200:
             c.execute(
                 "UPDATE key_clock SET cooldown_until=0, was_cd=0 WHERE key_hash=?",

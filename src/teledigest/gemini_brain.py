@@ -143,6 +143,11 @@ _RPD_SOFT_CAP = 950
 _EMBED_COOLDOWN_S = 300.0
 # Repeat 429 (key 429'd again after its first cooldown) -> longer backoff.
 _EMBED_COOLDOWN_REPEAT_S = 1800.0
+# TODO(drop-abuse-pause): глобальная abuse-пауза признана НЕ нужной (канон §2.5, 2026-07-18) —
+# защита от пулемётинга = per-key cooldown, задолбанный ключ остывает сам, залп гасится поштучно.
+# В keybroker вычищена (chore/keybroker-drop-abuse-pause). Здесь ПОКА оставлено (embed = живой прод,
+# трогать отдельно, со своим прогоном). Убрать: _EMBED_ABUSE_*, _embed_abuse_pause_until, _embed_recent_429
+# и блок «Global abuse-pause respect» + подсчёт recent_429 в report-пути.
 _EMBED_ABUSE_THRESHOLD = 3
 _EMBED_ABUSE_WINDOW_S = 60.0
 _EMBED_ABUSE_PAUSE_S = 1800.0

@@ -1,5 +1,5 @@
-"""Песочница (без реальных ключей): проверка 429-эскалации мозга против эталона.
-Ожидаем: 1-й 429→~300с, повтор→~1800с, 200→сброс, ≥3×429/60с→глоб abuse-пауза."""
+"""Песочница (без реальных ключей): проверка per-key 429-эскалации мозга.
+Ожидаем: 1-й 429→~300с, повтор→~1800с, 200→сброс. (Глоб abuse-пауза вычищена, §2.5.)"""
 
 import os
 import time
@@ -39,27 +39,18 @@ if __name__ == "__main__":
 
     k.report("t", "A", M, 200)
     r = cd("A")
-    print("200 на A (прощение) →", r, "(ожид 0, 0)")
+    print("200 на A (прощение = разбан) →", r, "(ожид 0, 0)")
     ok &= r[0] <= 0 and r[1] == 0
 
-    k.report("t", "B", M, 429)
-    k.report("t", "C", M, 429)
-    k.report(
-        "t", "D", M, 429
-    )  # 3-й 429 за окно (A уже простился, но лог 429 считает все)
-    c = k._conn()
-    ap = c.execute("SELECT abuse_pause_until FROM broker_global WHERE id=1").fetchone()
-    c.close()
-    left = round(ap[0] - time.time()) if ap else -1
-    print("abuse_pause_until через ≥3×429 →", left, "с (ожид ~1800)")
-    ok &= 1700 <= left <= 1810
-
-    res = k.acquire("t", "background", M, KEYS)
+    # per-key независимость: 429 по B/C/D остужают ИХ, не весь пул (abuse-паузы нет)
+    for kk in ("B", "C", "D"):
+        k.report("t", kk, M, 429)
+    res = k.acquire("t", "background", M, KEYS)  # A прощён → выдаётся, пул НЕ встал
     print(
-        "acquire во время abuse →",
-        (res[0], round(res[1]) if res[1] else res[1]),
-        "(ожид (None, ~<=1800))",
+        "acquire после 3×429 по B/C/D →",
+        (res[0], res[1]),
+        "(ожид: выдан ключ, НЕ пауза)",
     )
-    ok &= res[0] is None and res[1] and res[1] > 1000
+    ok &= res[0] is not None
 
-    print("VERDICT:", "OK — эскалация по эталону" if ok else "FAIL")
+    print("VERDICT:", "OK — per-key эскалация, глоб-паузы нет" if ok else "FAIL")
