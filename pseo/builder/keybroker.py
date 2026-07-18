@@ -156,6 +156,27 @@ def _log_event(consumer, model, event, status=0):
         pass  # логирование не должно ронять выдачу
 
 
+_BODY_LOG = os.path.join(os.path.dirname(DB) or ".", "error_bodies.log")
+
+
+def _log_body(consumer, model, status, body):
+    """Тело ЛЮБОГО не-200 ответа (400/429/5xx/сеть) в файл — диагностика ПРИЧИНЫ.
+    В request_log тела нет; ловим здесь, чтобы боевой 400/429 показал, что реально ломает
+    (RESOURCE_EXHAUSTED? INVALID_ARGUMENT? SAFETY?). НЕ роняет выдачу (всё в try)."""
+    try:
+        line = "%.0f\t%s\t%s\t%s\t%s\n" % (
+            time.time(),
+            status,
+            consumer,
+            model,
+            " ".join((body or "").split())[:800],
+        )
+        with open(_BODY_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
 CAPS = {  # капы ртов: метод «дневной пик × запас≈3», значения из ARCHITECTURE.md (юзер принял).
     "facet": 1500,  # замер: пик 482 ×3
     "translate": 400,  # 482×13яз/50 ×3
@@ -393,7 +414,13 @@ _KEYS = None
 
 def get_keys():
     """Ключи из env бот-контейнера. Кэш на процесс — это чтение env, НЕ состояние пейсинга
-    (то в SQLite, переживает спавн)."""
+    (то в SQLite, переживает спавн).
+
+    Порядок как у `config.gemini_api_keys_from_env` (CLAUDE.md): numbered `GEMINI_API_KEY_N`
+    → legacy `GEMINI_API_KEYS` (comma) → single `GEMINI_API_KEY`. ⚠️ РАНЬШЕ грепал
+    `startswith("GEMINI_API_KEY")` и хватал ЛЕГАСИ `GEMINI_API_KEYS` как ЛИШНИЙ богус-ключ →
+    400 API_KEY_INVALID на ~1/N запросов (диагностика 2026-07-18). Теперь через precedence.
+    """
     global _KEYS
     if _KEYS is None:
         cid = subprocess.check_output(
@@ -402,11 +429,27 @@ def get_keys():
             text=True,
         ).strip()
         env = subprocess.check_output(["docker", "exec", cid, "printenv"], text=True)
-        _KEYS = [
-            ln.split("=", 1)[1]
-            for ln in env.splitlines()
-            if ln.startswith("GEMINI_API_KEY") and "=" in ln
+        vals = {}
+        for ln in env.splitlines():
+            if "=" in ln:
+                name, val = ln.split("=", 1)
+                vals[name] = val
+        numbered = [
+            vals[k]
+            for k in sorted(
+                (k for k in vals if re.fullmatch(r"GEMINI_API_KEY_\d+", k)),
+                key=lambda k: int(k.rsplit("_", 1)[1]),
+            )
+            if vals[k].strip()
         ]
+        if numbered:  # numbered есть → легаси/single ИГНОРИРУЕМ (как хелпер)
+            _KEYS = numbered
+        elif vals.get("GEMINI_API_KEYS", "").strip():
+            _KEYS = [k.strip() for k in vals["GEMINI_API_KEYS"].split(",") if k.strip()]
+        elif vals.get("GEMINI_API_KEY", "").strip():
+            _KEYS = [vals["GEMINI_API_KEY"].strip()]
+        else:
+            _KEYS = []
         if not _KEYS:
             sys.exit("no GEMINI keys in container env")
     return _KEYS
@@ -466,7 +509,7 @@ def call(
         except urllib.error.HTTPError as e:
             status = e.code
             try:
-                err = e.read().decode("utf-8", "replace")[:300]
+                err = e.read().decode("utf-8", "replace")[:800]
             except Exception:
                 err = str(e)[:120]
         except Exception as e:
@@ -474,6 +517,11 @@ def call(
             err = str(e)[:120]
         finally:
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
+
+        if status != 200:
+            _log_body(
+                consumer, model, status, err
+            )  # тело в error_bodies.log — диагностика причины
 
         if status == 200:
             try:
