@@ -156,6 +156,27 @@ def _log_event(consumer, model, event, status=0):
         pass  # логирование не должно ронять выдачу
 
 
+_BODY_LOG = os.path.join(os.path.dirname(DB) or ".", "error_bodies.log")
+
+
+def _log_body(consumer, model, status, body):
+    """Тело ЛЮБОГО не-200 ответа (400/429/5xx/сеть) в файл — диагностика ПРИЧИНЫ.
+    В request_log тела нет; ловим здесь, чтобы боевой 400/429 показал, что реально ломает
+    (RESOURCE_EXHAUSTED? INVALID_ARGUMENT? SAFETY?). НЕ роняет выдачу (всё в try)."""
+    try:
+        line = "%.0f\t%s\t%s\t%s\t%s\n" % (
+            time.time(),
+            status,
+            consumer,
+            model,
+            " ".join((body or "").split())[:800],
+        )
+        with open(_BODY_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
 CAPS = {  # капы ртов: метод «дневной пик × запас≈3», значения из ARCHITECTURE.md (юзер принял).
     "facet": 1500,  # замер: пик 482 ×3
     "translate": 400,  # 482×13яз/50 ×3
@@ -466,7 +487,7 @@ def call(
         except urllib.error.HTTPError as e:
             status = e.code
             try:
-                err = e.read().decode("utf-8", "replace")[:300]
+                err = e.read().decode("utf-8", "replace")[:800]
             except Exception:
                 err = str(e)[:120]
         except Exception as e:
@@ -474,6 +495,11 @@ def call(
             err = str(e)[:120]
         finally:
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
+
+        if status != 200:
+            _log_body(
+                consumer, model, status, err
+            )  # тело в error_bodies.log — диагностика причины
 
         if status == 200:
             try:
