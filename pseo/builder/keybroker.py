@@ -82,10 +82,11 @@ RPM_DIVISOR = float(
 STEP_UNVERIFIED = 30.0  # модель с неизвестным RPM → консервативно 30с (2 RPM), пока не подтвердишь скрином
 _FORCE_STEP = os.environ.get("KB_FORCE_STEP")  # только для тестов (фиксированный шаг)
 
-# ГЛОБАЛЬНЫЙ пол между ЛЮБЫМИ двумя выдачами (независимо от ключа) — как extraction._INTER_FILE_PAUSE_S=4.5.
-# Канон НИКОГДА не шлёт back-to-back: даже при мгновенных 429 нельзя прожечь пул машинганом за секунду.
-GLOBAL_FLOOR = float(os.environ.get("KB_GLOBAL_FLOOR", "4.5"))
-_GLOBAL = "__global__"  # спец-ключ в key_clock: next_free = когда можно ЛЮБУЮ следующую выдачу
+# ⛔ ГЛОБАЛЬНЫЙ пол (GLOBAL_FLOOR/_GLOBAL) ВЫЧИЩЕН (канон §5, подвал; 2026-07-18): был мой выдуманный
+# глобальный аггрегат-дроссель (1 выдача/4.5с на весь пул = ~13/мин) — приблуда из
+# extraction._INTER_FILE_PAUSE_S (пауза ВНУТРИ процесса, не глоб-пол). Канон ЗАПРЕЩАЕТ аггрегат поверх
+# независимых проектов («душил бы 12 как 1»). Темп держит per-key шаг (step_for). RPM_DIVISOR НЕ трогаю —
+# это отдельная (впритык vs запас), гейтчена на 429-body.
 
 # ── ПРЕДОХРАНИТЕЛЬ per-РОТ: рот не съест больше своей доли (защита от runaway → осушения пула).
 # Не оптимизация — колпак. Тротл (per-key шаг + cooldown) держит катастрофу (429-шторм); этот кап
@@ -279,11 +280,6 @@ def acquire(consumer, role, model, keys):
                 "SELECT key_hash, next_free, cooldown_until FROM key_clock"
             )
         }
-        # ГЛОБАЛЬНЫЙ пол: между любыми двумя выдачами ≥ GLOBAL_FLOOR — не даём машинган по пулу.
-        gnext = clocks.get(_GLOBAL, (0.0, 0.0))[0]
-        if gnext > now:
-            c.execute("ROLLBACK")
-            return (None, gnext - now)
         used = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -315,11 +311,6 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
             "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
             (kh, now + step),
-        )
-        c.execute(  # глобальный пол — следующая ЛЮБАЯ выдача не раньше now+GLOBAL_FLOOR
-            "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
-            "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
-            (_GLOBAL, now + GLOBAL_FLOOR),
         )
         c.execute(
             "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "
