@@ -79,7 +79,6 @@ RESERVE = int(os.environ.get("KB_RESERVE", "60"))
 RPM_DIVISOR = float(
     os.environ.get("KB_RPM_DIV", "4")
 )  # 15/4≈3.75 RPM/ключ → шаг ~16с. Далеко под потолком.
-STEP_UNVERIFIED = 30.0  # модель с неизвестным RPM → консервативно 30с (2 RPM), пока не подтвердишь скрином
 _FORCE_STEP = os.environ.get("KB_FORCE_STEP")  # только для тестов (фиксированный шаг)
 
 # ⛔ ГЛОБАЛЬНЫЙ пол (GLOBAL_FLOOR/_GLOBAL) ВЫЧИЩЕН (канон §5, подвал; 2026-07-18): был мой выдуманный
@@ -107,12 +106,10 @@ def cap_for(model, role):
 
 
 def step_for(model):
-    """Шаг per-key ПО МОДЕЛИ, консервативно от её RPM. Неизвестный RPM → фикс-консерватив, не выдумка."""
+    """Шаг per-key ПО МОДЕЛИ от её RPM (факт из LIMITS). Неизвестный/0 → DEFAULT_LIMIT rpm (=5)."""
     if _FORCE_STEP:
         return float(_FORCE_STEP)
-    rpm = _lim(model)["rpm"]
-    if not rpm:
-        return STEP_UNVERIFIED
+    rpm = _lim(model)["rpm"] or DEFAULT_LIMIT["rpm"]
     return 60.0 * RPM_DIVISOR / rpm
 
 
@@ -499,10 +496,11 @@ def call(
                 return None
         fails += 1
         if status == 429:
-            continue  # мозг уже поставил cooldown → берём другой ключ
-        if status in (400, 500, 502, 503, -1):
-            time.sleep(3)  # транзиент → повторить
-            continue
+            continue  # мозг поставил cooldown этому ключу → берём другой (шаг разведёт сам)
+        if status in (500, 502, 503, -1):
+            continue  # транзиент сервера/сети → другой ключ (пейсинг per-key, без выдуманной паузы)
+        if status in (400, 403):
+            return None  # проблема запроса/ключа (INVALID_ARGUMENT) — ретрай не лечит
         print("  HTTP", status, err[:200])
         return None
     print(f"  сдались ({consumer}): fails={fails}/{MAX_FAILS}, ждали {waited:.0f}с")
