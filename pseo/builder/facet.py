@@ -170,9 +170,7 @@ def carve_family(fids, by_id):
     for s in range(0, len(fids), CARVE_BATCH):
         chunk = fids[s : s + CARVE_BATCH]
         idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
-        res = call(
-            json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="consolidate"
-        )
+        res = call(json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="carve")
         if not res or not res.get("intents"):
             for fid in chunk:  # fallback: муха как есть (её первая задача = имя)
                 out.append({"name": by_id[fid]["zadachi"][0], "ids": [fid]})
@@ -229,7 +227,7 @@ def assign_tail(tail_fids, by_id):
         res = None
         for _ in range(3):
             res = call(
-                json.dumps(idx, ensure_ascii=False), ASSIGN_SYS, consumer="consolidate"
+                json.dumps(idx, ensure_ascii=False), ASSIGN_SYS, consumer="assign"
             )
             if res and res.get("assign"):
                 break
