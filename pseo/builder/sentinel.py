@@ -7,8 +7,7 @@ sentinel.py — ДЕТЕРМИНИРОВАННЫЙ сторож (не LLM-«Ва
      + контент-целостность каждой 200-страницы: есть <h1>, тело не пустое, нет '�'.
   2. Sitemap-свип: живой /sitemap.xml → КАЖДЫЙ <loc> отвечает 200 (ловит orphans, недоехавший
      CF-билд, потерянные файлы — краул их не видит). + robots.txt доступен.
-  3. Runner (авто-тегание): лампа runner_status.json протухла >12ч → dead-man чирик.
-  4. Квота: max_key близко к кэпу (билдер объедает прод-резерв).
+(runner- и квота-проверки вырезаны 2026-07-20: раннера нет как класса, всё по отмашке.)
 LLM тут НЕ нужен — это HTTP-коды и пороги. Эскалация в дайджест только по факту срабатывания.
 
 Запуск (VPS): /root/embed_ab/venv/bin/python sentinel.py   (cron, напр. каждые 6ч)
@@ -24,11 +23,8 @@ sys.stdout.reconfigure(encoding="utf-8")
 DRY = "--dry" in sys.argv  # диагностика: считать, но НЕ чирикать
 
 SITE = "https://info.multyspeak.online"
-DB = "/home/teledigest/data/messages_fts.db"
 STATUS = "/root/pseo_builder/status.json"
 CHIRP = "/root/embed_ab/chirp.sh"
-QUOTA_CAP = 500
-QUOTA_ALERT = 460  # max_key выше → билдер ест прод-резерв
 STALE_HOURS = 6
 
 
@@ -108,11 +104,9 @@ def check_sitemap(crawled):
     return issues
 
 
-def check_runner():
-    """ВЫКЛЮЧЕН 2026-07-20: раннера НЕТ КАК КЛАССА (юзер: самоходных демонов у билдера
-    не существует, всё по отмашке; юнит pseo-runner снесён). Проверка беспредметна —
-    оставлена пустышкой, чтобы не чирикать про труп каждые 6 часов."""
-    return []
+# check_runner ВЫРЕЗАН 2026-07-20: раннера нет как класса (всё по отмашке).
+# check_quota ВЫРЕЗАН 2026-07-20 (юзер: неактуально): сценарий «самоходный билдер
+# объедает прод-резерв» умер вместе с раннером; расход по отмашке виден в keybroker.
 
 
 def check_builder():
@@ -144,26 +138,6 @@ def check_builder():
     return issues
 
 
-def check_quota():
-    try:
-        out = subprocess.check_output(
-            [
-                "sqlite3",
-                DB,
-                "SELECT COALESCE(MAX(count),0) FROM gemini_quota "
-                "WHERE date_utc=date('now') AND model='gemini-3.1-flash-lite';",
-            ],
-            text=True,
-            timeout=15,
-        ).strip()
-        mx = int(out or 0)
-    except Exception:
-        return []
-    if mx >= QUOTA_ALERT:
-        return [f"квота: max_key={mx}/{QUOTA_CAP} — билдер у прод-резерва, притормози"]
-    return []
-
-
 def main():
     issues = []
     seen, broken, damaged = crawl()
@@ -175,9 +149,7 @@ def main():
             f"битый контент (200, но пусто/без h1/�): {len(damaged)}: {damaged[:4]}"
         )
     issues += check_sitemap(seen)
-    issues += check_runner()
     issues += check_builder()
-    issues += check_quota()
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if issues:
