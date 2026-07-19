@@ -84,16 +84,6 @@ FACET_SYS = (
     "Только JSON, без пояснений."
 )
 
-CONSOLIDATE_SYS = (
-    "Дан список ЗАДАЧ (ярлыков), собранных по одной мухе, поэтому одна задача записана разными "
-    "словами и в разной дробности. Сведи к СОГЛАСОВАННОМУ набору задач ОДНОГО уровня дробности "
-    "(как оглавление гайда: 'Документы и виза', 'Банк и деньги', 'SIM и интернет', 'Транспорт', "
-    "'Жильё', 'Покупки', 'Здоровье', 'Билеты и развлечения', 'Работа и налоги', 'Безопасность', "
-    "'Почта и посылки', 'Обмен и переводы'…). Только ОБЪЕДИНЯЙ существующие, НЕ выдумывай новых, "
-    "НИ ОДИН входной ярлык не потеряй.\n"
-    'Верни СТРОГО JSON: {"map": {"<вход>": "<согласованная задача>", ...}}.'
-)
-
 
 def _atomic_json(path, obj):
     """Запись через temp+rename: kill в любой момент не оставит недописанный/битый файл."""
@@ -148,26 +138,104 @@ def facet_one(fid, lesson):
     )
 
 
-def _norm(s):
-    return " ".join(s.split()).rstrip(".").strip()
+# ── CARVE: ЗАМЕНА consolidate. Читаем ТЕКСТЫ мух пачкой по фасет-семье → LLM вычленяет подпункты
+# и присваивает мух. Правильнее дедупа меток (доказано br/vn 2026-07-18): метка = degraded-артефакт,
+# текст = исходник — carve находит нюансы, которых в метке нет, и держит ВНЖ≠гражданство. ГРАНИЦА:
+# carve ТОЛЬКО на плотной когерентной семье; тонкий хвост оставляем как facet (grab-bag расплющивает
+# в широкие вёдра — vn-тест). split-по-числу мёртв: НЕ роутим методы счётчиком, режем по семье+плотности.
+MIN_CARVE = 6  # семья мельче → мухи как есть (тонкий специфичный хвост НЕ карвим, это уже лонг-тейл)
+CARVE_BATCH = 90  # мух в пачку (окно ~16.6К ток; 90×~110 ≈ 10К, проверено 200)
+
+CARVE_SYS = (
+    "Ниже связанные советы (id: текст) — близкая тема. Вычлени СВЯЗНЫЕ подпункты (каждый = "
+    "отдельная страница-гайд). Присвой каждый совет к подпункту(ам) — совет МОЖЕТ быть в "
+    "нескольких. Правила: дубли/переформулировки ОДНОЙ задачи — в ОДИН подпункт; РАЗНЫЕ "
+    "задачи/объекты/места — РАЗДЕЛЬНО (студенческая≠рабочая виза; CPF≠гражданство≠ВНЖ); НЕ "
+    "укрупняй в широкие категории; НЕ выдумывай тем, которых в советах нет; охвати ВСЕ.\n"
+    'СТРОГО JSON: {"intents":[{"name":"<конкретная тема>","ids":["0",...]}]}'
+)
 
 
-def consolidate(labels):
-    """Свод ярлыков к одному грайну. БАТЧАМИ по 120 — на больших гео ярлыков тысячи,
-    один запрос на всё = таймаут + модель физически не покрывает map."""
-    uniq = sorted(set(labels))
-    if len(uniq) < 2:
-        return {x: x for x in uniq}
-    mp = {}
-    for i in range(0, len(uniq), 120):
-        batch = uniq[i : i + 120]
-        out = call(
-            json.dumps(batch, ensure_ascii=False),
-            CONSOLIDATE_SYS,
-            consumer="consolidate",
+def _first_word(z):
+    p = z.split()
+    return p[0].lower() if p else z.lower()
+
+
+def carve_family(fids, by_id):
+    """Пачка мух семьи (ТЕКСТЫ perevod) → LLM вычленяет подпункты + присваивает. [{name, ids}].
+    Батчами по CARVE_BATCH. None/сбой пачки → каждая её муха как свой вид (fallback, НЕ теряем).
+    """
+    out = []
+    for s in range(0, len(fids), CARVE_BATCH):
+        chunk = fids[s : s + CARVE_BATCH]
+        idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
+        res = call(
+            json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="consolidate"
         )
-        mp.update((out or {}).get("map") or {})
-    return {x: _norm(mp.get(x, x)) for x in uniq}
+        if not res or not res.get("intents"):
+            for fid in chunk:  # fallback: муха как есть (её первая задача = имя)
+                out.append({"name": by_id[fid]["zadachi"][0], "ids": [fid]})
+            continue
+        for g in res["intents"]:
+            ids = [
+                chunk[int(i)]
+                for i in (g.get("ids") or [])
+                if isinstance(i, str) and i.isdigit() and int(i) < len(chunk)
+            ]
+            if ids:
+                name = (g.get("name") or by_id[ids[0]]["zadachi"][0]).strip()
+                out.append({"name": name, "ids": ids})
+    return out
+
+
+def build_views_by_carve(tagged):
+    """ЗАМЕНА consolidate+релейбл+индекс. Группируем мух по фасет-семье (первое слово задачи);
+    плотную семью (≥MIN_CARVE мух) карвим по ТЕКСТАМ, тонкую оставляем как facet (каждая задача
+    семьи = свой вид, хвост сохраняем). Возвращает views {имя_интента: [items]} — ТОТ ЖЕ формат,
+    что раньше давал consolidate → инвертированный индекс (совместимо с pages.py)."""
+    by_id = {r["id"]: r for r in tagged}
+    fams = {}
+    for r in tagged:
+        for z in r["zadachi"]:
+            fams.setdefault(_first_word(z), set()).add(r["id"])
+
+    views = {}
+
+    def add(name, fid):
+        r = by_id[fid]
+        views.setdefault(name, []).append(
+            {
+                "id": r["id"],
+                "text": r["perevod"],
+                "sushnosti": r["sushnosti"],
+                "mesto": r["mesto"],
+                "uslovie": r["uslovie"],
+            }
+        )
+
+    for w, fset in fams.items():
+        fids = list(fset)
+        if (
+            len(fids) < MIN_CARVE
+        ):  # тонкая семья: задача = свой вид (специфичный хвост как facet)
+            for fid in fids:
+                for z in by_id[fid]["zadachi"]:
+                    if _first_word(z) == w:
+                        add(z, fid)
+            continue
+        for it in carve_family(fids, by_id):  # плотная семья: carve по текстам
+            for fid in it["ids"]:
+                add(it["name"], fid)
+
+    # страховка: дедуп мух в виде по id (одна муха могла попасть дважды на стыке семей)
+    for name, items in views.items():
+        seen, uniq = set(), []
+        for it in items:
+            if it["id"] not in seen:
+                seen.add(it["id"])
+                uniq.append(it)
+        views[name] = uniq
+    return views
 
 
 def run(geo, limit=None):
@@ -255,24 +323,9 @@ def run(geo, limit=None):
         )
         return new_n
 
-    # консолидация ЯРЛЫКОВ задач (гео ДОЗРЕЛ; батчами — на больших гео тысячи ярлыков)
-    cmap = consolidate([z for r in tagged for z in r["zadachi"]])
-    for r in tagged:
-        r["zadachi"] = sorted({cmap.get(z, z) for z in r["zadachi"]})
-
-    # ВИДЫ по задаче (инвертированный индекс): муха с N задачами → в N видах
-    views = {}
-    for r in tagged:
-        for z in r["zadachi"]:
-            views.setdefault(z, []).append(
-                {
-                    "id": r["id"],
-                    "text": r["perevod"],
-                    "sushnosti": r["sushnosti"],
-                    "mesto": r["mesto"],
-                    "uslovie": r["uslovie"],
-                }
-            )
+    # ВИДЫ через CARVE (замена consolidate): группировка по фасет-семье → carve плотных семей
+    # по ТЕКСТАМ мух / тонкий хвост как facet. Инвертированный индекс строится внутри.
+    views = build_views_by_carve(tagged)
 
     # индекс по сущности (для видов-страниц вида «CPF»: всё, где CPF — цель/требование/обход)
     ent_index = {}
