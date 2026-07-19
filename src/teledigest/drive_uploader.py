@@ -16,6 +16,7 @@ accumulating duplicates.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -204,10 +205,44 @@ def upload_samples_dir(
         log.info("Drive upload: no .txt files in %s — nothing to send.", samples_dir)
         return []
 
+    # Инкремент: льём только НОВОЕ/изменённое (манифест name->mtime). Раньше каждый
+    # прогон перезаливал ВЕСЬ каталог (.update, "updated") → сотни заливок душили
+    # event-loop бота (не отвечал на действия). Drive остаётся внешним архивом.
+    mpath = samples_dir / ".drive_uploaded.json"
+    cur = {p.name: int(p.stat().st_mtime) for p in files}
+    try:
+        manifest = json.loads(mpath.read_text())
+    except Exception:
+        manifest = None
+    if manifest is None:
+        # Первый прогон после фикса: файлы уже в Drive (их перезаливали) — фиксируем
+        # манифест и НЕ перезаливаем всё (иначе разовый шторм).
+        try:
+            mpath.write_text(json.dumps(cur))
+        except Exception as e:
+            log.warning("Drive upload: manifest seed failed: %s", e)
+        log.info(
+            "Drive upload: manifest seeded (%d files) — skip initial bulk re-upload.",
+            len(cur),
+        )
+        return []
+    todo = [p for p in files if manifest.get(p.name) != cur.get(p.name)]
+    if not todo:
+        log.info("Drive upload: nothing new (%d files already synced).", len(files))
+        return []
+
     try:
         service = get_drive_service()
     except Exception as e:
         log.error("Drive upload aborted — auth failed: %s", e)
         return []
 
-    return upload_files(service, files, cfg.google.drive_folder_id)
+    results = upload_files(service, todo, cfg.google.drive_folder_id)
+    for p, fid, _created in results:
+        if fid:
+            manifest[p.name] = cur.get(p.name)
+    try:
+        mpath.write_text(json.dumps(manifest))
+    except Exception as e:
+        log.warning("Drive upload: manifest save failed: %s", e)
+    return results

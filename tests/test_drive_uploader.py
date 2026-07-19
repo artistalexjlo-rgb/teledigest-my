@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -185,13 +186,13 @@ def test_upload_samples_dir_skips_when_disabled(app_config, tmp_path, monkeypatc
     assert results == []
 
 
-def test_upload_samples_dir_uploads_every_txt(app_config, tmp_path, monkeypatch):
+def test_upload_samples_dir_incremental(app_config, tmp_path, monkeypatch):
     """
-    Mini-pipeline scenario:
-      Setup: 3 sample files in samples/{country}/.
-      Action: upload_samples_dir() with mocked Drive service.
-      Expectation: each file produced an upload_file call with the right
-                   folder_id; non-.txt files in dir are ignored.
+    Mini-pipeline scenario (инкремент, а не полный свип):
+      Setup: 3 sample files in samples/{country}/, манифеста нет.
+      Run 1: манифест сеется, НИЧЕГО не льётся (файлы уже в Drive).
+      Run 2: без изменений — 0 заливок.
+      Run 3: 1 новый файл + 1 изменённый → льются ТОЛЬКО они, .json игнорится.
     """
     samples_root = tmp_path / "samples"
     (samples_root / "br").mkdir(parents=True)
@@ -208,17 +209,30 @@ def test_upload_samples_dir_uploads_every_txt(app_config, tmp_path, monkeypatch)
         patch.object(du, "get_drive_service", return_value=fake_service),
         patch("googleapiclient.http.MediaFileUpload"),
     ):
+        # Run 1: посев манифеста, без разовой перезаливки всего каталога
+        results = du.upload_samples_dir(samples_dir=samples_root)
+        assert results == []
+        assert (samples_root / ".drive_uploaded.json").exists()
+        files_api.create.assert_not_called()
+
+        # Run 2: ничего не менялось — ничего не льём
+        assert du.upload_samples_dir(samples_dir=samples_root) == []
+        files_api.create.assert_not_called()
+
+        # Run 3: новый файл + изменённый (mtime в будущее — грануляция секунды)
+        (samples_root / "id" / "2026-05-01_id_balichat.txt").write_text("id2")
+        changed = samples_root / "br" / "2026-04-30_br_Brazil_ChatForum.txt"
+        changed.write_text("br1-updated")
+        future = changed.stat().st_mtime + 5
+        os.utime(changed, (future, future))
         results = du.upload_samples_dir(samples_dir=samples_root)
 
-    # 3 .txt files uploaded, .json ignored
-    assert len(results) == 3
     uploaded_names = {p.name for (p, _, _) in results}
     assert uploaded_names == {
+        "2026-05-01_id_balichat.txt",
         "2026-04-30_br_Brazil_ChatForum.txt",
-        "2026-04-30_br_1001631614451.txt",
-        "2026-04-30_id_balichat.txt",
     }
-    # All uploads went to the configured folder
+    # Заливки ушли в настроенную папку
     for call in files_api.create.call_args_list:
         assert call.kwargs["body"]["parents"] == ["FOLDER123"]
 
