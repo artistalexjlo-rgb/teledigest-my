@@ -68,6 +68,11 @@ COOLDOWN_FIRST = (
     300.0  # _EMBED_COOLDOWN_S: 1-й 429 = транзиент → 5мин (НЕ убивать ключ)
 )
 COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (после cooldown) → 30мин, НЕ дневной бан
+# Вина vs среда: 429 на ДРУГОМ ключе за последние N сек = волна общего источника
+# (факт 2026-07-20: коррелированные волны 12×429 при пустых квотах, request_log) —
+# текущий ключ НЕ наказываем, иначе внешний чих прожигает весь пул в cooldown
+# (самострел). Окно 30с: волна в логах — кластер секунд, между волнами — минуты.
+ENV429_WINDOW = float(os.environ.get("KB_ENV429_WINDOW", "30"))
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -348,19 +353,36 @@ def report(consumer, key, model, status):
             (now, consumer, kh, model, status),
         )
         if status == 429:
-            row = c.execute(
-                "SELECT was_cd FROM key_clock WHERE key_hash=?", (kh,)
+            # МЕХАНИЗМ вина-vs-среда: 429 на ДРУГОМ ключе в окне ENV429_WINDOW = волна
+            # среды (общий источник, не грех ключа) → cooldown НЕ ставим, пул не
+            # прожигается (макс. один ключ на волну — первый). Пересиживание окна —
+            # backoff в call(). Изолированный 429 = вина ключа → эскалация как была.
+            env = c.execute(
+                "SELECT 1 FROM request_log WHERE status=429 AND ts>? AND key_hash<>? "
+                "AND event='report' LIMIT 1",
+                (now - ENV429_WINDOW, kh),
             ).fetchone()
-            was = row[0] if row else 0
-            cd = (
-                COOLDOWN_REPEAT if was else COOLDOWN_FIRST
-            )  # повтор → 30мин, первый → 5мин
-            c.execute(
-                "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd) VALUES(?,0,?,1) "
-                "ON CONFLICT(key_hash) DO UPDATE SET cooldown_until=excluded.cooldown_until, was_cd=1",
-                (kh, now + cd),
-            )
-            # abuse-пауза вычищена (§2.5): per-key cooldown выше уже остудил виновный ключ.
+            if env:
+                c.execute(
+                    "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) "
+                    "VALUES(?,?,?,?,'429_env',429)",
+                    (now, consumer, kh, model),
+                )
+            else:
+                row = c.execute(
+                    "SELECT was_cd FROM key_clock WHERE key_hash=?", (kh,)
+                ).fetchone()
+                was = row[0] if row else 0
+                cd = (
+                    COOLDOWN_REPEAT if was else COOLDOWN_FIRST
+                )  # повтор → 30мин, первый → 5мин
+                c.execute(
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd) VALUES(?,0,?,1) "
+                    "ON CONFLICT(key_hash) DO UPDATE SET cooldown_until=excluded.cooldown_until, was_cd=1",
+                    (kh, now + cd),
+                )
+            # abuse-пауза вычищена (§2.5): волна среды глушится НЕ-наказанием + backoff,
+            # виновный ключ остужается поштучно.
         elif status == 200:
             c.execute(
                 "UPDATE key_clock SET cooldown_until=0, was_cd=0 WHERE key_hash=?",
