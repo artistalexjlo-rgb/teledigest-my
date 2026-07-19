@@ -4,9 +4,11 @@ sentinel.py — ДЕТЕРМИНИРОВАННЫЙ сторож (не LLM-«Ва
 
 Проверки (все — правила, без интеллекта):
   1. Живой сайт: обход внутренних /ru/ ссылок от главной → каждая 200? (тухлые/битые ссылки)
-  2. Билдер: status.json — МАССОВЫЙ провал (сбоев >=3 И >=30%) или завис (ts>6ч). Единичный
-     сбой/парк — НЕ фатально, в лог, не пинг. Движок в канал не пишет вовсе (только sentinel).
-  3. Квота: max_key близко к кэпу (билдер объедает прод-резерв).
+     + контент-целостность каждой 200-страницы: есть <h1>, тело не пустое, нет '�'.
+  2. Sitemap-свип: живой /sitemap.xml → КАЖДЫЙ <loc> отвечает 200 (ловит orphans, недоехавший
+     CF-билд, потерянные файлы — краул их не видит). + robots.txt доступен.
+  3. Runner (авто-тегание): лампа runner_status.json протухла >12ч → dead-man чирик.
+  4. Квота: max_key близко к кэпу (билдер объедает прод-резерв).
 LLM тут НЕ нужен — это HTTP-коды и пороги. Эскалация в дайджест только по факту срабатывания.
 
 Запуск (VPS): /root/embed_ab/venv/bin/python sentinel.py   (cron, напр. каждые 6ч)
@@ -47,8 +49,9 @@ def fetch(url):
 
 
 def crawl():
-    """BFS по внутренним /ru/ ссылкам от главной. Возвращает {url: status}, broken=[]."""
-    seen, broken, queue = {}, [], ["/ru/"]
+    """BFS по внутренним /ru/ ссылкам от главной. Возвращает {url:status}, broken, damaged
+    (200, но контент битый: нет h1 / тело <400 симв / '�')."""
+    seen, broken, damaged, queue = {}, [], [], ["/ru/"]
     while queue and len(seen) < 400:
         path = queue.pop(0)
         if path in seen:
@@ -58,12 +61,58 @@ def crawl():
         if status != 200:
             broken.append((path, status))
             continue
+        if "<h1>" not in body or len(re.sub(r"<[^>]+>", "", body)) < 400 or "�" in body:
+            damaged.append(path)
         for href in re.findall(r'href="(/ru/[^"#?]*)"', body):
             if not href.endswith("/"):
                 continue
             if href not in seen:
                 queue.append(href)
-    return seen, broken
+    return seen, broken, damaged
+
+
+def head(url):
+    """Быстрый статус без тела (для sitemap-свипа)."""
+    try:
+        r = subprocess.run(
+            ["curl", "-sS", "-o", "/dev/null", "-m", "12", "-w", "%{http_code}", url],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return int(r.stdout.strip() or 0)
+    except Exception:
+        return 0
+
+
+def check_sitemap(crawled):
+    """Живой sitemap: доступен, не пуст, КАЖДЫЙ loc → 200 (не-краулнутые добираем head'ом).
+    Ловит orphans/недоехавший CF-билд. + robots.txt доступен."""
+    issues = []
+    st, body = fetch(SITE + "/sitemap.xml")
+    if st != 200 or "<loc>" not in body:
+        return [f"sitemap: недоступен/пуст (HTTP {st})"]
+    locs = re.findall(r"<loc>([^<]+)</loc>", body)
+    dead = []
+    for u in locs[:300]:
+        path = u.replace(SITE, "")
+        code = crawled.get(path) or head(u)
+        if code != 200:
+            dead.append(f"{path}→{code}")
+    if dead:
+        issues.append(
+            f"sitemap: {len(dead)}/{len(locs)} мёртвых loc: {', '.join(dead[:5])}"
+        )
+    if head(SITE + "/robots.txt") != 200:
+        issues.append("robots.txt недоступен")
+    return issues
+
+
+def check_runner():
+    """ВЫКЛЮЧЕН 2026-07-20: раннера НЕТ КАК КЛАССА (юзер: самоходных демонов у билдера
+    не существует, всё по отмашке; юнит pseo-runner снесён). Проверка беспредметна —
+    оставлена пустышкой, чтобы не чирикать про труп каждые 6 часов."""
+    return []
 
 
 def check_builder():
@@ -117,10 +166,16 @@ def check_quota():
 
 def main():
     issues = []
-    seen, broken = crawl()
+    seen, broken, damaged = crawl()
     if broken:
         lst = ", ".join(f"{p}→{s}" for p, s in broken[:6])
         issues.append(f"битых ссылок {len(broken)}/{len(seen)}: {lst}")
+    if damaged:
+        issues.append(
+            f"битый контент (200, но пусто/без h1/�): {len(damaged)}: {damaged[:4]}"
+        )
+    issues += check_sitemap(seen)
+    issues += check_runner()
     issues += check_builder()
     issues += check_quota()
 
