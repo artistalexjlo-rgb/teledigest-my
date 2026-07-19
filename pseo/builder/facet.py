@@ -16,7 +16,7 @@ single-bucket'а (там один неверный выбор = не та стр
 Роль сущности ∈ {цель, требование, обход, обстоятельство}.
 Задачи именуются из текста мухи → пасс консолидации сводит ярлыки к одному грайну (не косинус).
 
-Запуск (VPS): /root/embed_ab/venv/bin/python facet.py <geo> [--limit N]
+Запуск (VPS): cd /root/pseo_builder && /root/embed_ab/venv/bin/python facet.py <geo> [--limit N]
 Плуминг Gemini (пейсинг/квота/429/IPv4) — внутри keybroker.call (сосок мозга). build.py снесён.
 """
 
@@ -27,6 +27,7 @@ import sqlite3
 import sys
 
 from keybroker import call
+import tail_taxonomy as tax
 
 DB = "/home/teledigest/data/messages_fts.db"
 MIN_LEN = 140
@@ -138,12 +139,12 @@ def facet_one(fid, lesson):
     )
 
 
-# ── CARVE: ЗАМЕНА consolidate. Читаем ТЕКСТЫ мух пачкой по фасет-семье → LLM вычленяет подпункты
-# и присваивает мух. Правильнее дедупа меток (доказано br/vn 2026-07-18): метка = degraded-артефакт,
-# текст = исходник — carve находит нюансы, которых в метке нет, и держит ВНЖ≠гражданство. ГРАНИЦА:
-# carve ТОЛЬКО на плотной когерентной семье; тонкий хвост оставляем как facet (grab-bag расплющивает
-# в широкие вёдра — vn-тест). split-по-числу мёртв: НЕ роутим методы счётчиком, режем по семье+плотности.
-MIN_CARVE = 6  # семья мельче → мухи как есть (тонкий специфичный хвост НЕ карвим, это уже лонг-тейл)
+# ── CARVE (джоб1): ЗАМЕНА consolidate. Читаем ТЕКСТЫ мух пачкой по фасет-семье → LLM вычленяет
+# подпункты и присваивает мух. Правильнее дедупа меток (доказано br/vn 2026-07-18): метка =
+# degraded-артефакт, текст = исходник — carve находит нюансы, которых в метке нет, держит ВНЖ≠гражданство.
+# ГРАНИЦА: carve ТОЛЬКО на плотной когерентной семье; тонкий хвост уходит в джоб2 (assign_tail —
+# раскладка по таксономии полки×тип, НЕ сырые синглтоны). split-по-числу мёртв: режем по семье+плотности.
+MIN_CARVE = 6  # ГРАНИЦА джоб1/джоб2: семья ≥6 → carve (уплотнить), мельче → в хвост-раскладку (assign_tail)
 CARVE_BATCH = 90  # мух в пачку (окно ~16.6К ток; 90×~110 ≈ 10К, проверено 200)
 
 CARVE_SYS = (
@@ -188,11 +189,72 @@ def carve_family(fids, by_id):
     return out
 
 
+# ── ХВОСТ-РАСКЛАДКА (джоб2): тонкий хвост — НЕ сырые синглтоны и НЕ мёрж, а раскладка по
+# ГЛОБАЛЬНОЙ таксономии полки×тип (tail_taxonomy.py). Каждый сингл = самостоятельный абзац,
+# ложится на полку(и) как антология + получает тип. Метод open→lock→assign доказан на ru
+# 2026-07-19 (192/192, ~94% чисто). Непокрытое → prochee (park-ведро, сигнал роста таксономии).
+ASSIGN_SYS = (
+    "Ниже разрозненные советы путешественников/экспатов (id: текст) — каждый самостоятелен, "
+    "НЕ схлопывай и НЕ выкидывай. Разложи КАЖДЫЙ по ЗАКРЫТОЙ таксономии:\n"
+    "ПОЛКИ (можно НЕСКОЛЬКО, минимум 1): " + " | ".join(tax.SHELF_NAMES) + "\n"
+    "ТИП (РОВНО один): " + " | ".join(tax.TYPE_NAMES) + "\n"
+    "Не лезет ни на одну полку → полка '"
+    + tax.PROCHEE
+    + "' (сигнал дырки, не злоупотребляй).\n"
+    'СТРОГО JSON: {"assign":{"0":{"shelves":["..."],"type":"..."},...}}'
+)
+
+
+def assign_tail(tail_fids, by_id):
+    """Тонкий хвост → раскладка по таксономии. Возвращает (shelves {полка: [items]},
+    prochee [items]). Потерь НЕТ: сбой пачки / непокрытие / не-возврат мухи → в prochee.
+    """
+    fids = list(tail_fids)
+    shelves, prochee = {}, []
+
+    def item(fid, typ):
+        r = by_id[fid]
+        return {
+            "id": r["id"],
+            "text": r["perevod"],
+            "sushnosti": r["sushnosti"],
+            "mesto": r["mesto"],
+            "uslovie": r["uslovie"],
+            "type": typ,
+        }
+
+    for s in range(0, len(fids), CARVE_BATCH):
+        chunk = fids[s : s + CARVE_BATCH]
+        idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
+        res = None
+        for _ in range(3):
+            res = call(
+                json.dumps(idx, ensure_ascii=False), ASSIGN_SYS, consumer="consolidate"
+            )
+            if res and res.get("assign"):
+                break
+        a = (res or {}).get("assign") or {}
+        for j, fid in enumerate(chunk):
+            rec = a.get(str(j))
+            if not isinstance(rec, dict):  # пачка сдохла / муху не вернули → не теряем
+                prochee.append(item(fid, ""))
+                continue
+            typ = rec.get("type") if rec.get("type") in tax.TYPE_NAMES else ""
+            shs = [x for x in (rec.get("shelves") or []) if x in tax.SHELF_NAMES]
+            if not shs:  # не покрыто таксономией → park
+                prochee.append(item(fid, typ))
+                continue
+            for sh in shs:
+                shelves.setdefault(sh, []).append(item(fid, typ))
+    return shelves, prochee
+
+
 def build_views_by_carve(tagged):
-    """ЗАМЕНА consolidate+релейбл+индекс. Группируем мух по фасет-семье (первое слово задачи);
-    плотную семью (≥MIN_CARVE мух) карвим по ТЕКСТАМ, тонкую оставляем как facet (каждая задача
-    семьи = свой вид, хвост сохраняем). Возвращает views {имя_интента: [items]} — ТОТ ЖЕ формат,
-    что раньше давал consolidate → инвертированный индекс (совместимо с pages.py)."""
+    """Джоб1: плотные фасет-семьи (≥MIN_CARVE) → carve по ТЕКСТАМ (тематические страницы,
+    уплотняет дубли). Джоб2: тонкий хвост (мухи, не попавшие в carve) → assign_tail по глобальной
+    таксономии полки×тип (антологии, НЕ сырые синглтоны). Возвращает (views {интент: [items]},
+    shelves {полка: [items]}, prochee [items]). views_by_task ← views (совместимо с pages.py).
+    """
     by_id = {r["id"]: r for r in tagged}
     fams = {}
     for r in tagged:
@@ -200,6 +262,7 @@ def build_views_by_carve(tagged):
             fams.setdefault(_first_word(z), set()).add(r["id"])
 
     views = {}
+    carved_fids = set()
 
     def add(name, fid):
         r = by_id[fid]
@@ -215,19 +278,16 @@ def build_views_by_carve(tagged):
 
     for w, fset in fams.items():
         fids = list(fset)
-        if (
-            len(fids) < MIN_CARVE
-        ):  # тонкая семья: задача = свой вид (специфичный хвост как facet)
-            for fid in fids:
-                for z in by_id[fid]["zadachi"]:
-                    if _first_word(z) == w:
-                        add(z, fid)
-            continue
+        if len(fids) < MIN_CARVE:
+            continue  # тонкие семьи → хвост-раскладка ниже (НЕ сырые синглтоны)
         for it in carve_family(fids, by_id):  # плотная семья: carve по текстам
+            if len(it["ids"]) < 2:
+                continue  # одиночный интент carve = тонкий абзац → в хвост-раскладку, не 1-мушь-страница
             for fid in it["ids"]:
                 add(it["name"], fid)
+                carved_fids.add(fid)
 
-    # страховка: дедуп мух в виде по id (одна муха могла попасть дважды на стыке семей)
+    # страховка: дедуп мух в карв-виде по id (одна муха могла попасть дважды на стыке семей)
     for name, items in views.items():
         seen, uniq = set(), []
         for it in items:
@@ -235,7 +295,11 @@ def build_views_by_carve(tagged):
                 seen.add(it["id"])
                 uniq.append(it)
         views[name] = uniq
-    return views
+
+    # ХВОСТ = мухи, не попавшие ни в один плотный карв-вид → раскладка по таксономии
+    tail_fids = [fid for fid in by_id if fid not in carved_fids]
+    shelves, prochee = assign_tail(tail_fids, by_id)
+    return views, shelves, prochee
 
 
 def run(geo, limit=None):
@@ -325,7 +389,7 @@ def run(geo, limit=None):
 
     # ВИДЫ через CARVE (замена consolidate): группировка по фасет-семье → carve плотных семей
     # по ТЕКСТАМ мух / тонкий хвост как facet. Инвертированный индекс строится внутри.
-    views = build_views_by_carve(tagged)
+    views, shelves, prochee = build_views_by_carve(tagged)
 
     # индекс по сущности (для видов-страниц вида «CPF»: всё, где CPF — цель/требование/обход)
     ent_index = {}
@@ -336,13 +400,19 @@ def run(geo, limit=None):
     os.makedirs("out_facet", exist_ok=True)
     page = {
         "geo": geo,
+        # джоб1: плотные тематические страницы (совместимо с pages.py)
         "views_by_task": [{"zadacha": z, "items": its} for z, its in views.items()],
+        # джоб2: хвост-антологии по глобальной таксономии (Ф3 pages.py их рендерит)
+        "shelves": [{"shelf": sh, "items": its} for sh, its in shelves.items()],
+        "prochee": prochee,  # park-ведро непокрытого — сигнал роста таксономии
+        "taxonomy_version": tax.VERSION,
         "entity_index": {k: v for k, v in ent_index.items() if len(v) > 1},
     }
     _atomic_json(f"out_facet/{geo}.json", page)  # атомарно
 
     print(
         f"\n{geo}: +{new_n} новых → всего {len(tagged)} мух, видов-задач {len(views)}, "
+        f"полок {len(shelves)}, прочее {len(prochee)}, "
         f"сущностей-кросс {len(page['entity_index'])} → out_facet/{geo}.json remaining=0",
         flush=True,
     )
