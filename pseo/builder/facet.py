@@ -26,8 +26,8 @@ import re
 import sqlite3
 import sys
 
-from keybroker import call
 import tail_taxonomy as tax
+from keybroker import call
 
 DB = "/home/teledigest/data/messages_fts.db"
 MIN_LEN = 140
