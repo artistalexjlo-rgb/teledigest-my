@@ -123,7 +123,8 @@ def run(geo, kratko=False):
     fn = f"{OUT}/{geo}.json"
     d = json.load(open(fn, encoding="utf-8"))
     views = d.get("views_by_task", [])
-    all_ids = [it["id"] for v in views for it in v["items"]]
+    shelves = d.get("shelves", [])  # хвост-антологии (полка×тип) — та же укладка
+    all_ids = [it["id"] for c in (views, shelves) for v in c for it in v["items"]]
     vv = load_vecs(list(set(all_ids)))
     n_groups = n_dups = n_k = 0
     for v in views:
@@ -135,9 +136,14 @@ def run(geo, kratko=False):
             if k:
                 v["kratko"] = k
                 n_k += 1
+    n_sdups = 0
+    for sv in shelves:  # полкам kratko не даём: антология разнородна, «ответа» нет
+        sv["groups"] = group_view(sv, vv)
+        n_sdups += len(sv["items"]) - len(sv["groups"])
     _atomic_json(fn, d)
     print(
         f"{geo}: видов {len(views)}, групп {n_groups}, схлопнуто дублей {n_dups}"
+        + (f", полок {len(shelves)} (дублей {n_sdups})" if shelves else "")
         + (f", kratko +{n_k}" if kratko else ""),
         flush=True,
     )

@@ -419,11 +419,37 @@ def run(geo, limit=None):
     return new_n
 
 
+def run_assign_tail(geo):
+    """Только джоб2 на УЖЕ построенном out_facet: хвост = тегнутые мухи вне карв-видов →
+    раскладка по таксономии → shelves/prochee мёржатся в out_facet/<geo>.json.
+    БЕЗ пере-карва (полный run() на дозревшем гео пережёвывает carve заново — дорого).
+    """
+    tagged = json.load(open(f"tags/{geo}.json", encoding="utf-8"))
+    by_id = {r["id"]: r for r in tagged}
+    out_fn = f"out_facet/{geo}.json"
+    page = json.load(open(out_fn, encoding="utf-8"))
+    carved = {it["id"] for v in page.get("views_by_task", []) for it in v["items"]}
+    tail = [fid for fid in by_id if fid not in carved]
+    shelves, prochee = assign_tail(tail, by_id)
+    page["shelves"] = [{"shelf": sh, "items": its} for sh, its in shelves.items()]
+    page["prochee"] = prochee
+    page["taxonomy_version"] = tax.VERSION
+    _atomic_json(out_fn, page)
+    print(
+        f"{geo}: хвост {len(tail)} → полок {len(shelves)} "
+        f"({sum(len(v) for v in shelves.values())} членств), прочее {len(prochee)}",
+        flush=True,
+    )
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: facet.py <geo> [--limit N]")
+        print("usage: facet.py <geo> [--limit N] [--assign-tail]")
         sys.exit(1)
     geo = sys.argv[1]
+    if "--assign-tail" in sys.argv:
+        run_assign_tail(geo)
+        sys.exit(0)
     limit = (
         int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else None
     )

@@ -16,6 +16,23 @@ import os
 import re
 import sys
 
+import tail_taxonomy as _tax
+
+# полка → стабильный латинский ключ для URL (/ru/<geo>/s/finance/), не транслит-slug
+SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
+# тип абзаца → латинский ключ (css-класс тега на карточке/аккордеоне)
+TYPE_KEY = {name: key for key, name, _ in _tax.TYPES}
+# короткий ярлык тега (полное имя типа громоздко для чипа в аккордеоне)
+TYPE_SHORT = {
+    "lifehack": "лайфхак",
+    "reglament": "регламент",
+    "howto": "инструкция",
+    "risk": "риск",
+    "case": "кейс",
+    "service": "сервис",
+}
+SHELF_MIN = 3  # полка становится страницей от 3 абзацев (мельче — тонковато)
+
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
 DATA = f"{BASE}/data"
 # built-данные лежат либо локально (pull с VPS), либо укажи путь
@@ -344,6 +361,17 @@ COPY = {
         "qhub_intro": "Сотни людей — одни и те же непонятки. Выбери тему, посмотри реальные вопросы. Ответы у людей находятся не сразу… а у <a href='#luky'>Luky</a> — сразу.",
         "bridge_title": "Что спрашивают в чатах",
         "bridge_blurb": "Реальные вопросы людей — под свой случай спроси Luky",
+        "shelf_title": "{name}: {tl} — живой опыт из чатов · Luky",
+        "shelf_desc": "Живой опыт по теме «{tl}» {namep}: реальные советы, случаи и правила из чатов. Под твой случай — у Luky.",
+        "shelf_intro": "Собрано из живого опыта: «{tl}» {namep} — советы, случаи и правила как есть. Под свой случай — <a href='#luky'>спроси Luky</a>.",
+        "shelf_list_label": "Из живого опыта",
+        "shelf_blurb": "{n} заметок из чатов",
+        "shub_title": "{name}: разделы живого опыта — всё из чатов · Luky",
+        "shub_desc": "Живой опыт по {name} по разделам: визы, деньги, транспорт, документы, безопасность и другое. Под твой случай — у Luky.",
+        "shub_h1": "Разделы живого опыта",
+        "shub_intro": "Всё, что люди прошли сами — по разделам. Выбери свой, а под конкретный случай <a href='#luky'>спроси Luky</a>.",
+        "bridge_shelf_title": "Разделы живого опыта",
+        "bridge_shelf_blurb": "Реальные заметки по темам — под свой случай спроси Luky",
         "hub_title": "{name}: документы, деньги, жильё — живой опыт из чатов · Luky",
         "hub_desc": "Живой опыт по {name} из чатов сообществ: документы, деньги, жильё, безопасность, транспорт. Без воды, под твой случай.",
         "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <a href='#luky'>спроси Luky</a>.",
@@ -705,8 +733,17 @@ def groups_to_faqs(v, lang):
     by_id = {it["id"]: it for it in v["items"]}
     faqs = []
     for g in v["groups"]:
-        q, a = lead_split(by_id[g["rep"]]["text"])
-        faqs.append({"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])})
+        rep = by_id[g["rep"]]
+        q, a = lead_split(rep["text"])
+        f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
+        typ = rep.get(
+            "type"
+        )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
+        if typ and typ in TYPE_KEY:
+            key = TYPE_KEY[typ]
+            f["type"] = TYPE_SHORT.get(key, typ)
+            f["type_key"] = key
+        faqs.append(f)
     return faqs
 
 
@@ -927,8 +964,112 @@ def build_geo(geo, lang="ru"):
         )
         n += 1
 
-    # --- ГЕО-ХАБ (тайлы фактов + мостик вопросов) ---
+    # --- ШЕЛФ-КОНТУР (антологии хвоста: полки под /<lang>/<geo>/s/) ---
+    # Хвост-курирование: синглы, что раньше терялись фильтром ≥4, живут на широких
+    # полках-антологиях. Через ту же укладку, что факты: дедуп-группы → аккордеон
+    # page.html.j2 + тег типа (lifehack/reglament/…). Имена полок = русская
+    # таксономия → пока только lang=="ru" (i18n имён — отдельный шаг).
+    s_ok = False
+    shelves = []
+    if lang == "ru":
+        shelves = sorted(
+            [
+                sv
+                for sv in (facts or {}).get("shelves", [])
+                if len(sv["items"]) >= SHELF_MIN
+            ],
+            key=lambda x: -len(x["items"]),
+        )
+    if shelves:
+        s_ok = True
+        sh_sibs = [
+            {
+                "tema": sv["shelf"],
+                "slug": SHELF_KEY.get(sv["shelf"], slug(sv["shelf"])),
+                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+            }
+            for sv in shelves
+        ]
+        for sv in shelves:
+            sk = SHELF_KEY.get(sv["shelf"], slug(sv["shelf"]))
+            page = {
+                "lang": lang,
+                "path": f"/{lang}/{geo}/s/{sk}/",
+                "geo": geo,
+                "geo_name": name,
+                "intent_name": sv["shelf"],
+                "updated": "07.2026",
+                "title": C["shelf_title"].format(name=name, tl=tl(sv["shelf"])),
+                "meta_desc": C["shelf_desc"].format(
+                    name=name, namep=namep, tl=tl(sv["shelf"])
+                ),
+                "h1": pick(C["FHEAD"], geo + sk).format(
+                    t=cap(sv["shelf"]), g=name, gp=namep
+                ),
+                "intro": C["shelf_intro"].format(
+                    name=name, namep=namep, tl=tl(sv["shelf"])
+                ),
+                "chips": [
+                    {
+                        "icon": icon(x["tema"]),
+                        "label": x["tema"],
+                        "url": x["url"],
+                        "soon": False,
+                    }
+                    for x in sh_sibs
+                    if x["slug"] != sk
+                ][:6],
+            }
+            if sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
+                page["template"] = "page.html.j2"
+                page["list_label"] = C["shelf_list_label"]
+                page["faqs"] = groups_to_faqs(sv, lang)
+            else:  # полка без дедупа → старый список (не должно случаться после dedup.py)
+                page["template"] = "qlist.html.j2"
+                page["list_label"] = C["shelf_list_label"]
+                page["questions"] = [it["text"] for it in sv["items"]]
+            write(f"{lang}_{geo}_s_{sk}.json", page)
+            n += 1
+        stiles = [
+            {
+                "icon": icon(sv["shelf"]),
+                "title": sv["shelf"],
+                "blurb": C["shelf_blurb"].format(n=len(sv["items"])),
+                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+            }
+            for sv in shelves
+        ]
+        write(
+            f"{lang}_{geo}_s_hub.json",
+            {
+                "lang": lang,
+                "template": "index.html.j2",
+                "path": f"/{lang}/{geo}/s/",
+                "geo": geo,
+                "geo_name": name,
+                "updated": "07.2026",
+                "title": C["shub_title"].format(name=name),
+                "meta_desc": C["shub_desc"].format(name=name),
+                "h1": C["shub_h1"],
+                "intro": C["shub_intro"],
+                "list_label": C["list_label_topics"],
+                "tiles": stiles,
+            },
+        )
+        n += 1
+
+    # --- ГЕО-ХАБ (тайлы фактов + мостики вопросов и разделов) ---
     tiles = list(fact_tiles)
+    if s_ok:
+        tiles.insert(
+            0,
+            {
+                "icon": "📚",
+                "title": C["bridge_shelf_title"],
+                "blurb": C["bridge_shelf_blurb"],
+                "url": f"/{lang}/{geo}/s/",
+            },
+        )
     if q_ok:
         tiles.insert(
             0,
@@ -957,7 +1098,12 @@ def build_geo(geo, lang="ru"):
         },
     )
     n += 1
-    return n, len(fact_tiles), len(qgroups) if q_ok else 0
+    return (
+        n,
+        len(fact_tiles),
+        len(qgroups) if q_ok else 0,
+        len(shelves) if s_ok else 0,
+    )
 
 
 def langs_for(geo):
@@ -1026,11 +1172,13 @@ if __name__ == "__main__":
     counts = {}  # lang -> {geo: число факт-тем} (ранжир «популярных» на home)
     for g in geos:
         for lang in langs_for(g):
-            n, nf, nq = build_geo(g, lang)
+            n, nf, nq, ns = build_geo(g, lang)
             total += n
             built.setdefault(lang, []).append(g)
             counts.setdefault(lang, {})[g] = nf
-            print(f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq})")
+            print(
+                f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq}, полок {ns})"
+            )
     # home — портал-вход для ВСЕХ языков (включая ru: pages владеет home, wire делегирует сюда).
     # about — только не-ru (ru_about живой, не трогаем).
     for lang, gl in built.items():
