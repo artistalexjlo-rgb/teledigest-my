@@ -39,8 +39,24 @@ def geos():
     )
 
 
+_fresh = {}  # (path, mtime) → bool; файл не менялся — не перечитываем (их 36×13)
+
+
 def done(geo, lang):
-    return os.path.exists(f"{HERE}/out_facet_{lang}/{geo}.json")
+    """Готово = файл ЕСТЬ и в НОВОМ формате (несёт groups — укладка 0.10).
+    Старый формат (до-карвовый перевод стен) = не готово → пересборка facet_lang."""
+    p = f"{HERE}/out_facet_{lang}/{geo}.json"
+    if not os.path.exists(p):
+        return False
+    key = (p, os.path.getmtime(p))
+    if key not in _fresh:
+        try:
+            d = json.load(open(p, encoding="utf-8"))
+            vs = d.get("views_by_task", [])
+            _fresh[key] = (not vs) or any("groups" in v for v in vs)
+        except Exception:
+            _fresh[key] = False
+    return _fresh[key]
 
 
 def save_status(obj):
