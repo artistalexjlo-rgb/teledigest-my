@@ -105,6 +105,15 @@ details[open] summary::after{content:'\2212'}
 details .a{padding-top:10px;color:var(--text);opacity:.92}
 details .src{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.06em;
   color:var(--muted);text-transform:uppercase;margin-top:8px}
+/* тег типа абзаца (хвост-антологии: lifehack/reglament/howto/risk/case/service) */
+.tag{display:inline-block;font-family:var(--font-mono);font-weight:400;font-size:.62rem;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);
+  border-radius:5px;padding:1px 6px;margin-right:8px;vertical-align:2px;white-space:nowrap}
+.tag.risk{color:var(--red);border-color:var(--red)}
+.tag.reglament{color:var(--accent);border-color:var(--accent)}
+.tag.lifehack{color:var(--green);border-color:var(--green)}
+.tag.service{color:var(--yellow);border-color:var(--yellow)}
+.tag.howto{color:var(--hud);border-color:var(--hud)}
 .chips{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0}
 .chip{position:relative;isolation:isolate;font-family:var(--font-mono);font-size:.74rem;letter-spacing:.06em;
   text-transform:uppercase;padding:10px 16px;color:var(--text);background:transparent}

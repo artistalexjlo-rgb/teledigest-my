@@ -11,12 +11,14 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
+  {%- if page.short_answer %}
   <span class="section-label">{{ t.label_short_answer }}</span>
   <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.short_answer | safe }}</div></div>
+  {%- endif %}
 
-  <h2>{{ t.label_faq }}</h2>
+  <h2>{{ page.list_label or t.label_faq }}</h2>
   {%- for f in page.faqs %}
-  <details{% if loop.first %} open{% endif %}><summary>{{ f.q }}<span></span></summary>
+  <details{% if loop.first %} open{% endif %}><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
     <div class="a">{{ f.a | safe }}
     <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
   </details>
@@ -48,10 +50,11 @@
 {% endblock %}
 
 {% block jsonld %}
+{# ItemList, не FAQPage: заголовки — лид-фразы советов, не вопросы (канон: LLM не сочиняет) #}
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+{"@context":"https://schema.org","@type":"ItemList","itemListElement":[
 {%- for f in page.faqs %}
-{"@type":"Question","name":{{ f.q | tojson }},"acceptedAnswer":{"@type":"Answer","text":{{ f.a_plain | tojson }}}}{{ "," if not loop.last }}
+{"@type":"ListItem","position":{{ loop.index }},"name":{{ f.q | tojson }}}{{ "," if not loop.last }}
 {%- endfor %}
 ]}
 </script>

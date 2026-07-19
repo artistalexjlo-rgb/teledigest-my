@@ -16,6 +16,23 @@ import os
 import re
 import sys
 
+import tail_taxonomy as _tax
+
+# полка → стабильный латинский ключ для URL (/ru/<geo>/s/finance/), не транслит-slug
+SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
+# тип абзаца → латинский ключ (css-класс тега на карточке/аккордеоне)
+TYPE_KEY = {name: key for key, name, _ in _tax.TYPES}
+# короткий ярлык тега (полное имя типа громоздко для чипа в аккордеоне)
+TYPE_SHORT = {
+    "lifehack": "лайфхак",
+    "reglament": "регламент",
+    "howto": "инструкция",
+    "risk": "риск",
+    "case": "кейс",
+    "service": "сервис",
+}
+SHELF_MIN = 3  # полка становится страницей от 3 абзацев (мельче — тонковато)
+
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
 DATA = f"{BASE}/data"
 # built-данные лежат либо локально (pull с VPS), либо укажи путь
@@ -47,6 +64,17 @@ GEO_NAMES = {
         "cz": "Чехия",
         "mu": "Маврикий",
         "lk": "Шри-Ланка",
+        "be": "Бельгия",
+        "ch": "Швейцария",
+        "cn": "Китай",
+        "cu": "Куба",
+        "eg": "Египет",
+        "hr": "Хорватия",
+        "il": "Израиль",
+        "in": "Индия",
+        "kz": "Казахстан",
+        "tr": "Турция",
+        "kg": "Киргизия",
     },
     "en": {
         "br": "Brazil",
@@ -160,6 +188,44 @@ GEO_NAMES = {
         "kg": "Quirguistão",
     },
 }
+# ru: «где» с предлогом (в/на + предложный падеж) — «в {name}» даёт «в Бразилия»
+GEO_LOC = {
+    "br": "в Бразилии",
+    "vn": "во Вьетнаме",
+    "me": "в Черногории",
+    "id": "в Индонезии",
+    "gr": "в Греции",
+    "kr": "в Южной Корее",
+    "ph": "на Филиппинах",
+    "de": "в Германии",
+    "gb": "в Великобритании",
+    "bg": "в Болгарии",
+    "jp": "в Японии",
+    "by": "в Беларуси",
+    "fr": "во Франции",
+    "au": "в Австралии",
+    "ar": "в Аргентине",
+    "hu": "в Венгрии",
+    "at": "в Австрии",
+    "ru": "в России",
+    "cl": "в Чили",
+    "fi": "в Финляндии",
+    "ge": "в Грузии",
+    "cz": "в Чехии",
+    "mu": "на Маврикии",
+    "lk": "на Шри-Ланке",
+    "be": "в Бельгии",
+    "ch": "в Швейцарии",
+    "cn": "в Китае",
+    "cu": "на Кубе",
+    "eg": "в Египте",
+    "hr": "в Хорватии",
+    "il": "в Израиле",
+    "in": "в Индии",
+    "kz": "в Казахстане",
+    "tr": "в Турции",
+    "kg": "в Киргизии",
+}
 GEO_FLAG = {
     "br": "🇧🇷",
     "vn": "🇻🇳",
@@ -270,9 +336,9 @@ ICON = {
 COPY = {
     "ru": {
         "FHEAD": [
-            "{t} в {g}: живой опыт из чатов",
-            "{t}: как это в {g} — из первых рук",
-            "{t} в {g}: что реально важно знать",
+            "{t} {gp}: живой опыт из чатов",
+            "{t}: как это {gp} — из первых рук",
+            "{t} {gp}: что реально важно знать",
         ],
         "QHEAD": [
             "{t}: что спрашивают в чатах",
@@ -280,8 +346,8 @@ COPY = {
             "{t}: что спрашивают в чатах часто, но не всегда получают ответ",
         ],
         "fact_title": "{name}: {tl} — живой опыт · Luky",
-        "fact_desc": "Живой опыт из чатов про {tl} в {name}: как есть, из первых рук. Под твой случай — у Luky.",
-        "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» в {name} — как есть, без воды. Под свой случай — <a href='#luky'>спроси Luky</a>.",
+        "fact_desc": "Живой опыт из чатов про {tl} {namep}: как есть, из первых рук. Под твой случай — у Luky.",
+        "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» {namep} — как есть, без воды. Под свой случай — <a href='#luky'>спроси Luky</a>.",
         "fact_list_label": "Из живого опыта",
         "fact_blurb": "{n} советов из чатов",
         "q_title": "{name}: {tl} — что спрашивают · Luky",
@@ -295,6 +361,17 @@ COPY = {
         "qhub_intro": "Сотни людей — одни и те же непонятки. Выбери тему, посмотри реальные вопросы. Ответы у людей находятся не сразу… а у <a href='#luky'>Luky</a> — сразу.",
         "bridge_title": "Что спрашивают в чатах",
         "bridge_blurb": "Реальные вопросы людей — под свой случай спроси Luky",
+        "shelf_title": "{name}: {tl} — живой опыт из чатов · Luky",
+        "shelf_desc": "Живой опыт по теме «{tl}» {namep}: реальные советы, случаи и правила из чатов. Под твой случай — у Luky.",
+        "shelf_intro": "Собрано из живого опыта: «{tl}» {namep} — советы, случаи и правила как есть. Под свой случай — <a href='#luky'>спроси Luky</a>.",
+        "shelf_list_label": "Из живого опыта",
+        "shelf_blurb": "{n} заметок из чатов",
+        "shub_title": "{name}: разделы живого опыта — всё из чатов · Luky",
+        "shub_desc": "Живой опыт по {name} по разделам: визы, деньги, транспорт, документы, безопасность и другое. Под твой случай — у Luky.",
+        "shub_h1": "Разделы живого опыта",
+        "shub_intro": "Всё, что люди прошли сами — по разделам. Выбери свой, а под конкретный случай <a href='#luky'>спроси Luky</a>.",
+        "bridge_shelf_title": "Разделы живого опыта",
+        "bridge_shelf_blurb": "Реальные заметки по темам — под свой случай спроси Luky",
         "hub_title": "{name}: документы, деньги, жильё — живой опыт из чатов · Luky",
         "hub_desc": "Живой опыт по {name} из чатов сообществ: документы, деньги, жильё, безопасность, транспорт. Без воды, под твой случай.",
         "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <a href='#luky'>спроси Luky</a>.",
@@ -618,12 +695,108 @@ def icon(t):
     return "•"
 
 
+# счётчик подтверждений группы: «✓ N <n_word> из чатов» (префикс/суффикс в i18n)
+N_WORD = {
+    "en": ("report", "reports"),
+    "es": ("reporte", "reportes"),
+    "pt": ("relato", "relatos"),
+}
+
+
+def n_word(lang, n):
+    if lang == "ru":
+        if n % 10 == 1 and n % 100 != 11:
+            return "сообщение"
+        if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+            return "сообщения"
+        return "сообщений"
+    one, many = N_WORD.get(lang, N_WORD["en"])
+    return one if n == 1 else many
+
+
+def lead_split(text):
+    """Лид-фраза абзаца → заголовок аккордеона, остальное → тело. Точка ищется
+    после 40-го символа (иначе короткий обрывок-лид), точка после цифры не режет
+    («шаги: 1. Получите CPF» — не лид). Нет точки — весь текст заголовком,
+    тело пустое (рендер покажет только счётчик)."""
+    i = text.find(". ", 40)
+    while i != -1 and text[i - 1].isdigit():
+        i = text.find(". ", i + 1)
+    if i == -1:
+        return text, ""
+    return text[: i + 1], text[i + 2 :]
+
+
+def groups_to_faqs(v, lang):
+    """Дедуп-группы вида (dedup.py) → пункты аккордеона page.html.j2.
+    Пункт = репрезентант группы: лид → q, остальное → a, n = подтверждений."""
+    by_id = {it["id"]: it for it in v["items"]}
+    faqs = []
+    for g in v["groups"]:
+        rep = by_id[g["rep"]]
+        q, a = lead_split(rep["text"])
+        f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
+        typ = rep.get(
+            "type"
+        )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
+        if typ and typ in TYPE_KEY:
+            key = TYPE_KEY[typ]
+            f["type"] = TYPE_SHORT.get(key, typ)
+            f["type_key"] = key
+        faqs.append(f)
+    return faqs
+
+
+# RU→latin транслит для слагов: URL латиницей (money-качество), не кириллический %-суп
+_TR = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+}
+
+
 def slug(t):
-    return re.sub(r"[^a-z0-9а-яё]+", "-", t.lower()).strip("-")[:40] or "tema"
+    t = "".join(_TR.get(ch, ch) for ch in t.lower())
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:40] or "tema"
 
 
 def pick(pool, seed):
     return pool[int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(pool)]
+
+
+def cap(s):
+    """Заглавная в начале h1 (метки carve бывают строчными: «обмен валюты»)."""
+    return s[:1].upper() + s[1:] if s else s
 
 
 def load(p):
@@ -658,6 +831,8 @@ def _ques_dir(lang):
 def build_geo(geo, lang="ru"):
     C = COPY[lang]
     name = GEO_NAMES.get(lang, {}).get(geo, geo)
+    # «где» для ru-строк («{tl} в Бразилии»); прочие языки — имя как есть
+    namep = GEO_LOC.get(geo, f"в {name}") if lang == "ru" else name
     facts = load(f"{_facet_dir(lang)}/{geo}.json")
     ques = load(f"{_ques_dir(lang)}/{geo}.json")
     n = 0
@@ -686,20 +861,28 @@ def build_geo(geo, lang="ru"):
         items = [it["text"] for it in v["items"]]
         page = {
             "lang": lang,
-            "template": "qlist.html.j2",
             "path": f"/{lang}/{geo}/{s}/",
             "geo": geo,
             "geo_name": name,
             "intent_name": tema,
             "updated": "07.2026",
             "title": C["fact_title"].format(name=name, tl=tl(tema)),
-            "meta_desc": C["fact_desc"].format(name=name, tl=tl(tema)),
-            "h1": pick(C["FHEAD"], geo + s).format(t=tema, g=name),
-            "intro": C["fact_intro"].format(name=name, tl=tl(tema)),
-            "list_label": C["fact_list_label"],
-            "questions": items,
+            "meta_desc": C["fact_desc"].format(name=name, namep=namep, tl=tl(tema)),
+            "h1": pick(C["FHEAD"], geo + s).format(t=cap(tema), g=name, gp=namep),
+            "intro": C["fact_intro"].format(name=name, namep=namep, tl=tl(tema)),
             "chips": chips_for(s, fact_sibs),
         }
+        if v.get("groups"):  # дедуп прошёл (dedup.py) → компактная страница-аккордеон
+            page["template"] = "page.html.j2"
+            page["short_answer"] = v.get("kratko")  # None → блок скрыт шаблоном
+            page["list_label"] = C[
+                "fact_list_label"
+            ]  # «Из живого опыта», не «Частые вопросы»
+            page["faqs"] = groups_to_faqs(v, lang)
+        else:  # без дедупа (гео/язык ещё не прогнан) → старый список
+            page["template"] = "qlist.html.j2"
+            page["list_label"] = C["fact_list_label"]
+            page["questions"] = items
         write(f"{lang}_{geo}_{s}.json", page)
         n += 1
         fact_tiles.append(
@@ -781,8 +964,112 @@ def build_geo(geo, lang="ru"):
         )
         n += 1
 
-    # --- ГЕО-ХАБ (тайлы фактов + мостик вопросов) ---
+    # --- ШЕЛФ-КОНТУР (антологии хвоста: полки под /<lang>/<geo>/s/) ---
+    # Хвост-курирование: синглы, что раньше терялись фильтром ≥4, живут на широких
+    # полках-антологиях. Через ту же укладку, что факты: дедуп-группы → аккордеон
+    # page.html.j2 + тег типа (lifehack/reglament/…). Имена полок = русская
+    # таксономия → пока только lang=="ru" (i18n имён — отдельный шаг).
+    s_ok = False
+    shelves = []
+    if lang == "ru":
+        shelves = sorted(
+            [
+                sv
+                for sv in (facts or {}).get("shelves", [])
+                if len(sv["items"]) >= SHELF_MIN
+            ],
+            key=lambda x: -len(x["items"]),
+        )
+    if shelves:
+        s_ok = True
+        sh_sibs = [
+            {
+                "tema": sv["shelf"],
+                "slug": SHELF_KEY.get(sv["shelf"], slug(sv["shelf"])),
+                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+            }
+            for sv in shelves
+        ]
+        for sv in shelves:
+            sk = SHELF_KEY.get(sv["shelf"], slug(sv["shelf"]))
+            page = {
+                "lang": lang,
+                "path": f"/{lang}/{geo}/s/{sk}/",
+                "geo": geo,
+                "geo_name": name,
+                "intent_name": sv["shelf"],
+                "updated": "07.2026",
+                "title": C["shelf_title"].format(name=name, tl=tl(sv["shelf"])),
+                "meta_desc": C["shelf_desc"].format(
+                    name=name, namep=namep, tl=tl(sv["shelf"])
+                ),
+                "h1": pick(C["FHEAD"], geo + sk).format(
+                    t=cap(sv["shelf"]), g=name, gp=namep
+                ),
+                "intro": C["shelf_intro"].format(
+                    name=name, namep=namep, tl=tl(sv["shelf"])
+                ),
+                "chips": [
+                    {
+                        "icon": icon(x["tema"]),
+                        "label": x["tema"],
+                        "url": x["url"],
+                        "soon": False,
+                    }
+                    for x in sh_sibs
+                    if x["slug"] != sk
+                ][:6],
+            }
+            if sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
+                page["template"] = "page.html.j2"
+                page["list_label"] = C["shelf_list_label"]
+                page["faqs"] = groups_to_faqs(sv, lang)
+            else:  # полка без дедупа → старый список (не должно случаться после dedup.py)
+                page["template"] = "qlist.html.j2"
+                page["list_label"] = C["shelf_list_label"]
+                page["questions"] = [it["text"] for it in sv["items"]]
+            write(f"{lang}_{geo}_s_{sk}.json", page)
+            n += 1
+        stiles = [
+            {
+                "icon": icon(sv["shelf"]),
+                "title": sv["shelf"],
+                "blurb": C["shelf_blurb"].format(n=len(sv["items"])),
+                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+            }
+            for sv in shelves
+        ]
+        write(
+            f"{lang}_{geo}_s_hub.json",
+            {
+                "lang": lang,
+                "template": "index.html.j2",
+                "path": f"/{lang}/{geo}/s/",
+                "geo": geo,
+                "geo_name": name,
+                "updated": "07.2026",
+                "title": C["shub_title"].format(name=name),
+                "meta_desc": C["shub_desc"].format(name=name),
+                "h1": C["shub_h1"],
+                "intro": C["shub_intro"],
+                "list_label": C["list_label_topics"],
+                "tiles": stiles,
+            },
+        )
+        n += 1
+
+    # --- ГЕО-ХАБ (тайлы фактов + мостики вопросов и разделов) ---
     tiles = list(fact_tiles)
+    if s_ok:
+        tiles.insert(
+            0,
+            {
+                "icon": "📚",
+                "title": C["bridge_shelf_title"],
+                "blurb": C["bridge_shelf_blurb"],
+                "url": f"/{lang}/{geo}/s/",
+            },
+        )
     if q_ok:
         tiles.insert(
             0,
@@ -811,7 +1098,12 @@ def build_geo(geo, lang="ru"):
         },
     )
     n += 1
-    return n, len(fact_tiles), len(qgroups) if q_ok else 0
+    return (
+        n,
+        len(fact_tiles),
+        len(qgroups) if q_ok else 0,
+        len(shelves) if s_ok else 0,
+    )
 
 
 def langs_for(geo):
@@ -880,11 +1172,13 @@ if __name__ == "__main__":
     counts = {}  # lang -> {geo: число факт-тем} (ранжир «популярных» на home)
     for g in geos:
         for lang in langs_for(g):
-            n, nf, nq = build_geo(g, lang)
+            n, nf, nq, ns = build_geo(g, lang)
             total += n
             built.setdefault(lang, []).append(g)
             counts.setdefault(lang, {})[g] = nf
-            print(f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq})")
+            print(
+                f"{g}/{lang}: страниц-data {n} (факт-тем {nf}, вопрос-тем {nq}, полок {ns})"
+            )
     # home — портал-вход для ВСЕХ языков (включая ru: pages владеет home, wire делегирует сюда).
     # about — только не-ru (ru_about живой, не трогаем).
     for lang, gl in built.items():

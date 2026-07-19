@@ -20,10 +20,11 @@
 | `facet` (`facet_one`) | `facet.py` | 1 муха | **~1500** | замер: пик 482 ×3 | `runner` |
 | `translate` (`translate_texts`) | `facet_lang.py` | **50 мух** | **~400** | 482×13яз/50 ×3; throughput 13/мин·ключ (канон 4.1) | `lang_runner` |
 | `questions` | `questions_page.py` | 15 мух/запрос | **~300** | оценка ~100/день ×3, замерить | `runner` |
-| `consolidate` (рот=carve) | `facet.py` `carve_family` | ≤90 мух-ТЕКСТОВ | **~300** | оценка | `runner` |
+| `consolidate` (рты=carve, assign_tail) | `facet.py` `carve_family` / `assign_tail` | ≤90 мух-ТЕКСТОВ | **~300** | оценка; assign: ceil(хвост/90)×≤3 ретрая (br≈21 батч) | `runner`; хвост руками `facet.py <geo> --assign-tail` |
 | `faq` (`write_faq`) | `page_builder.py` | 1 секция | **~300** (дефолт) | не замерен, консерв. | `batch` |
 | `synth` | `page_builder.py` | 1 страница | **~200** (дефолт) | не замерен, консерв. | `batch` |
 | `labels` (`translate_labels`) | `facet_lang.py` | 60 меток | **~200** (дефолт) | копейки | `lang_runner` |
+| `kratko` (`kratko_for`) | `dedup.py` | ≤12 абзацев/вид | **~300** | 1 вызов/вид-страницу; br=134, бэкфилл-разовый | руками (`dedup.py <geo> --kratko`) |
 
 `DEFAULT_CONSUMER_CAP ≈ 300` — любой незаписанный рот. Сумма капов (~3200) < пул 5280, каждый << пул → один сломанный рот пул не осушит. **Числа предложены методом, финально фиксирует юзер.**
 
