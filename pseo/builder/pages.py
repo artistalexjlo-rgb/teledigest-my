@@ -727,24 +727,37 @@ def lead_split(text):
     return text[: i + 1], text[i + 2 :]
 
 
+def _faq_of(g, by_id, lang):
+    """Одна дедуп-группа → пункт аккордеона: лид → q, остальное → a, n = подтверждений."""
+    rep = by_id[g["rep"]]
+    q, a = lead_split(rep["text"])
+    f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
+    typ = rep.get("type")  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
+    if typ and typ in TYPE_KEY:
+        key = TYPE_KEY[typ]
+        f["type"] = TYPE_SHORT.get(key, typ)
+        f["type_key"] = key
+    return f
+
+
 def groups_to_faqs(v, lang):
-    """Дедуп-группы вида (dedup.py) → пункты аккордеона page.html.j2.
-    Пункт = репрезентант группы: лид → q, остальное → a, n = подтверждений."""
+    """Дедуп-группы вида (dedup.py) → пункты аккордеона page.html.j2."""
     by_id = {it["id"]: it for it in v["items"]}
-    faqs = []
-    for g in v["groups"]:
-        rep = by_id[g["rep"]]
-        q, a = lead_split(rep["text"])
-        f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
-        typ = rep.get(
-            "type"
-        )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
-        if typ and typ in TYPE_KEY:
-            key = TYPE_KEY[typ]
-            f["type"] = TYPE_SHORT.get(key, typ)
-            f["type_key"] = key
-        faqs.append(f)
-    return faqs
+    return [_faq_of(g, by_id, lang) for g in v["groups"]]
+
+
+def sections_to_faqs(v, lang):
+    """Секции жирного вида (dedup.py --sections) → блоки страницы: подзаголовок + свои
+    пункты. Смысловые повторы оказываются рядом, а не размазанными простынёй (кейс vn/QR).
+    """
+    by_id = {it["id"]: it for it in v["items"]}
+    by_rep = {g["rep"]: g for g in v["groups"]}
+    out = []
+    for s in v["sections"]:
+        faqs = [_faq_of(by_rep[r], by_id, lang) for r in s["reps"] if r in by_rep]
+        if faqs:
+            out.append({"name": s["name"], "faqs": faqs})
+    return out
 
 
 # RU→latin транслит для слагов: URL латиницей (money-качество), не кириллический %-суп
@@ -878,7 +891,9 @@ def build_geo(geo, lang="ru"):
             page["list_label"] = C[
                 "fact_list_label"
             ]  # «Из живого опыта», не «Частые вопросы»
-            page["faqs"] = groups_to_faqs(v, lang)
+            page["faqs"] = groups_to_faqs(v, lang)  # плоский список: jsonld + фолбэк
+            if v.get("sections"):  # жирный вид → смысловые блоки с подзаголовками
+                page["sections"] = sections_to_faqs(v, lang)
         else:  # без дедупа (гео/язык ещё не прогнан) → старый список
             page["template"] = "qlist.html.j2"
             page["list_label"] = C["fact_list_label"]
@@ -1024,6 +1039,8 @@ def build_geo(geo, lang="ru"):
                 page["template"] = "page.html.j2"
                 page["list_label"] = C["shelf_list_label"]
                 page["faqs"] = groups_to_faqs(sv, lang)
+                if sv.get("sections"):
+                    page["sections"] = sections_to_faqs(sv, lang)
             else:  # полка без дедупа → старый список (не должно случаться после dedup.py)
                 page["template"] = "qlist.html.j2"
                 page["list_label"] = C["shelf_list_label"]

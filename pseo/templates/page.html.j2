@@ -16,6 +16,17 @@
   <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.short_answer | safe }}</div></div>
   {%- endif %}
 
+  {%- if page.sections %}
+  {%- for sec in page.sections %}
+  <h2>{{ sec.name }}</h2>
+  {%- for f in sec.faqs %}
+  <details{% if loop.first and loop.index0 == 0 %} open{% endif %}><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
+    <div class="a">{{ f.a | safe }}
+    <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
+  </details>
+  {%- endfor %}
+  {%- endfor %}
+  {%- else %}
   <h2>{{ page.list_label or t.label_faq }}</h2>
   {%- for f in page.faqs %}
   <details{% if loop.first %} open{% endif %}><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
@@ -23,6 +34,7 @@
     <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
   </details>
   {%- endfor %}
+  {%- endif %}
 
   <h2>{{ t.label_related }}</h2>
   <div class="chips">
