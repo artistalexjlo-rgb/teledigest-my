@@ -73,6 +73,16 @@ COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (п
 # текущий ключ НЕ наказываем, иначе внешний чих прожигает весь пул в cooldown
 # (самострел). Окно 30с: волна в логах — кластер секунд, между волнами — минуты.
 ENV429_WINDOW = float(os.environ.get("KB_ENV429_WINDOW", "30"))
+# ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены — очередь держит МОЗГ).
+# Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в GRANT_STEP
+# на весь пул; выдал — следующий подходит через такт, а полёт (HTTP) идёт сам и никого
+# не держит (юзер: «рот получил ключ и пошёл — сосок ему не нужен»; длинный перевод
+# больше не блокирует пул). Частота запусков с IP ограничена тактом железно:
+# 3с = ≤20 запусков/мин. Число — ручка юзера (точного по-IP порога НЕ существует,
+# см. факт про общее окно 429 ниже в report()).
+# В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол», осьминог), такт живёт
+# в общей SQLite — один на все процессы.
+GRANT_STEP = float(os.environ.get("KB_GRANT_STEP", "3"))
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -180,13 +190,16 @@ def _log_body(consumer, model, status, body):
         pass
 
 
-CAPS = {  # капы ртов: метод «дневной пик × запас≈3», значения из ARCHITECTURE.md (юзер принял).
+# ⛔ Капы НЕ enforce (сняты юзером 2026-07-21). Числа ниже — МОИ оценки на глаз («×3»),
+# юзер их НЕ принимал (оспаривал translate=400). Держим как исторический ориентир объёмов;
+# реальный расход мерит consumer_usage.
+CAPS = {
     "facet": 1500,  # замер: пик 482 ×3
     "translate": 400,  # 482×13яз/50 ×3
     "questions": 300,  # оценка, замерить
     # «consolidate» переименован 07-19: рот должен зваться своим делом (юзер).
     # Старые строки consumer_usage остаются под старым именем — история, не мигрируем.
-    "carve": 300,  # экс-consolidate (кап юзер принял); распил плотных семей
+    "carve": 300,  # экс-consolidate; распил плотных семей
     "assign": 100,  # хвост-раскладка по полкам; ~ceil(хвост/90)×≤3 на гео, br≈63
     "faq": 300,  # дефолт-класс
     "synth": 200,  # дефолт-класс
@@ -252,6 +265,18 @@ def init():
         c.execute("ALTER TABLE key_clock ADD COLUMN was_cd INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    # очередь пула: busy_ts в broker_global = время последней выдачи (такт GRANT_STEP);
+    # busy_consumer — кто взял последним (диагностика)
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS broker_global("
+        "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
+    )
+    for col, typ in (("busy_consumer", "TEXT"), ("busy_ts", "REAL DEFAULT 0")):
+        try:
+            c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
+    c.execute("INSERT OR IGNORE INTO broker_global(id) VALUES(1)")
     c.commit()
     c.close()
 
@@ -260,6 +285,8 @@ def acquire(consumer, role, model, keys):
     """Взять ключ через центр. role: 'primary'|'background'. keys: список api-ключей.
     Возврат:
       (key, None)        — выдан ключ;
+      (None, 0.0)        — ОЧЕРЕДЬ: такт выдачи ещё не прошёл; ждать НЕ тратит бюджет
+                           вызова (канон юзера: пауз нет, только очередь);
       (None, wait_s>0)   — сейчас нет, но освободится через wait_s (RPM/clock);
       (None, -1.0)       — все ключи на капе/бане (бюджет модели выбран).
     """
@@ -270,16 +297,14 @@ def acquire(consumer, role, model, keys):
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
-        # ПРЕДОХРАНИТЕЛЬ per-РОТ: рот выбрал дневную долю → отказ (как per-ключ кап). Не даём
-        # одному сломанному рту осушить весь пул и заморить остальных.
-        crow = c.execute(
-            "SELECT count FROM consumer_usage WHERE consumer=? AND pt_day=?",
-            (consumer, day),
-        ).fetchone()
-        if crow and crow[0] >= _consumer_cap(c, consumer):
+        # ОЧЕРЕДЬ ПУЛА: такт на выдачу — с последней выдачи прошло < GRANT_STEP → ждать.
+        brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
+        if brow and now - (brow[0] or 0) < GRANT_STEP:
             c.execute("ROLLBACK")
-            _log_event(consumer, model, "cap_block", crow[0])  # рот виден в stats
-            return (None, -1.0)
+            return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
+        # Капы ртов СНЯТЫ (юзер 2026-07-21: «убрать капы и измерить реальные запросы»).
+        # Учёт consumer_usage ЖИВ — по нему меряем реальный расход каждого рта; единственный
+        # enforce-забор = per-ключ RPD + такт очереди. Таблица consumer_cap осталась заделом.
         clocks = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -331,6 +356,10 @@ def acquire(consumer, role, model, keys):
         c.execute(
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
+        )
+        c.execute(  # метка выдачи: следующий рот подойдёт через GRANT_STEP
+            "UPDATE broker_global SET busy_consumer=?, busy_ts=? WHERE id=1",
+            (consumer, now),
         )
         c.execute("COMMIT")
         return (key, None)
@@ -459,9 +488,10 @@ def call(
     acquire → HTTP → report (в finally: выйти без учёта негде) → разбор JSON.
 
     WORST-CASE НА ВЫЗОВ: ≤MAX_FAILS(5) реальных запросов к Google + ≤MAX_WAIT_TOTAL(30мин)
-    сна в ожидании слота + ≤75с backoff-сна при серии 429 (5+10+20+40, окно троттла).
-    Пулемёта нет: сон по указанию мозга или backoff'ом между 429-попытками.
-    None: бюджет модели выбран / не смогли за 5 попыток / вышли за 30мин ожидания.
+    сна в ожидании СЛОТА КЛЮЧА + ≤75с backoff-сна при серии 429 (окно троттла).
+    Очередь пула (такт выдачи GRANT_STEP) ждётся ОТДЕЛЬНО и бюджет не тратит — из
+    очереди не уходят; полёт (HTTP) пул не держит — блокировки как класса нет.
+    None: бюджет выбран / 5 провалов / 30мин без слота ключа.
     """
     payload = {
         "contents": [{"parts": [{"text": user}]}],
@@ -477,6 +507,9 @@ def call(
             if wait is None or wait < 0:
                 print(f"  бюджет модели {model} выбран — стоп ({consumer})")
                 return None
+            if wait == 0.0:  # ОЧЕРЕДЬ (такт выдачи): стоим сколько нужно,
+                time.sleep(0.7)  # бюджет вызова НЕ тратим — из очереди не уходят
+                continue
             nap = min(wait, MAX_SLEEP)
             time.sleep(nap)
             waited += nap
