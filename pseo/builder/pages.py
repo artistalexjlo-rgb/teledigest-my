@@ -727,34 +727,48 @@ def lead_split(text):
     return text[: i + 1], text[i + 2 :]
 
 
-def _faq_of(g, by_id, lang):
-    """Одна дедуп-группа → пункт аккордеона: лид → q, остальное → a, n = подтверждений."""
-    rep = by_id[g["rep"]]
-    q, a = lead_split(rep["text"])
-    f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
-    typ = rep.get("type")  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
-    if typ and typ in TYPE_KEY:
-        key = TYPE_KEY[typ]
-        f["type"] = TYPE_SHORT.get(key, typ)
-        f["type_key"] = key
-    return f
-
-
 def groups_to_faqs(v, lang):
-    """Дедуп-группы вида (dedup.py) → пункты аккордеона page.html.j2."""
+    """Дедуп-группы вида (dedup.py) → пункты аккордеона page.html.j2.
+    Пункт = репрезентант группы: лид → q, остальное → a, n = подтверждений."""
     by_id = {it["id"]: it for it in v["items"]}
-    return [_faq_of(g, by_id, lang) for g in v["groups"]]
+    faqs = []
+    for g in v["groups"]:
+        rep = by_id[g["rep"]]
+        q, a = lead_split(rep["text"])
+        f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
+        typ = rep.get(
+            "type"
+        )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
+        if typ and typ in TYPE_KEY:
+            key = TYPE_KEY[typ]
+            f["type"] = TYPE_SHORT.get(key, typ)
+            f["type_key"] = key
+        faqs.append(f)
+    return faqs
 
 
 def sections_to_faqs(v, lang):
     """Секции жирного вида (dedup.py --sections) → блоки страницы: подзаголовок + свои
-    пункты. Смысловые повторы оказываются рядом, а не размазанными простынёй (кейс vn/QR).
-    """
+    пункты (кейс vn/QR). НОВЫЙ путь рядом с рабочим: groups_to_faqs не тронут (surgical);
+    копия сборки пункта — осознанная цена за неприкосновенность отгруженного кода."""
     by_id = {it["id"]: it for it in v["items"]}
     by_rep = {g["rep"]: g for g in v["groups"]}
     out = []
     for s in v["sections"]:
-        faqs = [_faq_of(by_rep[r], by_id, lang) for r in s["reps"] if r in by_rep]
+        faqs = []
+        for r in s["reps"]:
+            g = by_rep.get(r)
+            if not g:
+                continue
+            rep = by_id[g["rep"]]
+            q, a = lead_split(rep["text"])
+            f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
+            typ = rep.get("type")
+            if typ and typ in TYPE_KEY:
+                key = TYPE_KEY[typ]
+                f["type"] = TYPE_SHORT.get(key, typ)
+                f["type_key"] = key
+            faqs.append(f)
         if faqs:
             out.append({"name": s["name"], "faqs": faqs})
     return out
