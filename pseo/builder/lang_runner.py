@@ -95,12 +95,12 @@ def main():
                 "ts": now(),
             }
         )
-        if not pending:  # всё переведено — ждём новых данных/гео
+        if not pending:  # всё переведено → ВЫХОД (канон PROCESSES.md: прогон умирает
+            # по завершении, вечных ждунов нет; новые данные = новый запуск по отмашке)
             save_status(
                 {"state": "all-done", "языков": len(langs), "гео": len(gs), "ts": now()}
             )
-            time.sleep(3600)
-            continue
+            return
         stalled = False
         for geo, lang in pending:
             if os.path.exists(STOP):

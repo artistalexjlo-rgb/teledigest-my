@@ -1,4 +1,30 @@
-# РЕЕСТР ПРОЦЕССОВ VPS — единственный источник правды
+# РЕЕСТР ПРОЦЕССОВ VPS + ВЕСЬ СТЕК СТРАНИЦ — единственный источник правды
+
+## ПОЛНЫЙ СТЕК (от мухи до прода; «процессов вне этой схемы не существует»)
+
+```
+ПОСТОЯННО (реестр ниже):
+  бот bots-grab (docker) ── граббер чатов → SQLite
+       └─ экстрактор: сообщения → мухи ai_lesson   [Gemini flash-lite, учёт gemini_quota]
+       └─ embed → Qdrant                            [gemini-embedding-2, свой RPD]
+  bge-sweep.timer (2ч) ── мухи → local_vec.db/Qdrant-local  [ЛОКАЛЬНАЯ модель, без Gemini]
+  sentinel (cron /6ч) ── HTTP-сторож портала, чирик при поломке [без Gemini]
+
+ПО ОТМАШКЕ (руками, nohup на время прогона, умирает по завершении):
+  1. facet.py <geo>            тег+ru-перевод [рот facet] + карв семей [carve] → out_facet/
+  2. facet.py <geo> --assign-tail   хвост → полки×типы [assign]
+  3. dedup.py <geo|--all> [--kratko]  дедуп-группы (KEYLESS, bge) + короткий ответ [kratko]
+  4. lang_runner.py            переводы по очереди языков → out_facet_<lang> [translate, labels]
+  5. questions_page.py         вопрос-контур → out_questions [questions]
+
+СБОРКА/ДЕПЛОЙ (KEYLESS, одна команда с десктопа):
+  ship.py = pull(VPS) → pages.py(json) → render.py(HTML) → readycheck(гейт)
+            → git push multyspeak-pages → Cloudflare Pages → info.multyspeak.online
+```
+
+Все Gemini-вызовы билдера — ТОЛЬКО через `keybroker.call` (капы ртов: facet 1500 · carve 300 ·
+assign 300 · kratko 600 · translate 400 · labels 200 · questions 300; поверх них — per-key
+шаг/RPD и вина-vs-среда). Мимо мозга запросов не существует.
 
 **Правило (2026-07-20, после инцидента pseo-runner):** на VPS имеет право жить ТОЛЬКО то,
 что есть в этой таблице. Новый юнит/таймер/крон = явное «да» юзера + строка здесь В ТОМ ЖЕ
