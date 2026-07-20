@@ -21,7 +21,10 @@ SITE = {
     # CTA-дверь в Luky. База продукта = .online (.ru — локализация для РФ, редиректит
     # на .online). Интерим: продуктовый лендинг. TODO: диплинк в комнату в РЕЖИМЕ
     # ПОМОЩНИКА, когда появится URL-параметр режима (см. model_luky_funnel_cta).
-    "cta_luky_url": "https://multyspeak.online",
+    "cta_luky_url": os.environ.get("PSEO_CTA_URL", "https://multyspeak.online"),
+    # дверь Luky у RU-зеркала: multyspeak.ru (РФ-доступность без VPN — иначе воронка
+    # зеркала ломается в точке конверсии). ship --mirror подставляет через PSEO_CTA_URL.
+    "mirror_cta_url": "https://multyspeak.ru",
     "telegram_url": "https://t.me/luky_channel",  # footer: канал + чат
     "languages": ["ru", "en", "es", "pt"],
     "year": 2026,

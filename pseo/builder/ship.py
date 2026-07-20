@@ -185,7 +185,11 @@ def step_mirror(dry):
     from config.site import SITE as _S
 
     mirror = _S["mirror_domain"]
-    env = {**os.environ, "PSEO_DOMAIN": mirror}
+    env = {
+        **os.environ,
+        "PSEO_DOMAIN": mirror,
+        "PSEO_CTA_URL": _S["mirror_cta_url"],  # дверь Luky = .ru (РФ без VPN)
+    }
     r = subprocess.run(
         [sys.executable, "render.py", "--all"],
         cwd=BASE,
