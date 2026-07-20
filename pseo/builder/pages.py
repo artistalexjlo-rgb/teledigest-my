@@ -1090,7 +1090,7 @@ def build_geo(geo, lang="ru"):
                         {
                             "icon": icon(sub["name"]),
                             "title": sub["name"],
-                            "blurb": C["shelf_blurb"].format(n=len(sub_groups)),
+                            "blurb": blurb(C, "shelf", len(sub_groups)),
                             "url": f"/{lang}/{geo}/s/{sk}/{ss}/",
                         }
                     )
