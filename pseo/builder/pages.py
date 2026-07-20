@@ -1039,7 +1039,73 @@ def build_geo(geo, lang="ru"):
                     if x["slug"] != sk
                 ][:6],
             }
-            if sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
+            if sv.get("subshelves"):  # полка-гигант ВЕТВИТСЯ: хаб + под-страницы
+                by_rep = {g["rep"]: g for g in sv["groups"]}
+                sub_sibs = [
+                    {"name": sub["name"], "slug": slug(sub["name"])}
+                    for sub in sv["subshelves"]
+                ]
+                subtiles = []
+                for sub in sv["subshelves"]:
+                    ss = slug(sub["name"])
+                    sub_groups = [by_rep[r] for r in sub["reps"] if r in by_rep]
+                    sub_view = {
+                        "items": sv["items"],
+                        "groups": sub_groups,
+                    }  # для groups_to_faqs
+                    spage = {
+                        "lang": lang,
+                        "template": "page.html.j2",
+                        "path": f"/{lang}/{geo}/s/{sk}/{ss}/",
+                        "geo": geo,
+                        "geo_name": name,
+                        "intent_name": sub["name"],
+                        "updated": "07.2026",
+                        "title": C["shelf_title"].format(name=name, tl=tl(sub["name"])),
+                        "meta_desc": C["shelf_desc"].format(
+                            name=name, namep=namep, tl=tl(sub["name"])
+                        ),
+                        "h1": pick(C["FHEAD"], geo + sk + ss).format(
+                            t=cap(sub["name"]), g=name, gp=namep
+                        ),
+                        "intro": C["shelf_intro"].format(
+                            name=name, namep=namep, tl=tl(sub["name"])
+                        ),
+                        "list_label": C["shelf_list_label"],
+                        "faqs": groups_to_faqs(sub_view, lang),
+                        "chips": [
+                            {
+                                "icon": icon(x["name"]),
+                                "label": x["name"],
+                                "url": f"/{lang}/{geo}/s/{sk}/{x['slug']}/",
+                                "soon": False,
+                            }
+                            for x in sub_sibs
+                            if x["slug"] != ss
+                        ][:6],
+                    }
+                    write(f"{lang}_{geo}_s_{sk}_{ss}.json", spage)
+                    n += 1
+                    subtiles.append(
+                        {
+                            "icon": icon(sub["name"]),
+                            "title": sub["name"],
+                            "blurb": C["shelf_blurb"].format(n=len(sub_groups)),
+                            "url": f"/{lang}/{geo}/s/{sk}/{ss}/",
+                        }
+                    )
+                # хаб полки: плитки веток + остаток (репы вне веток) аккордеоном внизу
+                covered = {r for sub in sv["subshelves"] for r in sub["reps"]}
+                rest = [g for g in sv["groups"] if g["rep"] not in covered]
+                page["template"] = "index.html.j2"
+                page["list_label"] = C["list_label_topics"]
+                page["tiles"] = subtiles
+                if rest:
+                    page["faqs"] = groups_to_faqs(
+                        {"items": sv["items"], "groups": rest[:30]}, lang
+                    )
+                    page["faqs_label"] = C["shelf_list_label"]
+            elif sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
                 page["template"] = "page.html.j2"
                 page["list_label"] = C["shelf_list_label"]
                 page["faqs"] = groups_to_faqs(sv, lang)
