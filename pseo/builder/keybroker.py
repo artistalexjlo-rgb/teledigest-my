@@ -298,16 +298,9 @@ def acquire(consumer, role, model, keys):
         if brow and now - (brow[0] or 0) < GRANT_STEP:
             c.execute("ROLLBACK")
             return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
-        # ПРЕДОХРАНИТЕЛЬ per-РОТ: рот выбрал дневную долю → отказ (как per-ключ кап). Не даём
-        # одному сломанному рту осушить весь пул и заморить остальных.
-        crow = c.execute(
-            "SELECT count FROM consumer_usage WHERE consumer=? AND pt_day=?",
-            (consumer, day),
-        ).fetchone()
-        if crow and crow[0] >= _consumer_cap(c, consumer):
-            c.execute("ROLLBACK")
-            _log_event(consumer, model, "cap_block", crow[0])  # рот виден в stats
-            return (None, -1.0)
+        # Капы ртов СНЯТЫ (юзер 2026-07-21: «убрать капы и измерить реальные запросы»).
+        # Учёт consumer_usage ЖИВ — по нему меряем реальный расход каждого рта; единственный
+        # enforce-забор = per-ключ RPD + такт очереди. Таблица consumer_cap осталась заделом.
         clocks = {
             r[0]: (r[1], r[2])
             for r in c.execute(
