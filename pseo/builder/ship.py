@@ -7,8 +7,12 @@
   4. gate   — гео с проблемами (битые/пустые/кодировка) НЕ едут; чистые — едут;
   5. push   — чистые гео-блоки → pages-репо → git push → CF авто-деплой.
 
-Запуск: python builder/ship.py [--dry] [--geo br,vn]   (из pseo/)
---dry = всё до push (посмотреть, что поедет). Дизайн гарантирован шаблоном, гейт держит структуру.
+  6. mirror — автоматически после push: пере-рендер под info.multyspeak.ru → ветка `ru`
+     (Dokploy на РФ-серваке) → обратный рендер под .online. Оба сайта = одна команда.
+
+Запуск: python builder/ship.py [--dry] [--geo br,vn] [--no-mirror]   (из pseo/)
+--dry = всё до push (посмотреть, что поедет). --no-mirror = только .online.
+--mirror = только зеркало (без pull/pages/push). Дизайн шаблоном, гейт держит структуру.
 """
 
 import json
@@ -222,6 +226,12 @@ def step_mirror(dry):
             p = os.path.join(PAGES_REPO, extra)
             if os.path.exists(p):
                 shutil.copy2(p, MIRROR_REPO)
+        ms = os.path.join(
+            BASE, "mirror_static"
+        )  # только-зеркальное (яндекс-верификация)
+        if os.path.isdir(ms):
+            for fn in os.listdir(ms):
+                shutil.copy2(os.path.join(ms, fn), MIRROR_REPO)
         sh(["git", "add", "-A"], cwd=MIRROR_REPO)
         sh(
             [
@@ -257,7 +267,11 @@ def main():
     if not rep:
         sys.exit(1)
     print("== 4-5. gate+push ==")
-    step_push(dry, only)
+    step_push(dry, only) or sys.exit(1)
+    # ЕДИНЫЙ ship: оба сайта одной командой — .online и .ru-зеркало не разъезжаются
+    if not dry and "--no-mirror" not in sys.argv:
+        print("== 6. mirror ==")
+        step_mirror(False)
 
 
 if __name__ == "__main__":
