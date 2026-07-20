@@ -73,6 +73,14 @@ COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (п
 # текущий ключ НЕ наказываем, иначе внешний чих прожигает весь пул в cooldown
 # (самострел). Окно 30с: волна в логах — кластер секунд, между волнами — минуты.
 ENV429_WINDOW = float(os.environ.get("KB_ENV429_WINDOW", "30"))
+# ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены как класс — очередь держит МОЗГ).
+# Одна выдача в полёте на ВЕСЬ пул: пока рот не отрепортил, следующему не даём — рты
+# подходят к соску ПО ОДНОМУ, кем бы ни были запущены. Суммарный темп с IP = естественная
+# латентность HTTP (~15-25/мин), параллельные залпы исчезают конструкцией.
+# Протухание брони: процесс сдох между grant и report (kill -9) → лок снимается сам.
+BUSY_TIMEOUT = float(
+    os.environ.get("KB_BUSY_TIMEOUT", "90")
+)  # HTTP timeout 60с + запас
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -252,6 +260,17 @@ def init():
         c.execute("ALTER TABLE key_clock ADD COLUMN was_cd INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    # очередь пула: busy_* в broker_global = «в полёте один запрос такого-то рта»
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS broker_global("
+        "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
+    )
+    for col, typ in (("busy_consumer", "TEXT"), ("busy_ts", "REAL DEFAULT 0")):
+        try:
+            c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
+    c.execute("INSERT OR IGNORE INTO broker_global(id) VALUES(1)")
     c.commit()
     c.close()
 
@@ -270,6 +289,13 @@ def acquire(consumer, role, model, keys):
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
+        # ОЧЕРЕДЬ ПУЛА: чей-то запрос уже в полёте → этому рту подождать (по одному к соску).
+        brow = c.execute(
+            "SELECT busy_consumer, busy_ts FROM broker_global WHERE id=1"
+        ).fetchone()
+        if brow and brow[0] and now - (brow[1] or 0) < BUSY_TIMEOUT:
+            c.execute("ROLLBACK")
+            return (None, 0.7)  # короткий сон и переспрос — рот стоит в очереди
         # ПРЕДОХРАНИТЕЛЬ per-РОТ: рот выбрал дневную долю → отказ (как per-ключ кап). Не даём
         # одному сломанному рту осушить весь пул и заморить остальных.
         crow = c.execute(
@@ -332,6 +358,10 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
         )
+        c.execute(  # бронь пула: этот рот в полёте, остальные ждут его report
+            "UPDATE broker_global SET busy_consumer=?, busy_ts=? WHERE id=1",
+            (consumer, now),
+        )
         c.execute("COMMIT")
         return (key, None)
     finally:
@@ -351,6 +381,9 @@ def report(consumer, key, model, status):
         c.execute(
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'report',?)",
             (now, consumer, kh, model, status),
+        )
+        c.execute(  # полёт завершён — снять бронь пула, очередь двигается
+            "UPDATE broker_global SET busy_consumer=NULL WHERE id=1"
         )
         if status == 429:
             # МЕХАНИЗМ вина-vs-среда: 429 на ДРУГОМ ключе в окне ENV429_WINDOW = волна
