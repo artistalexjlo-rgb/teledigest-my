@@ -349,12 +349,14 @@ COPY = {
         "fact_desc": "Живой опыт из чатов про {tl} {namep}: как есть, из первых рук. Под твой случай — у Luky.",
         "fact_intro": "Реальный опыт людей из чатов по теме «{tl}» {namep} — как есть, без воды. Под свой случай — <a href='#luky'>спроси Luky</a>.",
         "fact_list_label": "Из живого опыта",
-        "fact_blurb": "{n} советов из чатов",
+        "fact_blurb": "{n} {w} из чатов",
+        "fact_w": ("совет", "совета", "советов"),
         "q_title": "{name}: {tl} — что спрашивают · Luky",
         "q_desc": "Реальные вопросы про {tl} в {name} из живых чатов. Ответ под твой случай — у Luky.",
         "q_intro": "Живые вопросы из чатов сообществ — с чем реально сталкиваются. Узнаёшь свой? Ответ под твой случай — <a href='#luky'>спроси Luky</a>.",
         "q_list_label": "Вопросы из чатов",
-        "q_blurb": "{n} вопросов из чатов",
+        "q_blurb": "{n} {w} из чатов",
+        "q_w": ("вопрос", "вопроса", "вопросов"),
         "qhub_title": "{name}: что спрашивают в чатах — реальные вопросы · Luky",
         "qhub_desc": "Реальные вопросы про {name} из живых чатов: визы, деньги, жильё, безопасность. Ответ под твой случай — у Luky.",
         "qhub_h1": "Что спрашивают в чатах",
@@ -365,7 +367,8 @@ COPY = {
         "shelf_desc": "Живой опыт по теме «{tl}» {namep}: реальные советы, случаи и правила из чатов. Под твой случай — у Luky.",
         "shelf_intro": "Собрано из живого опыта: «{tl}» {namep} — советы, случаи и правила как есть. Под свой случай — <a href='#luky'>спроси Luky</a>.",
         "shelf_list_label": "Из живого опыта",
-        "shelf_blurb": "{n} заметок из чатов",
+        "shelf_blurb": "{n} {w} из чатов",
+        "shelf_w": ("заметка", "заметки", "заметок"),
         "shub_title": "{name}: разделы живого опыта — всё из чатов · Luky",
         "shub_desc": "Живой опыт по {name} по разделам: визы, деньги, транспорт, документы, безопасность и другое. Под твой случай — у Luky.",
         "shub_h1": "Разделы живого опыта",
@@ -703,6 +706,22 @@ N_WORD = {
 }
 
 
+def ru_w(n, forms):
+    """Склонение блёрбов плиток («3 заметки», не «3 заметок» — юзер поймал скрином)."""
+    one, few, many = forms
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def blurb(C, key, n):
+    """Блёрб плитки с числом: ru — со склонением ({w}), прочие языки — как были."""
+    forms = C.get(key + "_w")
+    return C[key + "_blurb"].format(n=n, w=ru_w(n, forms) if forms else "")
+
+
 def n_word(lang, n):
     if lang == "ru":
         if n % 10 == 1 and n % 100 != 11:
@@ -889,7 +908,7 @@ def build_geo(geo, lang="ru"):
             {
                 "icon": icon(tema),
                 "title": tema,
-                "blurb": C["fact_blurb"].format(n=len(items)),
+                "blurb": blurb(C, "fact", len(items)),
                 "url": f"/{lang}/{geo}/{s}/",
             }
         )
@@ -940,7 +959,7 @@ def build_geo(geo, lang="ru"):
             {
                 "icon": icon(g["tema"]),
                 "title": g["tema"],
-                "blurb": C["q_blurb"].format(n=len(g["questions"])),
+                "blurb": blurb(C, "q", len(g["questions"])),
                 "url": f"/{lang}/{geo}/q/{slug(g['tema'])}/",
             }
             for g in qgroups
@@ -1034,7 +1053,7 @@ def build_geo(geo, lang="ru"):
             {
                 "icon": icon(sv["shelf"]),
                 "title": sv["shelf"],
-                "blurb": C["shelf_blurb"].format(n=len(sv["items"])),
+                "blurb": blurb(C, "shelf", len(sv["items"])),
                 "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
             }
             for sv in shelves
