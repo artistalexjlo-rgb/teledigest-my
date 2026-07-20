@@ -222,6 +222,12 @@ def step_mirror(dry):
             p = os.path.join(PAGES_REPO, extra)
             if os.path.exists(p):
                 shutil.copy2(p, MIRROR_REPO)
+        ms = os.path.join(
+            BASE, "mirror_static"
+        )  # только-зеркальное (яндекс-верификация)
+        if os.path.isdir(ms):
+            for fn in os.listdir(ms):
+                shutil.copy2(os.path.join(ms, fn), MIRROR_REPO)
         sh(["git", "add", "-A"], cwd=MIRROR_REPO)
         sh(
             [
