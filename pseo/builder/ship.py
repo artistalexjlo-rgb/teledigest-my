@@ -171,7 +171,79 @@ def step_push(dry, only=None):
     return r.returncode == 0
 
 
+MIRROR_REPO = os.path.abspath(f"{BASE}/../../multyspeak-pages-ru")  # клон, ветка ru
+
+
+def step_mirror(dry):
+    """ЗЕРКАЛО для Яндекса: пере-рендер ВСЕГО под mirror_domain (canonical/sitemap на
+    info.multyspeak.ru — иначе Яндекс видит канониклы на чужой .online и не индексирует)
+    → пуш в ветку `ru` репо pages → Dokploy на РФ-серваке отдаёт статикой.
+    Гонять ПОСЛЕ обычного ship (data/ уже собран). Основной out/ пере-рендеривается
+    обратно под .online в конце (иначе следующий ship уедет с .ru-канониклами).
+    """
+    sys.path.insert(0, BASE)
+    from config.site import SITE as _S
+
+    mirror = _S["mirror_domain"]
+    env = {
+        **os.environ,
+        "PSEO_DOMAIN": mirror,
+        "PSEO_CTA_URL": _S["mirror_cta_url"],  # дверь Luky = .ru (РФ без VPN)
+    }
+    r = subprocess.run(
+        [sys.executable, "render.py", "--all"],
+        cwd=BASE,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    print("mirror render:", (r.stdout or r.stderr).strip().splitlines()[-1])
+    if r.returncode != 0:
+        return False
+    if not os.path.isdir(MIRROR_REPO):  # первый раз: клон того же origin, ветка ru
+        origin = sh(
+            ["git", "remote", "get-url", "origin"], cwd=PAGES_REPO
+        ).stdout.strip()
+        sh(["git", "clone", origin, MIRROR_REPO])
+        sh(["git", "checkout", "-B", "ru"], cwd=MIRROR_REPO)
+    if dry:
+        print("DRY — зеркало отрендерено в out/, без push.")
+    else:
+        for d in os.listdir(MIRROR_REPO):  # чистим всё кроме .git
+            if d == ".git":
+                continue
+            p = os.path.join(MIRROR_REPO, d)
+            shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
+        for d in os.listdir(OUT):
+            src = os.path.join(OUT, d)
+            dst = os.path.join(MIRROR_REPO, d)
+            shutil.copytree(src, dst) if os.path.isdir(src) else shutil.copy2(src, dst)
+        for extra in ("favicon.svg",):  # статика вне out/
+            p = os.path.join(PAGES_REPO, extra)
+            if os.path.exists(p):
+                shutil.copy2(p, MIRROR_REPO)
+        sh(["git", "add", "-A"], cwd=MIRROR_REPO)
+        sh(
+            [
+                "git",
+                "commit",
+                "-m",
+                "pSEO ru-mirror ship\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+            ],
+            cwd=MIRROR_REPO,
+        )
+        r2 = sh(["git", "push", "origin", "ru", "--force"], cwd=MIRROR_REPO)
+        print("mirror push:", "OK" if r2.returncode == 0 else r2.stderr[-200:])
+    # вернуть out/ под основной домен — следующий ship не должен уехать с .ru-канониклами
+    r3 = sh([sys.executable, "render.py", "--all"], cwd=BASE)
+    print("re-render .online:", "OK" if r3.returncode == 0 else "FAIL")
+    return True
+
+
 def main():
+    if "--mirror" in sys.argv:
+        step_mirror("--dry" in sys.argv)
+        return
     dry = "--dry" in sys.argv
     only = None
     if "--geo" in sys.argv:
