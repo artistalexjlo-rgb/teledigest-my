@@ -73,14 +73,15 @@ COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (п
 # текущий ключ НЕ наказываем, иначе внешний чих прожигает весь пул в cooldown
 # (самострел). Окно 30с: волна в логах — кластер секунд, между волнами — минуты.
 ENV429_WINDOW = float(os.environ.get("KB_ENV429_WINDOW", "30"))
-# ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены как класс — очередь держит МОЗГ).
-# Одна выдача в полёте на ВЕСЬ пул: пока рот не отрепортил, следующему не даём — рты
-# подходят к соску ПО ОДНОМУ, кем бы ни были запущены. Суммарный темп с IP = естественная
-# латентность HTTP (~15-25/мин), параллельные залпы исчезают конструкцией.
-# Протухание брони: процесс сдох между grant и report (kill -9) → лок снимается сам.
-BUSY_TIMEOUT = float(
-    os.environ.get("KB_BUSY_TIMEOUT", "90")
-)  # HTTP timeout 60с + запас
+# ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены — очередь держит МОЗГ).
+# Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в GRANT_STEP
+# на весь пул; выдал — следующий подходит через такт, а полёт (HTTP) идёт сам и никого
+# не держит (юзер: «рот получил ключ и пошёл — сосок ему не нужен»; длинный перевод
+# больше не блокирует пул). По-IP частота запусков ограничена тактом железно:
+# 3с = ≤20 запусков/мин при наблюдаемом пороге срыва ~45/мин. Число — ручка юзера.
+# В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол», осьминог), такт живёт
+# в общей SQLite — один на все процессы.
+GRANT_STEP = float(os.environ.get("KB_GRANT_STEP", "3"))
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -260,7 +261,8 @@ def init():
         c.execute("ALTER TABLE key_clock ADD COLUMN was_cd INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
-    # очередь пула: busy_* в broker_global = «в полёте один запрос такого-то рта»
+    # очередь пула: busy_ts в broker_global = время последней выдачи (такт GRANT_STEP);
+    # busy_consumer — кто взял последним (диагностика)
     c.execute(
         "CREATE TABLE IF NOT EXISTS broker_global("
         "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
@@ -279,8 +281,8 @@ def acquire(consumer, role, model, keys):
     """Взять ключ через центр. role: 'primary'|'background'. keys: список api-ключей.
     Возврат:
       (key, None)        — выдан ключ;
-      (None, 0.0)        — ОЧЕРЕДЬ: чей-то запрос в полёте; ждать НЕ тратит бюджет вызова
-                           (канон юзера: пауз нет, только очередь — из неё не уходят);
+      (None, 0.0)        — ОЧЕРЕДЬ: такт выдачи ещё не прошёл; ждать НЕ тратит бюджет
+                           вызова (канон юзера: пауз нет, только очередь);
       (None, wait_s>0)   — сейчас нет, но освободится через wait_s (RPM/clock);
       (None, -1.0)       — все ключи на капе/бане (бюджет модели выбран).
     """
@@ -291,11 +293,9 @@ def acquire(consumer, role, model, keys):
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
-        # ОЧЕРЕДЬ ПУЛА: чей-то запрос уже в полёте → этому рту подождать (по одному к соску).
-        brow = c.execute(
-            "SELECT busy_consumer, busy_ts FROM broker_global WHERE id=1"
-        ).fetchone()
-        if brow and brow[0] and now - (brow[1] or 0) < BUSY_TIMEOUT:
+        # ОЧЕРЕДЬ ПУЛА: такт на выдачу — с последней выдачи прошло < GRANT_STEP → ждать.
+        brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
+        if brow and now - (brow[0] or 0) < GRANT_STEP:
             c.execute("ROLLBACK")
             return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
         # ПРЕДОХРАНИТЕЛЬ per-РОТ: рот выбрал дневную долю → отказ (как per-ключ кап). Не даём
@@ -360,7 +360,7 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
         )
-        c.execute(  # бронь пула: этот рот в полёте, остальные ждут его report
+        c.execute(  # метка выдачи: следующий рот подойдёт через GRANT_STEP
             "UPDATE broker_global SET busy_consumer=?, busy_ts=? WHERE id=1",
             (consumer, now),
         )
@@ -383,9 +383,6 @@ def report(consumer, key, model, status):
         c.execute(
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'report',?)",
             (now, consumer, kh, model, status),
-        )
-        c.execute(  # полёт завершён — снять бронь пула, очередь двигается
-            "UPDATE broker_global SET busy_consumer=NULL WHERE id=1"
         )
         if status == 429:
             # МЕХАНИЗМ вина-vs-среда: 429 на ДРУГОМ ключе в окне ENV429_WINDOW = волна
@@ -495,9 +492,9 @@ def call(
 
     WORST-CASE НА ВЫЗОВ: ≤MAX_FAILS(5) реальных запросов к Google + ≤MAX_WAIT_TOTAL(30мин)
     сна в ожидании СЛОТА КЛЮЧА + ≤75с backoff-сна при серии 429 (окно троттла).
-    Очередь пула (кто-то в полёте) ждётся ОТДЕЛЬНО и бюджет не тратит — из очереди
-    не уходят (канон юзера: пауз нет, только очередь; висение исключено протуханием
-    брони за BUSY_TIMEOUT). None: бюджет выбран / 5 провалов / 30мин без слота ключа.
+    Очередь пула (такт выдачи GRANT_STEP) ждётся ОТДЕЛЬНО и бюджет не тратит — из
+    очереди не уходят; полёт (HTTP) пул не держит — блокировки как класса нет.
+    None: бюджет выбран / 5 провалов / 30мин без слота ключа.
     """
     payload = {
         "contents": [{"parts": [{"text": user}]}],
@@ -513,7 +510,7 @@ def call(
             if wait is None or wait < 0:
                 print(f"  бюджет модели {model} выбран — стоп ({consumer})")
                 return None
-            if wait == 0.0:  # ОЧЕРЕДЬ (кто-то в полёте): стоим сколько нужно,
+            if wait == 0.0:  # ОЧЕРЕДЬ (такт выдачи): стоим сколько нужно,
                 time.sleep(0.7)  # бюджет вызова НЕ тратим — из очереди не уходят
                 continue
             nap = min(wait, MAX_SLEEP)
