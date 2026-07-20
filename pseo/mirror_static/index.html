@@ -1,0 +1,16 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex, nofollow">
+<title>Luky</title><link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="canonical" href="https://info.multyspeak.ru/ru/">
+<style>body{background:#06080d;color:#e8f1f8;font-family:-apple-system,Segoe UI,sans-serif;display:grid;place-items:center;height:100vh;margin:0}a{color:#3ad8ff}</style>
+<script>
+/* Фолбэк-редирект по языку браузера (основной путь — Cloudflare Function /functions/index.js).
+   Работает, даже если функции выключены: определяем язык и уходим на /<lang>/. */
+(function(){
+  var SUP=["ru","en","es","pt"], pick="ru";
+  var langs=(navigator.languages||[navigator.language||"ru"]);
+  for(var i=0;i<langs.length;i++){var c=(langs[i]||"").slice(0,2).toLowerCase();if(SUP.indexOf(c)>=0){pick=c;break;}}
+  location.replace("/"+pick+"/");
+})();
+</script></head>
+<body><p>Luky · <a href="/ru/">ru</a> · <a href="/en/">en</a> · <a href="/es/">es</a> · <a href="/pt/">pt</a></p></body></html>
