@@ -170,9 +170,7 @@ def carve_family(fids, by_id):
     for s in range(0, len(fids), CARVE_BATCH):
         chunk = fids[s : s + CARVE_BATCH]
         idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
-        res = call(
-            json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="consolidate"
-        )
+        res = call(json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="carve")
         if not res or not res.get("intents"):
             for fid in chunk:  # fallback: муха как есть (её первая задача = имя)
                 out.append({"name": by_id[fid]["zadachi"][0], "ids": [fid]})
@@ -229,7 +227,7 @@ def assign_tail(tail_fids, by_id):
         res = None
         for _ in range(3):
             res = call(
-                json.dumps(idx, ensure_ascii=False), ASSIGN_SYS, consumer="consolidate"
+                json.dumps(idx, ensure_ascii=False), ASSIGN_SYS, consumer="assign"
             )
             if res and res.get("assign"):
                 break
@@ -419,17 +417,27 @@ def run(geo, limit=None):
     return new_n
 
 
+PAGE_MIN = 4  # гейт страницы (зеркало pages.py): вид <4 мух страницей не станет
+
+
 def run_assign_tail(geo):
-    """Только джоб2 на УЖЕ построенном out_facet: хвост = тегнутые мухи вне карв-видов →
-    раскладка по таксономии → shelves/prochee мёржатся в out_facet/<geo>.json.
-    БЕЗ пере-карва (полный run() на дозревшем гео пережёвывает carve заново — дорого).
+    """Только джоб2 на УЖЕ построенном out_facet: хвост = тегнутые мухи, НЕ доходящие
+    ни до одной страницы (все их виды <PAGE_MIN; в старом формате синглы лежат видами
+    по 1 мухе — «вне видов» их не ловит). Раскладка по таксономии → shelves/prochee
+    мёржатся в out_facet/<geo>.json. БЕЗ пере-карва (полный run() на дозревшем гео
+    пережёвывает carve заново — дорого).
     """
     tagged = json.load(open(f"tags/{geo}.json", encoding="utf-8"))
     by_id = {r["id"]: r for r in tagged}
     out_fn = f"out_facet/{geo}.json"
     page = json.load(open(out_fn, encoding="utf-8"))
-    carved = {it["id"] for v in page.get("views_by_task", []) for it in v["items"]}
-    tail = [fid for fid in by_id if fid not in carved]
+    on_page = {
+        it["id"]
+        for v in page.get("views_by_task", [])
+        if len(v["items"]) >= PAGE_MIN
+        for it in v["items"]
+    }
+    tail = [fid for fid in by_id if fid not in on_page]
     shelves, prochee = assign_tail(tail, by_id)
     page["shelves"] = [{"shelf": sh, "items": its} for sh, its in shelves.items()]
     page["prochee"] = prochee
