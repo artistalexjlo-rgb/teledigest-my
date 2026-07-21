@@ -445,7 +445,13 @@ def report(consumer, key, model, status):
                     "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET banned=1",
                     (kh, model, _pt_day()),
                 )
-                _log_event(consumer, model, "day_ban", 429)
+                # событие с КЛЮЧОМ (не через _log_event — там key_hash пустой):
+                # по нему пульт шлёт сигнал юзеру, а мы копим статистику причин
+                c.execute(
+                    "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) "
+                    "VALUES(?,?,?,?,'day_ban',429)",
+                    (now, consumer, kh, model),
+                )
             else:  # отказал снова → следующая ступень (отсидка не прощает)
                 lvl += 1
                 c.execute(
