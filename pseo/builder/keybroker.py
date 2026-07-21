@@ -63,11 +63,18 @@ DEFAULT_LIMIT = {
     "rpd": 20,
 }  # неизвестная модель — по самому жёсткому
 
-# 429-эскалация — ДОСЛОВНО из эталона gemini_brain.py (post-7f74f7c):
-COOLDOWN_FIRST = (
-    300.0  # _EMBED_COOLDOWN_S: 1-й 429 = транзиент → 5мин (НЕ убивать ключ)
-)
-COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (после cooldown) → 30мин, НЕ дневной бан
+# ЛЕСТНИЦА ОТДЫХА КЛЮЧА (числа юзера, 2026-07-21). Первый 429 — только МЕТКА, наказания
+# нет: следующий ход ключа всё равно наступит через оборот круга. Отказал СНОВА — ступени:
+#   60с   — пересечь минутную границу (оборота в ~12с не хватит, если 429 из минутного ведра);
+#   300с  — минута не помогла, дело не в минутном ведре;
+#   1800с — не помогли и пять минут;
+#   6000с — не остыл за полчаса.
+# Прошёл ВСЮ лестницу и снова 429 → ДНЕВНОЙ БАН (канон §6: подтверждённое дневное
+# исчерпание — тут подтверждение делом, ~2.3 часа эскалации; тело 429 у Google немое).
+# ⛔ Бан НИКОГДА не ставится раньше полной лестницы (катастрофа экстрактора — бан с первого
+# 429) и истекает по PACIFIC: usage ведётся по pt_day, завтрашняя строка чистая.
+# Отсидка ступень НЕ обнуляет («он же не остыл» — юзер): обнуляет только УСПЕХ.
+COOLDOWN_LADDER = (60.0, 300.0, 1800.0, 6000.0)
 # ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены — очередь держит МОЗГ).
 # Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в GRANT_STEP
 # на весь пул; выдал — следующий подходит через такт, а полёт (HTTP) идёт сам и никого
@@ -75,10 +82,13 @@ COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (п
 # больше не блокирует пул). Такт держит частоту запусков: 3с = ≤20/мин. Число — ручка юзера.
 # В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол», осьминог), такт живёт
 # в общей SQLite — один на все процессы.
-GRANT_STEP = float(os.environ.get("KB_GRANT_STEP", "3"))
+GRANT_STEP = float(
+    os.environ.get("KB_GRANT_STEP", "1")
+)  # 1с между ключами (юзер 07-21)
 # ПАУЗА НА ЗАКРЫТИИ КРУГА — эталон extraction._INTER_MODEL_SLEEP_S: прошли все ключи →
 # ждём перед новым оборотом. Единственный тормоз темпа; пауз внутри круга нет.
-ROUND_PAUSE = float(os.environ.get("KB_ROUND_PAUSE", "60"))
+ROUND_PAUSE = float(os.environ.get("KB_ROUND_PAUSE", "0"))  # 60с были из экстрактора
+# (пауза между МОДЕЛЯМИ с RPD 20) — не наш случай: одна модель, 15 RPM. Юзер снял 07-21.
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -259,6 +269,7 @@ def init():
     for col, typ in (
         ("served_round", "INTEGER DEFAULT -1"),  # какой оборот ключ уже отработал
         ("struck", "INTEGER DEFAULT 0"),  # метка первого 429 (без наказания)
+        ("cd_level", "INTEGER DEFAULT 0"),  # ступень лестницы отдыха (0 = здоров)
     ):
         try:
             c.execute(f"ALTER TABLE key_clock ADD COLUMN {col} {typ}")
@@ -415,26 +426,37 @@ def report(consumer, key, model, status):
         )
         if status == 429:
             row = c.execute(
-                "SELECT was_cd, struck FROM key_clock WHERE key_hash=?", (kh,)
+                "SELECT cd_level, struck FROM key_clock WHERE key_hash=?", (kh,)
             ).fetchone()
-            was, struck = (row[0] or 0, row[1] or 0) if row else (0, 0)
-            if not struck:  # первый отказ — только метка, ключ остаётся в круге
+            lvl, struck = (row[0] or 0, row[1] or 0) if row else (0, 0)
+            if (
+                lvl == 0 and not struck
+            ):  # ПЕРВЫЙ отказ — только метка, ключ остаётся в круге
                 c.execute(
                     "INSERT INTO key_clock(key_hash, next_free, cooldown_until, struck) "
                     "VALUES(?,0,0,1) ON CONFLICT(key_hash) DO UPDATE SET struck=1",
                     (kh,),
                 )
-            else:  # отказал и на следующем обороте — пауза не помогла, в кулдаун
-                cd = COOLDOWN_REPEAT if was else COOLDOWN_FIRST
+            elif lvl >= len(
+                COOLDOWN_LADDER
+            ):  # лестница пройдена вся → дневной бан (до PT-полуночи)
                 c.execute(
-                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd, struck) "
-                    "VALUES(?,0,?,1,0) ON CONFLICT(key_hash) DO UPDATE SET "
-                    "cooldown_until=excluded.cooldown_until, was_cd=1, struck=0",
-                    (kh, now + cd),
+                    "INSERT INTO usage(key_hash, model, pt_day, count, banned) VALUES(?,?,?,0,1) "
+                    "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET banned=1",
+                    (kh, model, _pt_day()),
+                )
+                _log_event(consumer, model, "day_ban", 429)
+            else:  # отказал снова → следующая ступень (отсидка не прощает)
+                lvl += 1
+                c.execute(
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, cd_level, struck) "
+                    "VALUES(?,0,?,?,0) ON CONFLICT(key_hash) DO UPDATE SET "
+                    "cooldown_until=excluded.cooldown_until, cd_level=excluded.cd_level, struck=0",
+                    (kh, now + COOLDOWN_LADDER[lvl - 1], lvl),
                 )
         elif status == 200:  # прощение: метка, кулдаун и история — всё снимается
             c.execute(
-                "UPDATE key_clock SET cooldown_until=0, was_cd=0, struck=0 WHERE key_hash=?",
+                "UPDATE key_clock SET cooldown_until=0, cd_level=0, struck=0 WHERE key_hash=?",
                 (kh,),
             )
         c.execute("COMMIT")
