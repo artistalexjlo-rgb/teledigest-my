@@ -35,6 +35,9 @@ REPORT_EVERY = int(os.environ.get("COMBINE_REPORT_EVERY", "50"))  # попыто
 # сколько ждём вежливого выхода рта после стоп-флага (один вызов к Gemini + запись;
 # у lang_runner шаг крупнее — гео×язык, потому не секунды)
 GRACE_S = int(os.environ.get("COMBINE_GRACE_S", "180"))
+LIVE_EVERY = int(
+    os.environ.get("COMBINE_LIVE_EVERY", "25")
+)  # сек между правками живой строки
 JOBS_DB = os.path.join(BRAIN, "combine_jobs.db")
 KB_DB = os.path.join(BRAIN, "keybroker.db")
 # два флага: facet-рты чтут RUNNER_STOP, lang_runner — LANG_RUNNER_STOP
@@ -102,14 +105,28 @@ def tg(method, **kw):
         return {}
 
 
+_STOP_KB = {"inline_keyboard": [[{"text": "⛔ СТОП", "callback_data": "stop"}]]}
+
+
 def say(text, stop_btn=False):
+    """Отправить сообщение. Возвращает message_id — чтобы потом ПРАВИТЬ его же."""
     kw = {"chat_id": CHAT, "text": text}
     if stop_btn:
-        kw["reply_markup"] = {
-            "inline_keyboard": [[{"text": "⛔ СТОП", "callback_data": "stop"}]]
-        }
+        kw["reply_markup"] = _STOP_KB
     log("→ЮЗЕРУ:", text.replace("\n", " | ")[:200])
-    tg("sendMessage", **kw)
+    r = tg("sendMessage", **kw)
+    return ((r or {}).get("result") or {}).get("message_id")
+
+
+def edit(msg_id, text, stop_btn=True):
+    """Живой прогресс = ПРАВКА одного сообщения, не поток новых (юзер не должен сидеть
+    в докплой-логах, но и спамить чат раз в 3 секунды нельзя)."""
+    if not msg_id:
+        return
+    kw = {"chat_id": CHAT, "message_id": msg_id, "text": text}
+    if stop_btn:
+        kw["reply_markup"] = _STOP_KB
+    tg("editMessageText", **kw)
 
 
 def jobs_conn():
@@ -259,6 +276,7 @@ class Job:
         self.base_attempts = 0
         self.last_report_at = 0
         self.tail = ""
+        self.live_msg = None  # id сообщения с живым прогрессом (правим его же)
         self.lock = threading.Lock()
         self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
 
@@ -302,7 +320,10 @@ class Job:
             )
             log(f"ЗАПУСК {kind} pid={self.proc.pid} argv={argv} лог={self.logpath}")
             threading.Thread(target=self._pump, daemon=True).start()
-            say(f"▶️ пошёл: {kind}" + (f" ({geo})" if geo else ""), stop_btn=True)
+            self.live_msg = say(  # это сообщение будем ПРАВИТЬ живым прогрессом
+                f"▶️ пошёл: {kind}" + (f" ({geo})" if geo else "") + "\nразогрев…",
+                stop_btn=True,
+            )
 
     def _pump(self):
         with open(self.logpath, "a", encoding="utf-8") as lf:
@@ -399,25 +420,32 @@ class Job:
         )
 
     def reporter(self):
-        """Каждые REPORT_EVERY попыток мозга — отчёт с прогрессом (канон юзера п.2/4)."""
+        """Два слоя в ТГ, чтобы НЕ надо было сидеть в докплой-логах и при этом не спамить:
+        (1) ЖИВАЯ строка — правим одно и то же сообщение каждые LIVE_EVERY сек;
+        (2) ВЕХА — новое сообщение каждые REPORT_EVERY попыток мозга (канон юзера п.2/4).
+        """
         while True:
-            time.sleep(20)
+            time.sleep(LIVE_EVERY)
             if not self.busy():
                 continue
             total, mouths, kmax, n429 = brain_stats()
             spent = total - self.base_attempts
-            if spent - self.last_report_at < REPORT_EVERY:
-                continue
-            self.last_report_at = spent
             mins = (time.time() - self.t0) / 60
             rate = spent / mins if mins else 0
-            m = ", ".join(f"{c} {n}" for c, n in mouths)
-            say(
-                f"⚙️ {self.kind} | попыток за задачу: {spent} | {rate:.0f}/мин\n"
-                f"прогресс: {self.tail[-200:] or '—'}\n"
-                f"ключи: макс {kmax}/440 | 429 за час: {n429}\nрты дня: {m}",
-                stop_btn=True,
+            head = (
+                f"⚙️ {self.kind} идёт {mins:.0f} мин | попыток {spent} | {rate:.0f}/мин\n"
+                f"{self.tail[-200:] or 'разогрев…'}"
             )
+            edit(self.live_msg, head)  # живая строка — всегда актуальна
+            if spent - self.last_report_at >= REPORT_EVERY:  # веха
+                self.last_report_at = spent
+                m = ", ".join(f"{c} {n}" for c, n in mouths)
+                say(
+                    f"⚙️ {self.kind} | попыток за задачу: {spent} | {rate:.0f}/мин\n"
+                    f"прогресс: {self.tail[-200:] or '—'}\n"
+                    f"ключи: макс {kmax}/440 | 429 за час: {n429}\nрты дня: {m}",
+                    stop_btn=True,
+                )
 
 
 def send_menu(job):
