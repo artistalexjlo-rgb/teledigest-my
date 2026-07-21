@@ -86,17 +86,14 @@ RESERVE = int(os.environ.get("KB_RESERVE", "60"))
 # ↑ канон п.2 (резерв primary) + ФАКТ A2 (экстрактор мерено ~22 запр/ключ/ночь, логи 2026-07-14).
 #   60 = ~22 + запас. НЕ 120 из build.py.
 
-# Пейсинг — КОНСЕРВАТИВНО, держим ~1/RPM_DIVISOR от лимита RPM (канон наблюдал 2-4 из 15 = далеко).
-RPM_DIVISOR = float(
-    os.environ.get("KB_RPM_DIV", "4")
-)  # 15/4≈3.75 RPM/ключ → шаг ~16с. Далеко под потолком.
-_FORCE_STEP = os.environ.get("KB_FORCE_STEP")  # только для тестов (фиксированный шаг)
+# ⛔ PER-KEY ШАГ (RPM_DIVISOR=4 → 16с на ключ) УДАЛЁН 2026-07-21: моё число, и оно лишнее —
+# КРУГ уже гарантирует, что ключ не получит второй запрос, пока не отработают все
+# остальные (это ≥ ROUND_PAUSE). Темп держат круг + пауза круга, как в эталоне.
 
 # ⛔ ГЛОБАЛЬНЫЙ пол (GLOBAL_FLOOR/_GLOBAL) ВЫЧИЩЕН (канон §5, подвал; 2026-07-18): был мой выдуманный
 # глобальный аггрегат-дроссель (1 выдача/4.5с на весь пул = ~13/мин) — приблуда из
 # extraction._INTER_FILE_PAUSE_S (пауза ВНУТРИ процесса, не глоб-пол). Канон ЗАПРЕЩАЕТ аггрегат поверх
-# независимых проектов («душил бы 12 как 1»). Темп держит per-key шаг (step_for). RPM_DIVISOR НЕ трогаю —
-# это отдельная (впритык vs запас), гейтчена на 429-body.
+# независимых проектов («душил бы 12 как 1»). Темп держат КРУГ + пауза круга.
 
 # ── ПРЕДОХРАНИТЕЛЬ per-РОТ: рот не съест больше своей доли (защита от runaway → осушения пула).
 # Не оптимизация — колпак. Тротл (per-key шаг + cooldown) держит катастрофу (429-шторм); этот кап
@@ -114,14 +111,6 @@ def cap_for(model, role):
     """RPD-кап на ключ ПО МОДЕЛИ. primary — полный RPD; background — минус резерв (не ниже 0)."""
     rpd = _lim(model)["rpd"]
     return rpd if role == "primary" else max(0, rpd - RESERVE)
-
-
-def step_for(model):
-    """Шаг per-key ПО МОДЕЛИ от её RPM (факт из LIMITS). Неизвестный/0 → DEFAULT_LIMIT rpm (=5)."""
-    if _FORCE_STEP:
-        return float(_FORCE_STEP)
-    rpm = _lim(model)["rpm"] or DEFAULT_LIMIT["rpm"]
-    return 60.0 * RPM_DIVISOR / rpm
 
 
 def _consumer_cap(c, consumer):
@@ -300,7 +289,6 @@ def acquire(consumer, role, model, keys):
       (None, -1.0)       — все ключи на капе/бане (бюджет модели выбран).
     """
     cap = cap_for(model, role)
-    step = step_for(model)
     now = time.time()
     day = _pt_day()
     c = _conn()
@@ -341,22 +329,19 @@ def acquire(consumer, role, model, keys):
             "SELECT round_no, round_gate FROM broker_global WHERE id=1"
         ).fetchone() or (0, 0)
         rnd, round_gate = (grow[0] or 0), (grow[1] or 0)
-        elig, soonest, served = [], None, []
+        elig, served = [], []
         for k in keys:
             kh = _kh(k)
-            nf, cd = clocks.get(kh, (0.0, 0.0))
+            _, cd = clocks.get(kh, (0.0, 0.0))
             cnt, ban = used.get(kh, (0, 0))
             if ban or cnt >= cap:
                 continue  # RPD/бан — этот ключ не годен вовсе
             if cd > now:
                 continue  # в 429-cooldown — отдыхает, в круг не входит
-            if nf > now:  # годен, но ещё не остыл по RPM — кандидат на wait
-                soonest = nf if soonest is None else min(soonest, nf)
-                continue
             if rounds.get(kh, -1) >= rnd:
                 served.append(kh)  # свой ход в этом обороте уже отработал
                 continue
-            elig.append((k, kh, nf))
+            elig.append((k, kh))
         if not elig and served:
             # КРУГ ЗАКРЫТ (все живые ключи отработали свой ход) → ПАУЗА перед новым
             # оборотом. Это единственный тормоз темпа: пауз между ключами внутри круга
@@ -371,26 +356,19 @@ def acquire(consumer, role, model, keys):
             )
             for k in keys:
                 kh = _kh(k)
-                nf, cd = clocks.get(kh, (0.0, 0.0))
+                _, cd = clocks.get(kh, (0.0, 0.0))
                 cnt, ban = used.get(kh, (0, 0))
-                if ban or cnt >= cap or cd > now or nf > now:
+                if ban or cnt >= cap or cd > now:
                     continue
-                elig.append((k, kh, nf))
+                elig.append((k, kh))
         if not elig:
             c.execute("ROLLBACK")
-            if soonest is not None:
-                return (None, max(0.05, soonest - now))
-            return (None, -1.0)  # все на капе/бане
-        key, kh, _ = elig[0]  # порядок списка ключей = порядок круга
+            return (None, -1.0)  # все на капе/бане/в кулдауне
+        key, kh = elig[0]  # порядок списка ключей = порядок круга
         c.execute(
             "INSERT INTO key_clock(key_hash, served_round) VALUES(?,?) "
             "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
             (kh, rnd),
-        )
-        c.execute(
-            "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
-            "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
-            (kh, now + step),
         )
         c.execute(
             "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "

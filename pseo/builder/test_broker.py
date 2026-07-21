@@ -53,7 +53,9 @@ if __name__ == "__main__":
     bykey = defaultdict(list)
     for k, ts in allg:
         bykey[k].append(ts)
-    STEP = kb.step_for(MODEL)
+    # per-key шаг удалён (2026-07-21): темп держит КРУГ — ключ не получает второй
+    # запрос, пока не отработают все остальные. Проверяем именно это.
+    STEP = kb.ROUND_PAUSE
     violations, mingap = 0, 999.0
     for k, tss in bykey.items():
         tss.sort()
@@ -61,7 +63,7 @@ if __name__ == "__main__":
             g = b - a
             mingap = min(mingap, g)
             if g < STEP - 0.05:
-                violations += 1
+                violations += 1  # ключ повторился раньше, чем закрылся круг
 
     print(
         "step=%.2fs  grants=%d  keys=%d  dur=%.1fs" % (STEP, len(allg), len(bykey), dur)
@@ -70,7 +72,7 @@ if __name__ == "__main__":
     print(
         "VERDICT:",
         (
-            "OK — осьминог укрощён, clock общий"
+            "OK — круг держит: ключ не повторяется внутри оборота"
             if violations == 0
             else "FAIL — burst прорвался"
         ),
