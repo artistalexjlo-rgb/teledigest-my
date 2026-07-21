@@ -60,11 +60,39 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
+_T0 = time.time()  # старт процесса — для окна пересменки реплик
+_conflict = {"since": 0.0, "said": 0.0}
+
+
+def _conflict_log(desc):
+    """Conflict при редеплое = штатная пересменка реплик (swarm держит старую, пока
+    поднимает новую) — молчим. Орём, только если он НЕ проходит: тогда это реальный
+    второй едок токена. Шум, который приучаешься игнорировать, прячет настоящие сбои.
+    """
+    now = time.time()
+    if not _conflict["since"]:
+        _conflict["since"] = now
+    tail = now - _conflict["since"]
+    if now - _T0 < 90 and tail < 90:
+        return  # окно пересменки после старта — норма, не шумим
+    if now - _conflict["said"] > 300:  # затянулся → сигнал, но не поток
+        _conflict["said"] = now
+        log(
+            f"⚠️ Conflict уже {tail / 60:.0f} мин — похоже, токен опрашивает кто-то ещё: {desc}"
+        )
+
+
 def tg(method, **kw):
     try:
         r = requests.post(f"{API}/{method}", json=kw, timeout=35).json()
         if not r.get("ok", True):
-            log("TG-ОШИБКА", method, r.get("description"))
+            desc = r.get("description") or ""
+            if "Conflict" in desc:
+                _conflict_log(desc)
+            else:
+                log("TG-ОШИБКА", method, desc)
+        elif _conflict["since"]:
+            _conflict["since"] = _conflict["said"] = 0.0  # разошлись — забываем
         return r
     except Exception as e:
         log("TG-СБОЙ", method, type(e).__name__, e)
