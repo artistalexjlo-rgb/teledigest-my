@@ -10,12 +10,16 @@ import glob
 import json
 import os
 import subprocess
+import sys
 import time
 
-PY = "/root/embed_ab/venv/bin/python"
-HERE = "/root/pseo_builder"
-STOP = f"{HERE}/LANG_RUNNER_STOP"
-STATUS = f"{HERE}/lang_runner_status.json"
+# ДУБЛЬ ДЛЯ КОМБАЙНА: питон СВОЙ (в контейнере хостового venv нет), а рот facet_lang —
+# из своего же каталога дублей, не из /root/pseo_builder.
+PY = sys.executable
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = "/root/pseo_builder"  # данные хоста через маунт (out_facet_*, флаги, статус)
+STOP = f"{DATA}/LANG_RUNNER_STOP"
+STATUS = f"{DATA}/lang_runner_status.json"
 
 
 def now():
@@ -35,7 +39,7 @@ def target_langs():
 
 def geos():
     return sorted(
-        os.path.basename(f)[:-5] for f in glob.glob(f"{HERE}/out_facet/*.json")
+        os.path.basename(f)[:-5] for f in glob.glob(f"{DATA}/out_facet/*.json")
     )
 
 
@@ -45,7 +49,7 @@ _fresh = {}  # (path, mtime) → bool; файл не менялся — не п�
 def done(geo, lang):
     """Готово = файл ЕСТЬ и в НОВОМ формате (несёт groups — укладка 0.10).
     Старый формат (до-карвовый перевод стен) = не готово → пересборка facet_lang."""
-    p = f"{HERE}/out_facet_{lang}/{geo}.json"
+    p = f"{DATA}/out_facet_{lang}/{geo}.json"
     if not os.path.exists(p):
         return False
     key = (p, os.path.getmtime(p))
@@ -68,8 +72,8 @@ def save_status(obj):
 def build_one(geo, lang):
     """facet_lang.py geo lang. rc: 0=ок/скип, 3=перевод провалился (мозг на капе / 429) → ретрай."""
     r = subprocess.run(
-        [PY, "facet_lang.py", geo, lang],
-        cwd=HERE,
+        [PY, f"{HERE}/facet_lang.py", geo, lang],
+        cwd=DATA,
         env={**os.environ, "LC_ALL": "C.UTF-8", "PYTHONIOENCODING": "utf-8"},
     )
     return r.returncode
