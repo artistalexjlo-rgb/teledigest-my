@@ -209,6 +209,7 @@ def assign_tail(tail_fids, by_id):
     """
     fids = list(tail_fids)
     shelves, prochee = {}, []
+    stop_at = None  # индекс, на котором нажали стоп (остаток честно уходит в prochee)
 
     def item(fid, typ):
         r = by_id[fid]
@@ -222,6 +223,12 @@ def assign_tail(tail_fids, by_id):
         }
 
     for s in range(0, len(fids), CARVE_BATCH):
+        # ДУБЛЬ КОМБАЙНА: стоп МЕЖДУ ПАЧКАМИ — у facet такая проверка есть, у хвоста
+        # не было, и стоп посреди гео сжигал уже сделанные вызовы впустую.
+        if os.path.exists("RUNNER_STOP"):
+            stop_at = s
+            print(f"  стоп между пачками на {s}/{len(fids)}", flush=True)
+            break
         chunk = fids[s : s + CARVE_BATCH]
         idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
         res = None
@@ -244,6 +251,12 @@ def assign_tail(tail_fids, by_id):
                 continue
             for sh in shs:
                 shelves.setdefault(sh, []).append(item(fid, typ))
+    if stop_at is not None:  # инвариант «потерь НЕТ»: недоразобранный хвост → prochee
+        prochee.extend(item(fid, "") for fid in fids[stop_at:])
+        print(
+            f"  остаток {len(fids) - stop_at} мух → prochee (следующий запуск разложит)",
+            flush=True,
+        )
     return shelves, prochee
 
 

@@ -32,6 +32,9 @@ BRAIN = os.environ.get("BRAIN_DIR", "/root/pseo_builder")
 BUILDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "builder")
 API = f"https://api.telegram.org/bot{TOKEN}"
 REPORT_EVERY = int(os.environ.get("COMBINE_REPORT_EVERY", "50"))  # попыток мозга
+# сколько ждём вежливого выхода рта после стоп-флага (один вызов к Gemini + запись;
+# у lang_runner шаг крупнее — гео×язык, потому не секунды)
+GRACE_S = int(os.environ.get("COMBINE_GRACE_S", "180"))
 JOBS_DB = os.path.join(BRAIN, "combine_jobs.db")
 KB_DB = os.path.join(BRAIN, "keybroker.db")
 # два флага: facet-рты чтут RUNNER_STOP, lang_runner — LANG_RUNNER_STOP
@@ -338,16 +341,47 @@ class Job:
             say(f"⛓ цикл прерван: осталось {n} шагов. Запусти заново, когда решишь.")
 
     def stop(self):
+        """ВЕЖЛИВЫЙ стоп. У ртов есть свои точки чистого выхода (facet — между мухами,
+        dedup — между видами, lang_runner — между задачами): там они ДОСОХРАНЯЮТ
+        сделанное. Раньше я ставил флаг и ТУТ ЖЕ бил SIGTERM — рот не успевал дойти
+        до своей проверки, и вызовы к Gemini сгорали впустую. Теперь: флаг → ждём →
+        и только упрямого дожимаем сигналом.
+        """
         log(f"СТОП запрошен | бежит={self.kind if self.busy() else 'ничего'}")
-        for f in STOP_FLAGS:  # рты сами встают между мухами
+        for f in STOP_FLAGS:
             open(f, "w").close()
-        if self.busy():
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-            say(
-                "⛔ стоп: флаг поставлен, процессу послан SIGTERM. Жду финальный отчёт."
-            )
-        else:
+        if not self.busy():
             say("⛔ стоп: живых задач нет, флаг поставлен на всякий.")
+            return
+        say(
+            f"⛔ стоп принят: {self.kind} дожёвывает текущий шаг и сохраняет "
+            f"(до {GRACE_S // 60} мин). Финальный отчёт придёт."
+        )
+        threading.Thread(target=self._escalate, daemon=True).start()
+
+    def _escalate(self):
+        """Дать роту доработать по-хорошему; не вышел — SIGTERM, совсем упрямый — SIGKILL."""
+        t0 = time.time()
+        while self.busy() and time.time() - t0 < GRACE_S:
+            time.sleep(2)
+        if not self.busy():
+            log(f"стоп: вышел сам за {time.time() - t0:.0f}с — данные сохранены")
+            return
+        log(f"стоп: не вышел за {GRACE_S}с → SIGTERM")
+        say(f"⚠️ {self.kind} не вышел по-хорошему за {GRACE_S // 60} мин — шлю SIGTERM.")
+        try:
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+        except Exception as e:
+            log("SIGTERM не прошёл:", e)
+        t1 = time.time()
+        while self.busy() and time.time() - t1 < 30:
+            time.sleep(2)
+        if self.busy():
+            log("стоп: не умер и от SIGTERM → SIGKILL")
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+            except Exception as e:
+                log("SIGKILL не прошёл:", e)
 
     def status(self):
         total, mouths, kmax, n429 = brain_stats()
