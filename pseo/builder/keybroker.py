@@ -271,7 +271,15 @@ def init():
         "CREATE TABLE IF NOT EXISTS broker_global("
         "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
     )
-    for col, typ in (("busy_consumer", "TEXT"), ("busy_ts", "REAL DEFAULT 0")):
+    try:  # круг: какой оборот ключ уже отработал (-1 = ещё ни одного)
+        c.execute("ALTER TABLE key_clock ADD COLUMN served_round INTEGER DEFAULT -1")
+    except sqlite3.OperationalError:
+        pass
+    for col, typ in (
+        ("busy_consumer", "TEXT"),
+        ("busy_ts", "REAL DEFAULT 0"),
+        ("round_no", "INTEGER DEFAULT 0"),  # текущий оборот круга
+    ):
         try:
             c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:
@@ -311,6 +319,10 @@ def acquire(consumer, role, model, keys):
                 "SELECT key_hash, next_free, cooldown_until FROM key_clock"
             )
         }
+        rounds = {  # какой оборот ключ уже отработал (круг, эталон extraction)
+            r[0]: r[1]
+            for r in c.execute("SELECT key_hash, served_round FROM key_clock")
+        }
         used = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -318,7 +330,16 @@ def acquire(consumer, role, model, keys):
                 (model, day),
             )
         }
-        elig, soonest = [], None
+        # ⭐ КРУГ (эталон extraction.py:182 «одна модель — по всем ключам — потом дальше»):
+        # ключ отдаётся РОВНО ОДИН РАЗ за оборот, в порядке списка. Отработал — ждёт,
+        # пока оборот не закроется, сколько бы быстро он ни освободился.
+        # ⛔ Прежний `elig.sort(...)` («самый остывший») давал ОБРАТНОЕ: ключ, который
+        # быстрее всех отказал, освобождался первым и получал следующий запрос — пул
+        # из 12 ключей вырождался в 5 (факт 2026-07-21: 10 отказов/мин на 5 ключах).
+        rnd = (
+            c.execute("SELECT round_no FROM broker_global WHERE id=1").fetchone() or [0]
+        )[0] or 0
+        elig, soonest, served = [], None, []
         for k in keys:
             kh = _kh(k)
             nf, cd = clocks.get(kh, (0.0, 0.0))
@@ -326,18 +347,35 @@ def acquire(consumer, role, model, keys):
             if ban or cnt >= cap:
                 continue  # RPD/бан — этот ключ не годен вовсе
             if cd > now:
-                continue  # в 429-cooldown
+                continue  # в 429-cooldown — отдыхает, в круг не входит
             if nf > now:  # годен, но ещё не остыл по RPM — кандидат на wait
                 soonest = nf if soonest is None else min(soonest, nf)
                 continue
+            if rounds.get(kh, -1) >= rnd:
+                served.append(kh)  # свой ход в этом обороте уже отработал
+                continue
             elig.append((k, kh, nf))
+        if not elig and served:  # все живые отработали — открываем следующий оборот
+            rnd += 1
+            c.execute("UPDATE broker_global SET round_no=? WHERE id=1", (rnd,))
+            for k in keys:
+                kh = _kh(k)
+                nf, cd = clocks.get(kh, (0.0, 0.0))
+                cnt, ban = used.get(kh, (0, 0))
+                if ban or cnt >= cap or cd > now or nf > now:
+                    continue
+                elig.append((k, kh, nf))
         if not elig:
             c.execute("ROLLBACK")
             if soonest is not None:
                 return (None, max(0.05, soonest - now))
             return (None, -1.0)  # все на капе/бане
-        elig.sort(key=lambda x: x[2])  # самый остывший
-        key, kh, _ = elig[0]
+        key, kh, _ = elig[0]  # порядок списка ключей = порядок круга
+        c.execute(
+            "INSERT INTO key_clock(key_hash, served_round) VALUES(?,?) "
+            "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
+            (kh, rnd),
+        )
         c.execute(
             "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
             "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
