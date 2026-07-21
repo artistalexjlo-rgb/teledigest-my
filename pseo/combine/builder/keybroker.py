@@ -217,10 +217,24 @@ def _pt_day():
     return datetime.now(PT).strftime("%Y-%m-%d")
 
 
+_SCHEMA_OK = False
+
+
 def _conn():
+    global _SCHEMA_OK
     c = sqlite3.connect(DB, timeout=10)
     c.execute("PRAGMA busy_timeout=8000")
     c.execute("PRAGMA journal_mode=WAL")
+    if not _SCHEMA_OK:
+        # ⚠️ БОЕВОЙ ПРОЦЕСС init() НЕ ЗОВЁТ: база уже есть, рот идёт сразу в acquire.
+        # Из-за этого миграция новых колонок не применялась и мозг падал на живом
+        # прогоне (07-21: «no such column: served_round»). Схема досоздаётся ЛЕНИВО,
+        # при первом подключении процесса: CREATE IF NOT EXISTS + ALTER идемпотентны.
+        _SCHEMA_OK = True  # ставим ДО init(): он сам зовёт _conn(), иначе рекурсия
+        try:
+            init()
+        except Exception as e:
+            print("keybroker: миграция схемы не прошла:", e)
     return c
 
 
