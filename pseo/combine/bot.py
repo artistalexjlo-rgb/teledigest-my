@@ -152,6 +152,11 @@ class Job:
             self.base_attempts = brain_stats()[0]
             self.last_report_at = 0
             self.tail = ""
+            # полный лог задачи: BRAIN/combine_logs/<ts>_<kind>.log (переживает контейнер)
+            os.makedirs(os.path.join(BRAIN, "combine_logs"), exist_ok=True)
+            self.logpath = os.path.join(
+                BRAIN, "combine_logs", f"{int(self.t0)}_{kind}.log"
+            )
             self.proc = subprocess.Popen(
                 argv,
                 cwd=BRAIN,
@@ -164,10 +169,14 @@ class Job:
             say(f"▶️ пошёл: {kind}" + (f" ({geo})" if geo else ""), stop_btn=True)
 
     def _pump(self):
-        for line in self.proc.stdout:  # последние строки — в отчёты
-            line = line.strip()
-            if line:
-                self.tail = line
+        with open(self.logpath, "a", encoding="utf-8") as lf:
+            for line in self.proc.stdout:
+                lf.write(line)  # полный вывод рта — в файл лога
+                lf.flush()
+                print(f"[{self.kind}] {line}", end="")  # и в docker logs
+                line = line.strip()
+                if line:
+                    self.tail = line  # последняя строка — в отчёты
         rc = self.proc.wait()
         spent = brain_stats()[0] - self.base_attempts
         mins = (time.time() - self.t0) / 60
@@ -181,7 +190,8 @@ class Job:
         j.close()
         say(
             f"{icon} {self.kind}: код {rc}, {mins:.0f} мин, попыток ~{spent}\n"
-            f"последнее: {self.tail[-300:] or '—'}"
+            f"последнее: {self.tail[-300:] or '—'}\n"
+            f"лог: {self.logpath}"
         )
 
     def stop(self):
