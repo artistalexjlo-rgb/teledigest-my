@@ -267,10 +267,14 @@ def init():
         "CREATE TABLE IF NOT EXISTS broker_global("
         "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
     )
-    try:  # круг: какой оборот ключ уже отработал (-1 = ещё ни одного)
-        c.execute("ALTER TABLE key_clock ADD COLUMN served_round INTEGER DEFAULT -1")
-    except sqlite3.OperationalError:
-        pass
+    for col, typ in (
+        ("served_round", "INTEGER DEFAULT -1"),  # какой оборот ключ уже отработал
+        ("struck", "INTEGER DEFAULT 0"),  # метка первого 429 (без наказания)
+    ):
+        try:
+            c.execute(f"ALTER TABLE key_clock ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
     for col, typ in (
         ("busy_consumer", "TEXT"),
         ("busy_ts", "REAL DEFAULT 0"),
@@ -413,9 +417,14 @@ def acquire(consumer, role, model, keys):
 
 
 def report(consumer, key, model, status):
-    """Отчёт об исходе — per-key эскалация 429 (из эталона gemini_brain, БЕЗ глоб-abuse §2.5):
-    1-й 429 → cooldown 300с + пометка was_cd;  повторный 429 → 1800с (НЕ дневной бан);
-    успех(200) → прощение (разбан): сброс cooldown И истории was_cd.
+    """Отчёт об исходе — эскалация 429 ПО ОБОРОТАМ КРУГА (правило юзера 2026-07-21):
+
+    1-й 429  → только МЕТКА (strike), ключ остаётся в обороте. Наказывать сразу не за
+               что: следующий его ход всё равно наступит не раньше, чем через паузу
+               круга (60с) — этого может хватить.
+    2-й 429  → тот же ключ отказал СНОВА на следующем обороте, то есть пауза не помогла
+               → cooldown 300с (и 1800с, если он уже сидел в кулдауне раньше).
+    успех    → прощение: снимаем и метку, и cooldown, и историю was_cd.
     """
     kh = _kh(key)
     now = time.time()
@@ -427,25 +436,27 @@ def report(consumer, key, model, status):
             (now, consumer, kh, model, status),
         )
         if status == 429:
-            # 429 → ключ ВСЕГДА уходит отдыхать. Никаких развилок «вина или среда»:
-            # прежний слой (429 у соседа за 30с → наказание отменить) удалён 2026-07-21
-            # как выдумка — он держал отказавшие ключи в обороте, и пул из 12 вырождался
-            # в 5 долбимых по кругу.
             row = c.execute(
-                "SELECT was_cd FROM key_clock WHERE key_hash=?", (kh,)
+                "SELECT was_cd, struck FROM key_clock WHERE key_hash=?", (kh,)
             ).fetchone()
-            was = row[0] if row else 0
-            cd = (
-                COOLDOWN_REPEAT if was else COOLDOWN_FIRST
-            )  # повтор → 30мин, первый → 5мин
+            was, struck = (row[0] or 0, row[1] or 0) if row else (0, 0)
+            if not struck:  # первый отказ — только метка, ключ остаётся в круге
+                c.execute(
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, struck) "
+                    "VALUES(?,0,0,1) ON CONFLICT(key_hash) DO UPDATE SET struck=1",
+                    (kh,),
+                )
+            else:  # отказал и на следующем обороте — пауза не помогла, в кулдаун
+                cd = COOLDOWN_REPEAT if was else COOLDOWN_FIRST
+                c.execute(
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd, struck) "
+                    "VALUES(?,0,?,1,0) ON CONFLICT(key_hash) DO UPDATE SET "
+                    "cooldown_until=excluded.cooldown_until, was_cd=1, struck=0",
+                    (kh, now + cd),
+                )
+        elif status == 200:  # прощение: метка, кулдаун и история — всё снимается
             c.execute(
-                "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd) VALUES(?,0,?,1) "
-                "ON CONFLICT(key_hash) DO UPDATE SET cooldown_until=excluded.cooldown_until, was_cd=1",
-                (kh, now + cd),
-            )
-        elif status == 200:
-            c.execute(
-                "UPDATE key_clock SET cooldown_until=0, was_cd=0 WHERE key_hash=?",
+                "UPDATE key_clock SET cooldown_until=0, was_cd=0, struck=0 WHERE key_hash=?",
                 (kh,),
             )
         c.execute("COMMIT")
