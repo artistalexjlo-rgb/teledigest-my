@@ -438,17 +438,24 @@ def get_keys():
     """
     global _KEYS
     if _KEYS is None:
-        cid = subprocess.check_output(
-            "docker ps --format '{{.Names}}' | grep bots-grab | head -1",
-            shell=True,
-            text=True,
-        ).strip()
-        env = subprocess.check_output(["docker", "exec", cid, "printenv"], text=True)
-        vals = {}
-        for ln in env.splitlines():
-            if "=" in ln:
-                name, val = ln.split("=", 1)
-                vals[name] = val
+        # ДУБЛЬ ДЛЯ КОМБАЙНА: ключи в СВОЁМ env контейнера (Dokploy их туда кладёт).
+        # Исходник лез в чужой контейнер `docker exec bots-grab printenv` — в нашем
+        # контейнере docker-бинаря нет и не должно быть. Docker-путь оставлен запасным
+        # на случай запуска дубля прямо на хосте.
+        vals = {k: v for k, v in os.environ.items() if k.startswith("GEMINI_API_KEY")}
+        if not vals:
+            cid = subprocess.check_output(
+                "docker ps --format '{{.Names}}' | grep bots-grab | head -1",
+                shell=True,
+                text=True,
+            ).strip()
+            env = subprocess.check_output(
+                ["docker", "exec", cid, "printenv"], text=True
+            )
+            for ln in env.splitlines():
+                if "=" in ln:
+                    name, val = ln.split("=", 1)
+                    vals[name] = val
         numbered = [
             vals[k]
             for k in sorted(
