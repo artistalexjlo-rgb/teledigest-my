@@ -38,6 +38,16 @@
   </div>
   {%- endif %}
 
+  {%- if page.faqs %}{# остаток полки-хаба: пункты вне веток (ветвление полок) #}
+  {%- if page.faqs_label %}<h2>{{ page.faqs_label }}</h2>{% endif %}
+  {%- for f in page.faqs %}
+  <details><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
+    <div class="a">{{ f.a | safe }}
+    <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
+  </details>
+  {%- endfor %}
+  {%- endif %}
+
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
   {%- if cta %}
     <h2>{{ cta.hook }}</h2>
