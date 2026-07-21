@@ -152,6 +152,59 @@ def pt_day():
     return r.stdout.strip()
 
 
+def ban_watch():
+    """СИГНАЛ О ДНЕВНОМ БАНЕ КЛЮЧА (заказ юзера 2026-07-21).
+
+    Ключ садится в бан только пройдя ВСЮ лестницу (60/300/1800/6000) — это редкое и
+    важное событие: значит ключ не ожил за ~2.3 часа. Шлём в ТГ разбор: сколько он
+    сегодня отработал, сколько словил 429, что Google писал в теле — для статистики
+    причин (тело у Google немое, копим наблюдения).
+    """
+    seen = time.time()  # стартуем «с этого момента», старое не переигрываем
+    while True:
+        time.sleep(30)
+        try:
+            c = kb()
+            rows = c.execute(
+                "SELECT ts, consumer, key_hash, model FROM request_log "
+                "WHERE event='day_ban' AND ts>? ORDER BY ts",
+                (seen,),
+            ).fetchall()
+            for ts, cons, kh, mdl in rows:
+                seen = max(seen, ts)
+                cnt = (
+                    c.execute(
+                        "SELECT count FROM usage WHERE key_hash=? AND model=? AND pt_day=?",
+                        (kh, mdl, pt_day()),
+                    ).fetchone()
+                    or [0]
+                )[0]
+                n429 = c.execute(
+                    "SELECT COUNT(*) FROM request_log WHERE key_hash=? AND status=429 "
+                    "AND ts>?",
+                    (kh, ts - 86400),
+                ).fetchone()[0]
+                bodies = ""
+                try:  # последнее, что Google сказал — вдруг там не пустой RESOURCE_EXHAUSTED
+                    with open(f"{BRAIN}/error_bodies.log", encoding="utf-8") as f:
+                        tail = [x for x in f.readlines()[-40:] if "\t429\t" in x]
+                    if tail:
+                        bodies = tail[-1].split("\t")[-1].strip()[:300]
+                except Exception:
+                    pass
+                say(
+                    f"⛔ КЛЮЧ {kh[:8]} В ДНЕВНОМ БАНЕ (прошёл всю лестницу отдыха)\n"
+                    f"рот: {cons} | модель: {mdl}\n"
+                    f"за сегодня попыток на ключе: {cnt} | 429 за сутки: {n429}\n"
+                    f"последнее тело 429: {bodies or '—'}\n"
+                    f"вернётся сам со сменой PT-дня (~10:00 МСК)."
+                )
+                log(f"СИГНАЛ: дневной бан ключа {kh[:8]} (рот {cons})")
+            c.close()
+        except Exception as e:
+            log("ban_watch сбой:", type(e).__name__, e)
+
+
 def brain_stats():
     """Снимок мозга за PT-день: попытки всего/по ртам, макс-ключ, 429."""
     day = pt_day()
@@ -512,6 +565,7 @@ def main():
     log(f"я бот: @{me.get('username')} (id={me.get('id')})")
     job = Job()
     threading.Thread(target=job.reporter, daemon=True).start()
+    threading.Thread(target=ban_watch, daemon=True).start()  # сигнал о банах ключей
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
     offset = 0
     while True:

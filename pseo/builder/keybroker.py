@@ -63,44 +63,47 @@ DEFAULT_LIMIT = {
     "rpd": 20,
 }  # неизвестная модель — по самому жёсткому
 
-# 429-эскалация — ДОСЛОВНО из эталона gemini_brain.py (post-7f74f7c):
-COOLDOWN_FIRST = (
-    300.0  # _EMBED_COOLDOWN_S: 1-й 429 = транзиент → 5мин (НЕ убивать ключ)
-)
-COOLDOWN_REPEAT = 1800.0  # _EMBED_COOLDOWN_REPEAT_S: повторный 429 (после cooldown) → 30мин, НЕ дневной бан
-# Вина vs среда: 429 на ДРУГОМ ключе за последние N сек = волна общего источника
-# (факт 2026-07-20: коррелированные волны 12×429 при пустых квотах, request_log) —
-# текущий ключ НЕ наказываем, иначе внешний чих прожигает весь пул в cooldown
-# (самострел). Окно 30с: волна в логах — кластер секунд, между волнами — минуты.
-ENV429_WINDOW = float(os.environ.get("KB_ENV429_WINDOW", "30"))
+# ЛЕСТНИЦА ОТДЫХА КЛЮЧА (числа юзера, 2026-07-21). Первый 429 — только МЕТКА, наказания
+# нет: следующий ход ключа всё равно наступит через оборот круга. Отказал СНОВА — ступени:
+#   60с   — пересечь минутную границу (оборота в ~12с не хватит, если 429 из минутного ведра);
+#   300с  — минута не помогла, дело не в минутном ведре;
+#   1800с — не помогли и пять минут;
+#   6000с — не остыл за полчаса.
+# Прошёл ВСЮ лестницу и снова 429 → ДНЕВНОЙ БАН (канон §6: подтверждённое дневное
+# исчерпание — тут подтверждение делом, ~2.3 часа эскалации; тело 429 у Google немое).
+# ⛔ Бан НИКОГДА не ставится раньше полной лестницы (катастрофа экстрактора — бан с первого
+# 429) и истекает по PACIFIC: usage ведётся по pt_day, завтрашняя строка чистая.
+# Отсидка ступень НЕ обнуляет («он же не остыл» — юзер): обнуляет только УСПЕХ.
+COOLDOWN_LADDER = (60.0, 300.0, 1800.0, 6000.0)
 # ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены — очередь держит МОЗГ).
 # Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в GRANT_STEP
 # на весь пул; выдал — следующий подходит через такт, а полёт (HTTP) идёт сам и никого
 # не держит (юзер: «рот получил ключ и пошёл — сосок ему не нужен»; длинный перевод
-# больше не блокирует пул). Частота запусков с IP ограничена тактом железно:
-# 3с = ≤20 запусков/мин. Число — ручка юзера (точного по-IP порога НЕ существует,
-# см. факт про общее окно 429 ниже в report()).
+# больше не блокирует пул). Такт держит частоту запусков: 1с между ключами (юзер 07-21).
 # В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол», осьминог), такт живёт
 # в общей SQLite — один на все процессы.
-GRANT_STEP = float(os.environ.get("KB_GRANT_STEP", "3"))
+GRANT_STEP = float(
+    os.environ.get("KB_GRANT_STEP", "1")
+)  # 1с между ключами (юзер 07-21)
+# ПАУЗА НА ЗАКРЫТИИ КРУГА — эталон extraction._INTER_MODEL_SLEEP_S: прошли все ключи →
+# ждём перед новым оборотом. Единственный тормоз темпа; пауз внутри круга нет.
+ROUND_PAUSE = float(os.environ.get("KB_ROUND_PAUSE", "0"))  # 60с были из экстрактора
+# (пауза между МОДЕЛЯМИ с RPD 20) — не наш случай: одна модель, 15 RPM. Юзер снял 07-21.
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
-# Защита от пулемётинга = per-key cooldown (COOLDOWN_FIRST/REPEAT выше): задолбанный ключ сам остывает,
+# Защита от пулемётинга = лестница отдыха (COOLDOWN_LADDER выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
 RESERVE = int(os.environ.get("KB_RESERVE", "60"))
 # ↑ канон п.2 (резерв primary) + ФАКТ A2 (экстрактор мерено ~22 запр/ключ/ночь, логи 2026-07-14).
 #   60 = ~22 + запас. НЕ 120 из build.py.
 
-# Пейсинг — КОНСЕРВАТИВНО, держим ~1/RPM_DIVISOR от лимита RPM (канон наблюдал 2-4 из 15 = далеко).
-RPM_DIVISOR = float(
-    os.environ.get("KB_RPM_DIV", "4")
-)  # 15/4≈3.75 RPM/ключ → шаг ~16с. Далеко под потолком.
-_FORCE_STEP = os.environ.get("KB_FORCE_STEP")  # только для тестов (фиксированный шаг)
+# ⛔ PER-KEY ШАГ (RPM_DIVISOR=4 → 16с на ключ) УДАЛЁН 2026-07-21: моё число, и оно лишнее —
+# КРУГ уже гарантирует, что ключ не получит второй запрос, пока не отработают все
+# остальные. Темп держат круг + такт между выдачами.
 
 # ⛔ ГЛОБАЛЬНЫЙ пол (GLOBAL_FLOOR/_GLOBAL) ВЫЧИЩЕН (канон §5, подвал; 2026-07-18): был мой выдуманный
 # глобальный аггрегат-дроссель (1 выдача/4.5с на весь пул = ~13/мин) — приблуда из
 # extraction._INTER_FILE_PAUSE_S (пауза ВНУТРИ процесса, не глоб-пол). Канон ЗАПРЕЩАЕТ аггрегат поверх
-# независимых проектов («душил бы 12 как 1»). Темп держит per-key шаг (step_for). RPM_DIVISOR НЕ трогаю —
-# это отдельная (впритык vs запас), гейтчена на 429-body.
+# независимых проектов («душил бы 12 как 1»). Темп держат КРУГ + такт между выдачами.
 
 # ── ПРЕДОХРАНИТЕЛЬ per-РОТ: рот не съест больше своей доли (защита от runaway → осушения пула).
 # Не оптимизация — колпак. Тротл (per-key шаг + cooldown) держит катастрофу (429-шторм); этот кап
@@ -118,14 +121,6 @@ def cap_for(model, role):
     """RPD-кап на ключ ПО МОДЕЛИ. primary — полный RPD; background — минус резерв (не ниже 0)."""
     rpd = _lim(model)["rpd"]
     return rpd if role == "primary" else max(0, rpd - RESERVE)
-
-
-def step_for(model):
-    """Шаг per-key ПО МОДЕЛИ от её RPM (факт из LIMITS). Неизвестный/0 → DEFAULT_LIMIT rpm (=5)."""
-    if _FORCE_STEP:
-        return float(_FORCE_STEP)
-    rpm = _lim(model)["rpm"] or DEFAULT_LIMIT["rpm"]
-    return 60.0 * RPM_DIVISOR / rpm
 
 
 def _consumer_cap(c, consumer):
@@ -271,7 +266,21 @@ def init():
         "CREATE TABLE IF NOT EXISTS broker_global("
         "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
     )
-    for col, typ in (("busy_consumer", "TEXT"), ("busy_ts", "REAL DEFAULT 0")):
+    for col, typ in (
+        ("served_round", "INTEGER DEFAULT -1"),  # какой оборот ключ уже отработал
+        ("struck", "INTEGER DEFAULT 0"),  # метка первого 429 (без наказания)
+        ("cd_level", "INTEGER DEFAULT 0"),  # ступень лестницы отдыха (0 = здоров)
+    ):
+        try:
+            c.execute(f"ALTER TABLE key_clock ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
+    for col, typ in (
+        ("busy_consumer", "TEXT"),
+        ("busy_ts", "REAL DEFAULT 0"),
+        ("round_no", "INTEGER DEFAULT 0"),  # текущий оборот круга
+        ("round_gate", "REAL DEFAULT 0"),  # когда можно открыть следующий оборот
+    ):
         try:
             c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:
@@ -291,7 +300,6 @@ def acquire(consumer, role, model, keys):
       (None, -1.0)       — все ключи на капе/бане (бюджет модели выбран).
     """
     cap = cap_for(model, role)
-    step = step_for(model)
     now = time.time()
     day = _pt_day()
     c = _conn()
@@ -311,6 +319,10 @@ def acquire(consumer, role, model, keys):
                 "SELECT key_hash, next_free, cooldown_until FROM key_clock"
             )
         }
+        rounds = {  # какой оборот ключ уже отработал (круг, эталон extraction)
+            r[0]: r[1]
+            for r in c.execute("SELECT key_hash, served_round FROM key_clock")
+        }
         used = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -318,30 +330,56 @@ def acquire(consumer, role, model, keys):
                 (model, day),
             )
         }
-        elig, soonest = [], None
+        # ⭐ КРУГ (эталон extraction.py:182 «одна модель — по всем ключам — потом дальше»):
+        # ключ отдаётся РОВНО ОДИН РАЗ за оборот, в порядке списка. Отработал — ждёт,
+        # пока оборот не закроется, сколько бы быстро он ни освободился.
+        # ⛔ Прежний `elig.sort(...)` («самый остывший») давал ОБРАТНОЕ: ключ, который
+        # быстрее всех отказал, освобождался первым и получал следующий запрос — пул
+        # из 12 ключей вырождался в 5 (факт 2026-07-21: 10 отказов/мин на 5 ключах).
+        grow = c.execute(
+            "SELECT round_no, round_gate FROM broker_global WHERE id=1"
+        ).fetchone() or (0, 0)
+        rnd, round_gate = (grow[0] or 0), (grow[1] or 0)
+        elig, served = [], []
         for k in keys:
             kh = _kh(k)
-            nf, cd = clocks.get(kh, (0.0, 0.0))
+            _, cd = clocks.get(kh, (0.0, 0.0))
             cnt, ban = used.get(kh, (0, 0))
             if ban or cnt >= cap:
                 continue  # RPD/бан — этот ключ не годен вовсе
             if cd > now:
-                continue  # в 429-cooldown
-            if nf > now:  # годен, но ещё не остыл по RPM — кандидат на wait
-                soonest = nf if soonest is None else min(soonest, nf)
+                continue  # в 429-cooldown — отдыхает, в круг не входит
+            if rounds.get(kh, -1) >= rnd:
+                served.append(kh)  # свой ход в этом обороте уже отработал
                 continue
-            elig.append((k, kh, nf))
+            elig.append((k, kh))
+        if not elig and served:
+            # КРУГ ЗАКРЫТ (все живые ключи отработали свой ход) → ПАУЗА перед новым
+            # оборотом. Это единственный тормоз темпа: пауз между ключами внутри круга
+            # НЕТ (эталон extraction: «одна модель — по всем ключам — потом sleep 60s»).
+            if now < round_gate:
+                c.execute("ROLLBACK")
+                return (None, round_gate - now)
+            rnd += 1
+            c.execute(
+                "UPDATE broker_global SET round_no=?, round_gate=? WHERE id=1",
+                (rnd, now + ROUND_PAUSE),
+            )
+            for k in keys:
+                kh = _kh(k)
+                _, cd = clocks.get(kh, (0.0, 0.0))
+                cnt, ban = used.get(kh, (0, 0))
+                if ban or cnt >= cap or cd > now:
+                    continue
+                elig.append((k, kh))
         if not elig:
             c.execute("ROLLBACK")
-            if soonest is not None:
-                return (None, max(0.05, soonest - now))
-            return (None, -1.0)  # все на капе/бане
-        elig.sort(key=lambda x: x[2])  # самый остывший
-        key, kh, _ = elig[0]
+            return (None, -1.0)  # все на капе/бане/в кулдауне
+        key, kh = elig[0]  # порядок списка ключей = порядок круга
         c.execute(
-            "INSERT INTO key_clock(key_hash, next_free, cooldown_until) VALUES(?,?,0) "
-            "ON CONFLICT(key_hash) DO UPDATE SET next_free=excluded.next_free",
-            (kh, now + step),
+            "INSERT INTO key_clock(key_hash, served_round) VALUES(?,?) "
+            "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
+            (kh, rnd),
         )
         c.execute(
             "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "
@@ -368,9 +406,14 @@ def acquire(consumer, role, model, keys):
 
 
 def report(consumer, key, model, status):
-    """Отчёт об исходе — per-key эскалация 429 (из эталона gemini_brain, БЕЗ глоб-abuse §2.5):
-    1-й 429 → cooldown 300с + пометка was_cd;  повторный 429 → 1800с (НЕ дневной бан);
-    успех(200) → прощение (разбан): сброс cooldown И истории was_cd.
+    """Отчёт об исходе — эскалация 429 ПО ОБОРОТАМ КРУГА (правило юзера 2026-07-21):
+
+    1-й 429  → только МЕТКА (strike), ключ остаётся в обороте. Наказывать сразу не за
+               что: следующий его ход всё равно наступит не раньше, чем через паузу
+               круга (60с) — этого может хватить.
+    2-й 429  → тот же ключ отказал СНОВА на следующем обороте, то есть пауза не помогла
+               → cooldown 300с (и 1800с, если он уже сидел в кулдауне раньше).
+    успех    → прощение: снимаем и метку, и cooldown, и историю was_cd.
     """
     kh = _kh(key)
     now = time.time()
@@ -382,39 +425,44 @@ def report(consumer, key, model, status):
             (now, consumer, kh, model, status),
         )
         if status == 429:
-            # МЕХАНИЗМ вина-vs-среда: 429 на ДРУГОМ ключе в окне ENV429_WINDOW = волна
-            # среды (общий источник, не грех ключа) → cooldown НЕ ставим, пул не
-            # прожигается (макс. один ключ на волну — первый). Пересиживание окна —
-            # backoff в call(). Изолированный 429 = вина ключа → эскалация как была.
-            env = c.execute(
-                "SELECT 1 FROM request_log WHERE status=429 AND ts>? AND key_hash<>? "
-                "AND event='report' LIMIT 1",
-                (now - ENV429_WINDOW, kh),
+            row = c.execute(
+                "SELECT cd_level, struck FROM key_clock WHERE key_hash=?", (kh,)
             ).fetchone()
-            if env:
+            lvl, struck = (row[0] or 0, row[1] or 0) if row else (0, 0)
+            if (
+                lvl == 0 and not struck
+            ):  # ПЕРВЫЙ отказ — только метка, ключ остаётся в круге
+                c.execute(
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, struck) "
+                    "VALUES(?,0,0,1) ON CONFLICT(key_hash) DO UPDATE SET struck=1",
+                    (kh,),
+                )
+            elif lvl >= len(
+                COOLDOWN_LADDER
+            ):  # лестница пройдена вся → дневной бан (до PT-полуночи)
+                c.execute(
+                    "INSERT INTO usage(key_hash, model, pt_day, count, banned) VALUES(?,?,?,0,1) "
+                    "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET banned=1",
+                    (kh, model, _pt_day()),
+                )
+                # событие с КЛЮЧОМ (не через _log_event — там key_hash пустой):
+                # по нему пульт шлёт сигнал юзеру, а мы копим статистику причин
                 c.execute(
                     "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) "
-                    "VALUES(?,?,?,?,'429_env',429)",
+                    "VALUES(?,?,?,?,'day_ban',429)",
                     (now, consumer, kh, model),
                 )
-            else:
-                row = c.execute(
-                    "SELECT was_cd FROM key_clock WHERE key_hash=?", (kh,)
-                ).fetchone()
-                was = row[0] if row else 0
-                cd = (
-                    COOLDOWN_REPEAT if was else COOLDOWN_FIRST
-                )  # повтор → 30мин, первый → 5мин
+            else:  # отказал снова → следующая ступень (отсидка не прощает)
+                lvl += 1
                 c.execute(
-                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, was_cd) VALUES(?,0,?,1) "
-                    "ON CONFLICT(key_hash) DO UPDATE SET cooldown_until=excluded.cooldown_until, was_cd=1",
-                    (kh, now + cd),
+                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, cd_level, struck) "
+                    "VALUES(?,0,?,?,0) ON CONFLICT(key_hash) DO UPDATE SET "
+                    "cooldown_until=excluded.cooldown_until, cd_level=excluded.cd_level, struck=0",
+                    (kh, now + COOLDOWN_LADDER[lvl - 1], lvl),
                 )
-            # abuse-пауза вычищена (§2.5): волна среды глушится НЕ-наказанием + backoff,
-            # виновный ключ остужается поштучно.
-        elif status == 200:
+        elif status == 200:  # прощение: метка, кулдаун и история — всё снимается
             c.execute(
-                "UPDATE key_clock SET cooldown_until=0, was_cd=0 WHERE key_hash=?",
+                "UPDATE key_clock SET cooldown_until=0, cd_level=0, struck=0 WHERE key_hash=?",
                 (kh,),
             )
         c.execute("COMMIT")
@@ -470,7 +518,12 @@ def get_keys():
     return _KEYS
 
 
-MAX_FAILS = 5  # РЕАЛЬНЫХ провалов (429/4xx/5xx/сеть) на 1 вызов → сдаёмся
+# ЭТАЛОН extraction.py:164 `_RETRY_DELAYS_S = [5, 20, 60]` — первая попытка без паузы,
+# затем ТРИ повтора с этими паузами. Числа не наши, не крутить.
+RETRY_DELAYS = (5.0, 20.0, 60.0)
+MAX_FAILS = 1 + len(
+    RETRY_DELAYS
+)  # 4 обращения на вызов (1 + 3 повтора), дальше сдаёмся
 MAX_WAIT_TOTAL = 1800.0  # суммарный бюджет ОЖИДАНИЯ слота на 1 вызов (30 мин)
 MAX_SLEEP = 30.0  # максимум спим за один «нет слота», потом снова спрашиваем мозг
 
@@ -487,8 +540,8 @@ def call(
     получает dict или None. Ключа рот НЕ видит — он живёт и умирает здесь.
     acquire → HTTP → report (в finally: выйти без учёта негде) → разбор JSON.
 
-    WORST-CASE НА ВЫЗОВ: ≤MAX_FAILS(5) реальных запросов к Google + ≤MAX_WAIT_TOTAL(30мин)
-    сна в ожидании СЛОТА КЛЮЧА + ≤75с backoff-сна при серии 429 (окно троттла).
+    WORST-CASE НА ВЫЗОВ: 4 реальных запроса к Google (1 + 3 повтора по эталону) +
+    ≤MAX_WAIT_TOTAL(30мин) сна в ожидании СЛОТА КЛЮЧА + ≤85с пауз между повторами (5+20+60).
     Очередь пула (такт выдачи GRANT_STEP) ждётся ОТДЕЛЬНО и бюджет не тратит — из
     очереди не уходят; полёт (HTTP) пул не держит — блокировки как класса нет.
     None: бюджет выбран / 5 провалов / 30мин без слота ключа.
@@ -556,15 +609,11 @@ def call(
                 return None
         fails += 1
         if status == 429:
-            # Ключу — cooldown (мозг уже поставил). Но СЛЕДУЮЩИЙ ключ брать НЕ сразу:
-            # 429 при пустых квотах = общее окно RESOURCE_EXHAUSTED (по-IP/server-side;
-            # факт 2026-07-20: волны ровно по 12×429 на весь пул при 22-45 grants/мин —
-            # continue без паузы за секунды прожигал ВСЕ ключи в cooldown). Пересиживаем
-            # окно backoff'ом ВНУТРИ вызова (5→10→20→40с) — это не глобальный аггрегат
-            # (запрещён каноном §5), пул другим ртам не держим.
-            nap = min(5.0 * (2 ** (fails - 1)), 60.0)
-            time.sleep(nap)
-            waited += nap
+            # Ключ ушёл в cooldown (report) — берём СЛЕДУЮЩЕГО ПО КРУГУ СРАЗУ, без паузы:
+            # следующий ключ к отказу текущего отношения не имеет. Темп держит не пауза
+            # здесь, а ПАУЗА НА ЗАКРЫТИИ КРУГА в acquire (эталон extraction: «одна модель —
+            # по всем ключам — потом sleep 60s»). Прежний нарастающий backoff 5→10→20→40
+            # был остатком теории «общей волны» — удалён 2026-07-21.
             continue
         if status in (500, 502, 503, -1):
             continue  # транзиент сервера/сети → другой ключ (пейсинг per-key, без выдуманной паузы)
