@@ -8,7 +8,7 @@
   - исходный код НЕ трогается: рты бегут ДУБЛЯМИ из /app/builder, данные — через
     маунт BRAIN_DIR (/brain = /root/pseo_builder хоста): keybroker.db, out_facet и пр.
 
-ENV: COMBINE_BOT_TOKEN, COMBINE_CHAT_ID, BRAIN_DIR=/brain, GEMINI_API_KEY_N (ртам).
+ENV: COMBINE_BOT_TOKEN, ADMIN_ID, BRAIN_DIR, GEMINI_API_KEY_N (ртам).
 Запуск процесса = запись в jobs (audit) → subprocess дубля. Нет команды — нет процесса.
 """
 
@@ -23,7 +23,9 @@ import time
 import requests
 
 TOKEN = os.environ["COMBINE_BOT_TOKEN"]
-CHAT = int(os.environ["COMBINE_CHAT_ID"])  # единственный, кому подчиняемся
+# ADMIN_ID — соглашение проекта (личный telegram-id юзера). COMBINE_CHAT_ID — старое
+# имя, которое я завёл зря; читаем оба, чтобы уже настроенный сервис не сломался.
+CHAT = int(os.environ.get("ADMIN_ID") or os.environ["COMBINE_CHAT_ID"])
 # Данные монтируются в контейнер ПО ТЕМ ЖЕ путям, что на хосте (/root/pseo_builder,
 # /home/teledigest/data, /root/embed_ab) — дубли ртов несут абсолютные пути, не правим их.
 BRAIN = os.environ.get("BRAIN_DIR", "/root/pseo_builder")
@@ -53,10 +55,19 @@ MENU = {
 }
 
 
+def log(*a):
+    """Всё, что делает пульт — в stdout контейнера (вкладка Logs в Dokploy)."""
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
 def tg(method, **kw):
     try:
-        return requests.post(f"{API}/{method}", json=kw, timeout=35).json()
-    except Exception:
+        r = requests.post(f"{API}/{method}", json=kw, timeout=35).json()
+        if not r.get("ok", True):
+            log("TG-ОШИБКА", method, r.get("description"))
+        return r
+    except Exception as e:
+        log("TG-СБОЙ", method, type(e).__name__, e)
         return {}
 
 
@@ -66,6 +77,7 @@ def say(text, stop_btn=False):
         kw["reply_markup"] = {
             "inline_keyboard": [[{"text": "⛔ СТОП", "callback_data": "stop"}]]
         }
+    log("→ЮЗЕРУ:", text.replace("\n", " | ")[:200])
     tg("sendMessage", **kw)
 
 
@@ -165,6 +177,7 @@ class Job:
                 text=True,
                 start_new_session=True,
             )
+            log(f"ЗАПУСК {kind} pid={self.proc.pid} argv={argv} лог={self.logpath}")
             threading.Thread(target=self._pump, daemon=True).start()
             say(f"▶️ пошёл: {kind}" + (f" ({geo})" if geo else ""), stop_btn=True)
 
@@ -195,6 +208,7 @@ class Job:
         )
 
     def stop(self):
+        log(f"СТОП запрошен | бежит={self.kind if self.busy() else 'ничего'}")
         for f in STOP_FLAGS:  # рты сами встают между мухами
             open(f, "w").close()
         if self.busy():
@@ -243,6 +257,8 @@ class Job:
 
 
 def main():
+    log(f"СТАРТ пульта | админ={CHAT} | BRAIN={BRAIN} | отчёт каждые {REPORT_EVERY}")
+    log("меню:", ", ".join(MENU))
     job = Job()
     threading.Thread(target=job.reporter, daemon=True).start()
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
@@ -254,7 +270,9 @@ def main():
             cb = u.get("callback_query")
             if cb:
                 if cb["from"]["id"] != CHAT:
+                    log(f"ОТКАЗ кнопка от чужого id={cb['from']['id']} (админ {CHAT})")
                     continue
+                log("←КНОПКА:", cb["data"])
                 tg("answerCallbackQuery", callback_query_id=cb["id"])
                 data = cb["data"]
                 if data == "stop":
@@ -267,9 +285,14 @@ def main():
                         job.start(kind, geo or None)
                 continue
             msg = u.get("message") or {}
-            if msg.get("from", {}).get("id") != CHAT:
-                continue  # не юзер — молча игнор (канон)
+            src = msg.get("from", {}).get("id")
+            if src != CHAT:  # не юзер — в ТГ молчим (канон), но в лог пишем ВСЕГДА
+                log(
+                    f"ОТКАЗ сообщение от чужого id={src} (админ {CHAT}): {msg.get('text')}"
+                )
+                continue
             text = (msg.get("text") or "").strip()
+            log("←КОМАНДА:", text)
             if text in ("/combine", "/start"):
                 rows = [
                     [{"text": label, "callback_data": f"run:{kind}"}]

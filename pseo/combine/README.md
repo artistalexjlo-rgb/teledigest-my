@@ -23,7 +23,7 @@
      Build Path: `pseo/combine`, тип сборки Dockerfile.
 4. Environment (вкладка Environment):
    - `COMBINE_BOT_TOKEN` = токен из п.1
-   - `COMBINE_CHAT_ID` = число из п.2
+   - `ADMIN_ID` = число из п.2 (твой личный telegram-id; в приватном чате он же chat_id)
    - `GEMINI_API_KEY_1` … `GEMINI_API_KEY_12` = те же, что у bots-grab (ртам нужны ключи)
 5. Mounts (вкладка Mounts) — три Directory Mount, пути в контейнере ТЕ ЖЕ, что на хосте:
    - `/root/pseo_builder` → `/root/pseo_builder` (мозг, out_facet, флаги — RW)
