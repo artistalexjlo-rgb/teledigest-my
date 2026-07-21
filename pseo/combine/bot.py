@@ -129,6 +129,95 @@ def brain_stats():
         return 0, [], 0, f"?({e})"
 
 
+LANGS = ["en", "es", "pt", "de", "fr", "it", "zh", "ja", "ko", "ar", "hi", "th", "tr"]
+
+
+def pipeline_state():
+    """ЧТО СЕЙЧАС ПРОСРОЧЕНО — считается из данных, не из моей памяти.
+
+    Порядок тракта: мухи → facet(+carve) → assign(хвост→полки) → kratko(короткий
+    ответ) → translate(языки) → ship(с десктопа). Каждый шаг кормит следующий,
+    поэтому чинить надо в этом порядке — иначе переводы поедут без kratko.
+    """
+    import glob
+
+    st = {"geos": 0, "views": 0, "no_kratko": 0, "no_shelf": [], "langs": []}
+    try:
+        files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
+        st["geos"] = len(files)
+        for f in files:
+            geo = os.path.basename(f)[:-5]
+            d = json.load(open(f, encoding="utf-8"))
+            vs = [
+                v
+                for v in d.get("views_by_task", [])
+                if len(v.get("groups") or v.get("items") or []) >= 4
+            ]
+            st["views"] += len(vs)
+            st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
+            if not (d.get("shelves") or []):
+                st["no_shelf"].append(geo)
+        for lang in LANGS:
+            d = f"{BRAIN}/out_facet_{lang}"
+            have = glob.glob(f"{d}/*.json")
+            stale = sum(
+                1
+                for p in have
+                if os.path.getmtime(p)
+                < os.path.getmtime(f"{BRAIN}/out_facet/{os.path.basename(p)}")
+            )
+            miss = st["geos"] - len(have)
+            if miss or stale:
+                st["langs"].append((lang, miss, stale))
+    except Exception as e:
+        st["error"] = f"{type(e).__name__}: {e}"
+    return st
+
+
+def state_card():
+    """Карточка состояния + подсказка «что дожать СЕЙЧАС» (первый непустой шаг)."""
+    s = pipeline_state()
+    if s.get("error"):
+        return f"⚠️ не смог прочитать данные: {s['error']}", None
+    lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц-видов"]
+    todo = []
+    if s["no_shelf"]:
+        lines.append(f"1) хвост не разложен по полкам: {len(s['no_shelf'])} гео")
+        todo.append("assign")
+    else:
+        lines.append("1) хвост→полки: ✅ все гео")
+    if s["no_kratko"]:
+        lines.append(f"2) без короткого ответа: {s['no_kratko']} видов")
+        todo.append("kratko")
+    else:
+        lines.append("2) короткие ответы: ✅ все виды")
+    if s["langs"]:
+        worst = ", ".join(
+            f"{lang}(нет {m}, устар {st_})" for lang, m, st_ in s["langs"][:5]
+        )
+        lines.append(f"3) переводы: {len(s['langs'])} языков не готовы — {worst}")
+        todo.append("translate")
+    else:
+        lines.append("3) переводы: ✅ все языки свежие")
+    lines.append(
+        "\n➡️ СЕЙЧАС НАДО: "
+        + (
+            {
+                "assign": "разложить хвост (assign)",
+                "kratko": "дожать kratko",
+                "translate": "гнать переводы",
+            }[todo[0]]
+            if todo
+            else "ничего — можно шипить (ship с десктопа)"
+        )
+    )
+    lines.append(
+        "порядок жёсткий: assign → kratko → translate → ship.\n"
+        "переводы ПОСЛЕ kratko, иначе языки останутся без коротких ответов."
+    )
+    return "\n".join(lines), todo
+
+
 class Job:
     """Одна задача = один subprocess дубля. Глобально не больше одной."""
 
@@ -140,15 +229,18 @@ class Job:
         self.last_report_at = 0
         self.tail = ""
         self.lock = threading.Lock()
+        self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
 
     def busy(self):
         return self.proc is not None and self.proc.poll() is None
 
-    def start(self, kind, geo=None):
+    def start(self, kind, geo=None, _chain=False):
         with self.lock:
             if self.busy():
                 say(f"занято: {self.kind} уже бежит. Сначала ⛔ СТОП.")
                 return
+            if not _chain:
+                self.chain = []  # ручной запуск отменяет недобеганную цепочку
             argv = [a.replace("{geo}", geo or "") for a in MENU[kind][1]]
             for f in STOP_FLAGS:  # прошлый стоп не должен глушить новый заказ
                 if os.path.exists(f):
@@ -206,6 +298,16 @@ class Job:
             f"последнее: {self.tail[-300:] or '—'}\n"
             f"лог: {self.logpath}"
         )
+        # цепочка полного цикла: следующий шаг только если предыдущий вышел чисто
+        # и стоп не нажат (нажатый стоп = юзер сказал «хватит», цепочка рвётся)
+        if self.chain and rc == 0 and not any(os.path.exists(f) for f in STOP_FLAGS):
+            kind, geo = self.chain.pop(0)
+            say(f"⛓ цикл: следующий шаг — {kind}" + (f" ({geo})" if geo else ""))
+            self.start(kind, geo, _chain=True)
+        elif self.chain:
+            n = len(self.chain)
+            self.chain = []
+            say(f"⛓ цикл прерван: осталось {n} шагов. Запусти заново, когда решишь.")
 
     def stop(self):
         log(f"СТОП запрошен | бежит={self.kind if self.busy() else 'ничего'}")
@@ -256,6 +358,59 @@ class Job:
             )
 
 
+def send_menu(job):
+    """Меню = карточка состояния + кнопки С ЧИСЛАМИ + полный цикл. Юзер не должен
+    держать состояние тракта в голове — пульт считает его сам."""
+    card, todo = state_card()
+    s = pipeline_state()
+    labels = {
+        "assign": f"1. Хвост→полки ({len(s['no_shelf'])} гео)",
+        "kratko": f"2. Kratko ({s['no_kratko']} видов)",
+        "translate": f"3. Переводы ({len(s['langs'])} языков)",
+        "facet": "0. Facet+carve <гео> (новые мухи)",
+    }
+    rows = []
+    if todo:
+        rows.append(
+            [{"text": "▶️ ПОЛНЫЙ ЦИКЛ по порядку", "callback_data": "run:cycle"}]
+        )
+    for kind in ("facet", "assign", "kratko", "translate"):
+        mark = "➡️ " if todo and kind == todo[0] else ""
+        rows.append([{"text": mark + labels[kind], "callback_data": f"run:{kind}"}])
+    tg("sendMessage", chat_id=CHAT, text=card, reply_markup={"inline_keyboard": rows})
+    log("меню отправлено | надо:", todo)
+
+
+def start_cycle(job):
+    """Полный цикл = очередь шагов в жёстком порядке. Worst-case пишем ДО запуска."""
+    s = pipeline_state()
+    chain = []
+    for geo in s["no_shelf"]:
+        chain.append(("assign", geo))
+    if s["no_kratko"]:
+        chain.append(("kratko", None))
+    if s["langs"]:
+        chain.append(("translate", None))
+    if not chain:
+        say("цикл не нужен: всё готово, можно шипить.")
+        return
+    # ИСПОЛНЕНИЕ ВСЛУХ (worst-case, не «выглядит ок»):
+    est = (
+        len(s["no_shelf"]) * 70
+        + s["no_kratko"]
+        + sum((m + st_) * 3 for _, m, st_ in s["langs"])
+    )
+    say(
+        f"⛓ полный цикл: {len(chain)} шагов\n"
+        f"порядок: {', '.join(k for k, _ in chain[:3])}…\n"
+        f"ГРУБАЯ оценка расхода: ~{est} запросов (при 12 ключах × 440 = 5280/день)\n"
+        f"остановить можно в любой момент — ⛔ СТОП рвёт цепочку."
+    )
+    first = chain.pop(0)
+    job.chain = chain
+    job.start(first[0], first[1], _chain=True)
+
+
 def main():
     log(f"СТАРТ пульта | админ={CHAT} | BRAIN={BRAIN} | отчёт каждые {REPORT_EVERY}")
     log("меню:", ", ".join(MENU))
@@ -283,10 +438,19 @@ def main():
                 data = cb["data"]
                 if data == "stop":
                     job.stop()
+                elif data == "run:cycle":
+                    start_cycle(job)
                 elif data.startswith("run:"):
                     _, kind, geo = (data + ":").split(":")[:3]
-                    if kind in ("facet", "assign") and not geo:
-                        say(f"гео не задано: пришли текстом `{kind} br`")
+                    if kind == "facet" and not geo:
+                        say("facet нужен гео: пришли текстом `facet br`")
+                    elif kind == "assign" and not geo:
+                        s = pipeline_state()  # без гео — разложить все, где полок нет
+                        if not s["no_shelf"]:
+                            say("хвост разложен везде, assign не нужен.")
+                        else:
+                            job.chain = [("assign", g) for g in s["no_shelf"][1:]]
+                            job.start("assign", s["no_shelf"][0], _chain=True)
                     else:
                         job.start(kind, geo or None)
                 continue
@@ -300,16 +464,7 @@ def main():
             text = (msg.get("text") or "").strip()
             log("←КОМАНДА:", text)
             if text in ("/combine", "/start"):
-                rows = [
-                    [{"text": label, "callback_data": f"run:{kind}"}]
-                    for kind, (label, _) in MENU.items()
-                ]
-                tg(
-                    "sendMessage",
-                    chat_id=CHAT,
-                    text="что запускаем?",
-                    reply_markup={"inline_keyboard": rows},
-                )
+                send_menu(job)
             elif text in ("/stop", "/combine_stop"):
                 job.stop()
             elif text in ("/status", "/combine_status"):
