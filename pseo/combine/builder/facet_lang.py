@@ -165,27 +165,33 @@ def translate_labels(labels, lang):
 
 def translate_texts(id_text, lang):
     """{id: english} → {id: target}. Батчи по 50 (канон 4.1: запрос ≈10К ток = 60% окна модели).
-    Возвращает (out, complete): complete=False если мозг отдал None (кап рта / исчерпание ключей /
-    429) — тогда гео НЕ пишем, доделаем позже (без шторма).
+    Возвращает (out, reason): reason=None — всё ок; иначе строка-причина остановки.
+
+    call() отдаёт None и на РАЗОВОМ сбое парса (модель вернула битый JSON — флаки), и на
+    реальном исчерпании ключей. Раньше ЛЮБОЙ None рубил весь гео с надписью «кап» — одна
+    кривая пачка = 0 переводов и ложь про кап (юзер 07-22). Теперь пачку РЕТРАИМ: флаки-
+    ответ на повторе обычно проходит; если ключи реально стынут — call вернёт None быстро
+    (без похода в Google), и мы честно остановимся, потратив ~0 лишних запросов.
     """
     items = list(id_text.items())
     out = {}
     for i in range(0, len(items), 50):
         batch = dict(items[i : i + 50])
-        r = call(
-            json.dumps(batch, ensure_ascii=False), text_sys(lang), consumer="translate"
-        )
-        if (
-            r is None
-        ):  # None = исчерпание ключей/провал вызова (НЕ пустой батч!) → стоп, incomplete
-            return (
-                out,
-                False,
-            )  # НЕ проглатываем провал в `or {}` — иначе пишем пустышку как «done»
+        r = None
+        for _ in range(3):  # 1 + 2 ретрая пачки на транзиентный сбой (парс/сеть)
+            r = call(
+                json.dumps(batch, ensure_ascii=False),
+                text_sys(lang),
+                consumer="translate",
+            )
+            if r is not None:
+                break
+        if r is None:  # три раза подряд None → пул реально не отдаёт, стоп (без шторма)
+            return out, "перевод прерван: пул ключей не отдаёт (исчерпание/сбой)"
         for k, v in r.items():
             if v and v.strip() and not _has_cyr(v):
                 out[k] = v.strip()
-    return out, True
+    return out, None
 
 
 def run(geo, lang):
@@ -212,14 +218,12 @@ def run(geo, lang):
     if lang == "en":
         text = en_text
     else:
-        text, complete = translate_texts(
+        text, reason = translate_texts(
             en_text, lang
         )  # ПЛАТНАЯ часть, квоту держит мозг
-        if (
-            not complete
-        ):  # мозг отдал None (кап/429) → гео НЕ пишем, доделаем позже (без шторма)
+        if reason:  # пул не отдал (после ретраев) → гео НЕ пишем, доделаем позже
             print(
-                f"{geo}/{lang}: кап мозга — стоп, гео отложен (перевёл {len(text)})",
+                f"{geo}/{lang}: {reason}; гео отложен (успел {len(text)})",
                 flush=True,
             )
             return False
