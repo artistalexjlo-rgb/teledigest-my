@@ -259,6 +259,12 @@ class Job:
 def main():
     log(f"СТАРТ пульта | админ={CHAT} | BRAIN={BRAIN} | отчёт каждые {REPORT_EVERY}")
     log("меню:", ", ".join(MENU))
+    # long-poll и webhook несовместимы: если у токена висит webhook (остался от другого
+    # бота/прежней конфигурации), getUpdates отдаёт Conflict и команды не доходят.
+    w = tg("deleteWebhook", drop_pending_updates=False)
+    log("deleteWebhook:", w.get("ok"), w.get("description", ""))
+    me = tg("getMe").get("result", {})
+    log(f"я бот: @{me.get('username')} (id={me.get('id')})")
     job = Job()
     threading.Thread(target=job.reporter, daemon=True).start()
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
