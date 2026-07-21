@@ -409,10 +409,33 @@ class Job:
             kind, geo = self.chain.pop(0)
             say(f"⛓ цикл: следующий шаг — {kind}" + (f" ({geo})" if geo else ""))
             self.start(kind, geo, _chain=True)
-        elif self.chain:
+            return
+        if self.chain:
             n = len(self.chain)
             self.chain = []
             say(f"⛓ цикл прерван: осталось {n} шагов. Запусти заново, когда решишь.")
+            return
+        # ⭐ ОДИНОЧНАЯ ЗАДАЧА ЗАВЕРШЕНА → показать НОВОЕ состояние тракта + что дальше,
+        # с кнопками. Иначе после «готово» юзер не знает, что делать (его прямая жалоба).
+        card, todo = state_card()
+        if todo:
+            nxt = todo[0]
+            rows = [
+                [{"text": f"➡️ дальше: {MENU[nxt][0]}", "callback_data": f"run:{nxt}"}]
+            ]
+            rows.append([{"text": "☰ меню", "callback_data": "menu"}])
+            tg(
+                "sendMessage",
+                chat_id=CHAT,
+                text="📊 после задачи:\n" + card,
+                reply_markup={"inline_keyboard": rows},
+            )
+        else:
+            say(
+                "📊 после задачи:\n"
+                + card
+                + "\n\n🎉 тракт готов — можно шипить (ship с десктопа)."
+            )
 
     def stop(self):
         """ВЕЖЛИВЫЙ стоп. У ртов есть свои точки чистого выхода (facet — между мухами,
@@ -582,6 +605,8 @@ def main():
                 data = cb["data"]
                 if data == "stop":
                     job.stop()
+                elif data == "menu":
+                    send_menu(job)
                 elif data == "run:cycle":
                     start_cycle(job)
                 elif data.startswith("run:"):
