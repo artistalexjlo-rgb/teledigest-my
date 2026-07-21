@@ -44,13 +44,13 @@ STOP_FLAGS = [
 MENU = {
     "kratko": (
         "Kratko (дожим)",
-        ["python", f"{BUILDER}/dedup.py", "--all", "--kratko"],
+        ["python", "-u", f"{BUILDER}/dedup.py", "--all", "--kratko"],
     ),
-    "translate": ("Переводы (очередь)", ["python", f"{BUILDER}/lang_runner.py"]),
-    "facet": ("Facet+carve <гео>", ["python", f"{BUILDER}/facet.py", "{geo}"]),
+    "translate": ("Переводы (очередь)", ["python", "-u", f"{BUILDER}/lang_runner.py"]),
+    "facet": ("Facet+carve <гео>", ["python", "-u", f"{BUILDER}/facet.py", "{geo}"]),
     "assign": (
         "Хвост→полки <гео>",
-        ["python", f"{BUILDER}/facet.py", "{geo}", "--assign-tail"],
+        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-tail"],
     ),
 }
 
