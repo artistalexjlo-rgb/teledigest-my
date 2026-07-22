@@ -205,12 +205,48 @@ def translate_texts(id_text, lang):
     return out, None
 
 
+def kratko_topup(out_path, geo, lang):
+    """Гео уже переведено (новый формат), но kratko появились ПОЗЖЕ (is_fresh скипал их —
+    дыра, юзер 07-22). Добираем ТОЛЬКО недостающие короткие ответы в существующий файл,
+    НЕ перегоняя тело (ключи зря не жжём). Возврат: True если файл полон/дополнен."""
+    tr = json.load(open(out_path, encoding="utf-8"))
+    src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
+    # сшивка по ID МУХ (языконезависимы): id любой мухи из вида → ru-kratko его исходного
+    # вида. Метка в переводе уже на другом языке, по ней не свяжешь — только по id.
+    kr_by_id = {}
+    for v in src["views_by_task"]:
+        if v.get("kratko"):
+            for it in v.get("items", []):
+                kr_by_id[it["id"]] = v["kratko"]
+    need = {}  # индекс переводного вида → ru-kratko, которого там ещё нет
+    for i, v in enumerate(tr.get("views_by_task", [])):
+        if v.get("kratko"):
+            continue  # уже переведён — не трогаем
+        rk = next(
+            (kr_by_id[it["id"]] for it in v.get("items", []) if it["id"] in kr_by_id),
+            None,
+        )
+        if rk:
+            need[str(i)] = rk
+    if not need:
+        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
+        return True
+    print(f"{geo}/{lang}: добираю kratko: {len(need)}", flush=True)
+    got = translate_kratko(need, lang)
+    for k, val in got.items():
+        tr["views_by_task"][int(k)]["kratko"] = val
+    _atomic(out_path, tr)
+    print(f"{geo}/{lang}: kratko добрано +{len(got)}", flush=True)
+    return True
+
+
 def run(geo, lang):
     out_path = f"{HERE}/out_facet_{lang}/{geo}.json"
     if os.path.exists(out_path):
         if is_fresh(out_path):
-            print(f"{geo}/{lang}: уже готов (новый формат), скип", flush=True)
-            return True
+            return kratko_topup(
+                out_path, geo, lang
+            )  # тело готово — проверить/добрать kratko
         print(f"{geo}/{lang}: старый формат (без groups) — пересборка", flush=True)
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
     views = [
