@@ -621,7 +621,16 @@ def call(
             try:
                 api = json.loads(body)
                 raw = api["candidates"][0]["content"]["parts"][0]["text"]
-                return json.loads(re.sub(r"```json|```", "", raw).strip())
+                parsed = json.loads(re.sub(r"```json|```", "", raw).strip())
+                # КОНТРАКТ: все рты просят JSON-ОБЪЕКТ. Модель иногда отдаёт массив
+                # `[...]` — валидный JSON, но не dict → у потребителя `.items()` = краш
+                # (факт 07-22: 'list' object has no attribute 'items' рушил перевод гео).
+                # Не-dict = такой же брак ответа, как парс-фейл → None (рот ретраит/скипает).
+                if not isinstance(parsed, dict):
+                    print("  parse err: не dict, а", type(parsed).__name__)
+                    _log_event(consumer, model, "parse_fail")
+                    return None
+                return parsed
             except Exception as e:
                 print("  parse err", str(e)[:100])
                 _log_event(

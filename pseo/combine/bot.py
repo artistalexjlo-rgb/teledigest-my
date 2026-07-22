@@ -118,11 +118,18 @@ def say(text, stop_btn=False):
     return ((r or {}).get("result") or {}).get("message_id")
 
 
+_last_edit = {}  # msg_id → последний отправленный текст (не долбить одинаковым)
+
+
 def edit(msg_id, text, stop_btn=True):
     """Живой прогресс = ПРАВКА одного сообщения, не поток новых (юзер не должен сидеть
-    в докплой-логах, но и спамить чат раз в 3 секунды нельзя)."""
-    if not msg_id:
+    в докплой-логах, но и спамить чат раз в 3 секунды нельзя).
+    ⚠️ Telegram отклоняет правку ТЕМ ЖЕ текстом ('message is not modified') — если рот
+    час стоит на одном гео, tail не меняется, и мы флудили сотнями ошибок (факт 07-22).
+    Пропускаем правку, когда текст не изменился."""
+    if not msg_id or _last_edit.get(msg_id) == text:
         return
+    _last_edit[msg_id] = text
     kw = {"chat_id": CHAT, "message_id": msg_id, "text": text}
     if stop_btn:
         kw["reply_markup"] = _STOP_KB
