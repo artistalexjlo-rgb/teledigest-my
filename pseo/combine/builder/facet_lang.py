@@ -83,7 +83,8 @@ def text_sys(lang):
     return (
         f"Translate each English text into natural {LANG_NAME[lang]}. Preserve ALL facts, numbers, "
         "names, conditions and caveats EXACTLY — add nothing, drop nothing. Natural target language, "
-        "not a calque. Input is JSON {id: english}. Return STRICT JSON {id: translated}. Keep all ids."
+        'not a calque. Input is JSON {"0": english, "1": english, ...}. Return STRICT JSON with the '
+        'SAME short numeric keys: {"0": translated, ...}. Keep every key, translate every value.'
     )
 
 
@@ -92,24 +93,29 @@ def kratko_sys(lang):
     return (
         f"Translate each Russian summary into natural {LANG_NAME[lang]}. Preserve ALL facts, "
         "numbers, names and caveats EXACTLY — add nothing, drop nothing. "
-        "Input is JSON {id: russian}. Return STRICT JSON {id: translated}. Keep all ids."
+        'Input is JSON {"0": russian, "1": russian, ...}. Return STRICT JSON with the SAME short '
+        'numeric keys: {"0": translated, ...}. Keep every key, translate every value.'
     )
 
 
 def translate_kratko(kr_by_key, lang):
-    """{key: ru_kratko} → {key: translated}. Непереведённое просто выпадает (блок скрыт)."""
+    """{key: ru_kratko} → {key: translated}. Непереведённое просто выпадает (блок скрыт).
+    Модели даём ПОРЯДКОВЫЕ индексы, не настоящие ключи — сшиваем назад по позиции
+    (тот же приём, что в translate_texts: хэш модель не копирует)."""
     out = {}
     items = list(kr_by_key.items())
     for i in range(0, len(items), 30):
-        batch = dict(items[i : i + 30])
+        chunk = items[i : i + 30]
+        payload = {str(j): txt for j, (_k, txt) in enumerate(chunk)}
         r = call(
-            json.dumps(batch, ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
             kratko_sys(lang),
             consumer="translate",
         )
-        for k, v in (r or {}).items():
-            if v and v.strip() and not _has_cyr(v):
-                out[k] = v.strip()
+        for j, (real_key, _txt) in enumerate(chunk):
+            v = (r or {}).get(str(j))
+            if v and str(v).strip() and not _has_cyr(str(v)):
+                out[real_key] = str(v).strip()
     return out
 
 
@@ -173,14 +179,18 @@ def translate_texts(id_text, lang):
     ответ на повторе обычно проходит; если ключи реально стынут — call вернёт None быстро
     (без похода в Google), и мы честно остановимся, потратив ~0 лишних запросов.
     """
-    items = list(id_text.items())
+    items = list(id_text.items())  # [(настоящий_хэш_id, english), ...]
     out = {}
     for i in range(0, len(items), 50):
-        batch = dict(items[i : i + 50])
+        chunk = items[i : i + 50]  # держим ПОРЯДОК — по нему сошьём назад
+        # ⭐ модели даём ПОРЯДКОВЫЕ "0".."49", НЕ 24-символьный хэш (образец carve в
+        # facet.py). Копировать длинный хэш 50 раз — не её задача, на ней и врала id
+        # (факт 07-22). Короткий индекс скопировать легко; хэш живёт снаружи.
+        payload = {str(j): txt for j, (_id, txt) in enumerate(chunk)}
         r = None
         for _ in range(3):  # 1 + 2 ретрая пачки на транзиентный сбой (парс/сеть)
             r = call(
-                json.dumps(batch, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False),
                 text_sys(lang),
                 consumer="translate",
             )
@@ -188,9 +198,10 @@ def translate_texts(id_text, lang):
                 break
         if r is None:  # три раза подряд None → пул реально не отдаёт, стоп (без шторма)
             return out, "перевод прерван: пул ключей не отдаёт (исчерпание/сбой)"
-        for k, v in r.items():
-            if v and v.strip() and not _has_cyr(v):
-                out[k] = v.strip()
+        for j, (real_id, _txt) in enumerate(chunk):  # сшивка ПО ПОЗИЦИИ
+            v = r.get(str(j))
+            if v and str(v).strip() and not _has_cyr(str(v)):
+                out[real_id] = str(v).strip()
     return out, None
 
 
