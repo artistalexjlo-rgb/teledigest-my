@@ -37,13 +37,44 @@ KRATKO_TOP = (
     12  # сколько топ-абзацев кормим выжимке (окно соска ~16.6К ток — с запасом)
 )
 
-KRATKO_SYS = (
-    "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
-    "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
-    "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
-    "сверх написанного. Естественный русский, без воды и без «в чатах говорят».\n"
-    'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
-)
+# Выжимка делается НА ЯЗЫКЕ ТЕХ ЖЕ АБЗАЦЕВ, что стоят на странице под плашкой.
+# ⛔ НЕ переводить готовую русскую выжимку на другие языки (так было до 07-22): тогда
+# плашка сверху и советы ниже приходят разными путями и могут разъехаться в формулировках,
+# а проверить это на языке, которого никто в команде не читает, нечем. Синтез из видимого
+# текста делает согласованность СВОЙСТВОМ КОНСТРУКЦИИ, а не предметом проверки.
+LANG_NAME = {
+    "ru": "русском",
+    "en": "English",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "zh": "Chinese (Simplified)",
+    "fr": "French",
+    "de": "German",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ar": "Arabic",
+    "th": "Thai",
+    "it": "Italian",
+    "hi": "Hindi",
+    "tr": "Turkish",
+}
+
+
+def kratko_sys(lang="ru"):
+    if lang == "ru":
+        tail = "Естественный русский, без воды и без «в чатах говорят»."
+    else:
+        tail = (
+            f"Write the answer in natural {LANG_NAME.get(lang, lang)} — the SAME language "
+            "as the advice above. No filler, no «people in chats say»."
+        )
+    return (
+        "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
+        "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
+        "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
+        f"сверх написанного. {tail}\n"
+        'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
+    )
 
 
 def _atomic_json(path, obj):
@@ -108,14 +139,23 @@ def group_view(view, vv):
     return groups
 
 
-def kratko_for(view):
-    """LLM-выжимка короткого ответа из топ-групп (тексты репрезентантов).
-    None = инфра-сбой/невалид — страница выйдет без блока, не блокер."""
+def kratko_for(view, lang="ru"):
+    """LLM-выжимка короткого ответа из топ-групп ЭТОГО ЖЕ файла (тексты репрезентантов) —
+    значит на языке файла. None = инфра-сбой/невалид — страница выйдет без блока, не блокер.
+    """
     from keybroker import call  # импорт тут: кластеризация остаётся keyless
 
     by_id = {it["id"]: it for it in view["items"]}
-    tops = [by_id[g["rep"]]["text"] for g in view["groups"][:KRATKO_TOP]]
-    out = call(json.dumps(tops, ensure_ascii=False), KRATKO_SYS, consumer="kratko")
+    tops = [
+        by_id[g["rep"]]["text"]
+        for g in view["groups"][:KRATKO_TOP]
+        if g["rep"] in by_id
+    ]
+    if not tops:
+        return None
+    out = call(
+        json.dumps(tops, ensure_ascii=False), kratko_sys(lang), consumer="kratko"
+    )
     k = (out or {}).get("kratko")
     return k.strip() if isinstance(k, str) and k.strip() else None
 
@@ -191,10 +231,45 @@ def run(geo, kratko=False):
     )
 
 
+def kratko_lang(geo, lang):
+    """Короткий ответ ДЛЯ ЯЗЫКОВОГО файла: синтез из абзацев ЭТОГО файла, на ЕГО языке.
+    Зовётся после сборки out_facet_<lang>/<geo>.json. Идемпотентно (готовые не трогает),
+    чекпоинт каждые SAVE_EVERY, стоп-флаг между видами — как в русском run()."""
+    fn = f"out_facet_{lang}/{geo}.json"
+    d = json.load(open(fn, encoding="utf-8"))
+    views = d.get("views_by_task", [])
+    need = [v for v in views if v.get("groups") and not v.get("kratko")]
+    if not need:
+        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
+        return 0
+    print(f"{geo}/{lang}: нужно kratko: {len(need)}", flush=True)
+    n_k = 0
+    for v in need:
+        if _stopped():
+            _atomic_json(fn, d)
+            print(f"{geo}/{lang}: остановлен, сохранено kratko +{n_k}", flush=True)
+            return n_k
+        k = kratko_for(v, lang)
+        if k:
+            v["kratko"] = k
+            n_k += 1
+            if n_k % SAVE_EVERY == 0:
+                _atomic_json(fn, d)
+        print(f"  {geo}/{lang}: kratko {n_k}/{len(need)}", flush=True)
+    _atomic_json(fn, d)
+    print(f"{geo}/{lang}: kratko +{n_k}", flush=True)
+    return n_k
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: dedup.py <geo|--all> [--kratko]")
+        print(
+            "usage: dedup.py <geo|--all> [--kratko]  |  dedup.py --kratko-lang <geo> <lang>"
+        )
         sys.exit(1)
+    if sys.argv[1] == "--kratko-lang":  # синтез kratko по готовому языковому файлу
+        kratko_lang(sys.argv[2], sys.argv[3])
+        sys.exit(0)
     kr = "--kratko" in sys.argv
     if sys.argv[1] == "--all":
         geos = sorted(os.path.basename(f)[:-5] for f in glob.glob(f"{OUT}/*.json"))

@@ -88,37 +88,6 @@ def text_sys(lang):
     )
 
 
-def kratko_sys(lang):
-    # kratko генерится по-русски (dedup.py --kratko) → переводим RU→lang, В Т.Ч. для en
-    return (
-        f"Translate each Russian summary into natural {LANG_NAME[lang]}. Preserve ALL facts, "
-        "numbers, names and caveats EXACTLY — add nothing, drop nothing. "
-        'Input is JSON {"0": russian, "1": russian, ...}. Return STRICT JSON with the SAME short '
-        'numeric keys: {"0": translated, ...}. Keep every key, translate every value.'
-    )
-
-
-def translate_kratko(kr_by_key, lang):
-    """{key: ru_kratko} → {key: translated}. Непереведённое просто выпадает (блок скрыт).
-    Модели даём ПОРЯДКОВЫЕ индексы, не настоящие ключи — сшиваем назад по позиции
-    (тот же приём, что в translate_texts: хэш модель не копирует)."""
-    out = {}
-    items = list(kr_by_key.items())
-    for i in range(0, len(items), 30):
-        chunk = items[i : i + 30]
-        payload = {str(j): txt for j, (_k, txt) in enumerate(chunk)}
-        r = call(
-            json.dumps(payload, ensure_ascii=False),
-            kratko_sys(lang),
-            consumer="translate",
-        )
-        for j, (real_key, _txt) in enumerate(chunk):
-            v = (r or {}).get(str(j))
-            if v and str(v).strip() and not _has_cyr(str(v)):
-                out[real_key] = str(v).strip()
-    return out
-
-
 def carry_groups(src_view, kept_ids, by_id_text):
     """Перенести дедуп-группы в перевод: id-состав языконезависим. Муха без перевода
     выпадает из группы; репрезентант без перевода → самый богатый переведённый в группе;
@@ -205,48 +174,29 @@ def translate_texts(id_text, lang):
     return out, None
 
 
-def kratko_topup(out_path, geo, lang):
-    """Гео уже переведено (новый формат), но kratko появились ПОЗЖЕ (is_fresh скипал их —
-    дыра, юзер 07-22). Добираем ТОЛЬКО недостающие короткие ответы в существующий файл,
-    НЕ перегоняя тело (ключи зря не жжём). Возврат: True если файл полон/дополнен."""
-    tr = json.load(open(out_path, encoding="utf-8"))
-    src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
-    # сшивка по ID МУХ (языконезависимы): id любой мухи из вида → ru-kratko его исходного
-    # вида. Метка в переводе уже на другом языке, по ней не свяжешь — только по id.
-    kr_by_id = {}
-    for v in src["views_by_task"]:
-        if v.get("kratko"):
-            for it in v.get("items", []):
-                kr_by_id[it["id"]] = v["kratko"]
-    need = {}  # индекс переводного вида → ru-kratko, которого там ещё нет
-    for i, v in enumerate(tr.get("views_by_task", [])):
-        if v.get("kratko"):
-            continue  # уже переведён — не трогаем
-        rk = next(
-            (kr_by_id[it["id"]] for it in v.get("items", []) if it["id"] in kr_by_id),
-            None,
-        )
-        if rk:
-            need[str(i)] = rk
-    if not need:
-        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
-        return True
-    print(f"{geo}/{lang}: добираю kratko: {len(need)}", flush=True)
-    got = translate_kratko(need, lang)
-    for k, val in got.items():
-        tr["views_by_task"][int(k)]["kratko"] = val
-    _atomic(out_path, tr)
-    print(f"{geo}/{lang}: kratko добрано +{len(got)}", flush=True)
-    return True
+def add_kratko(geo, lang):
+    """Синтез коротких ответов по ГОТОВОМУ языковому файлу — логика и промпт живут в
+    dedup.kratko_lang (одно место на все языки, включая ru). Сбой не роняет перевод."""
+    try:
+        import dedup
+
+        cwd = os.getcwd()
+        os.chdir(HERE)  # dedup работает относительными путями out_facet_<lang>/
+        try:
+            return dedup.kratko_lang(geo, lang)
+        finally:
+            os.chdir(cwd)
+    except Exception as e:
+        print(f"{geo}/{lang}: kratko не сделан ({type(e).__name__}: {e})", flush=True)
+        return 0
 
 
 def run(geo, lang):
     out_path = f"{HERE}/out_facet_{lang}/{geo}.json"
     if os.path.exists(out_path):
         if is_fresh(out_path):
-            return kratko_topup(
-                out_path, geo, lang
-            )  # тело готово — проверить/добрать kratko
+            add_kratko(geo, lang)  # тело готово — досинтезировать kratko, если их нет
+            return True
         print(f"{geo}/{lang}: старый формат (без groups) — пересборка", flush=True)
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
     views = [
@@ -279,7 +229,6 @@ def run(geo, lang):
     rol = ROL.get(lang, ROL["en"])  # прочие языки — англ. роли (не блокируем)
 
     out_views = []
-    kr_src = {}  # индекс out_view → ru-kratko (переведём батчем ниже)
     for v in views:
         lbl = label_map.get(v["zadacha"], v["zadacha"])
         if _has_cyr(lbl):
@@ -308,15 +257,7 @@ def run(geo, lang):
             # укладка 0.10: группы дедупа языконезависимы (id-состав) — несём сквозь перевод
             if v.get("groups"):
                 tv["groups"] = carry_groups(v, kept, by_text)
-            if v.get("kratko"):
-                kr_src[str(len(out_views))] = v["kratko"]
             out_views.append(tv)
-
-    # короткий ответ: ru-выжимка → перевод батчем (не перевёлся → блок скрыт шаблоном)
-    if kr_src:
-        kr_tr = translate_kratko(kr_src, lang)
-        for k, val in kr_tr.items():
-            out_views[int(k)]["kratko"] = val
 
     # КОРЕНЬ бага «пустой файл»: RU-гео ИМЕЕТ ≥4-виды, а перевод дал 0 → это ПРОВАЛ (429/сдох),
     # НЕ писать пустышку (иначе done-по-факту-файла → пропущен навсегда). На ретрай.
@@ -336,6 +277,9 @@ def run(geo, lang):
         f"{sum(len(v['items']) for v in out_views)} мух → {d}/{geo}.json",
         flush=True,
     )
+    # КОРОТКИЙ ОТВЕТ синтезируется ЗДЕСЬ, из только что записанных абзацев этого языка —
+    # не переводится с русского (до 07-22 было так, плашка могла разъехаться с текстом).
+    add_kratko(geo, lang)
     return True  # явный успех (было: падал в None → exit 3 на каждой записи)
 
 
