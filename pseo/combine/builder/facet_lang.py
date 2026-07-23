@@ -195,7 +195,11 @@ def run(geo, lang):
     out_path = f"{HERE}/out_facet_{lang}/{geo}.json"
     if os.path.exists(out_path):
         if is_fresh(out_path):
-            add_kratko(geo, lang)  # тело готово — досинтезировать kratko, если их нет
+            # ⛔ НЕ досинтезировать тут kratko: это РАЗОВЫЙ ретрофит по старому материалу,
+            # ему не место в постоянном пути (иначе каждый заход сканирует всё старое —
+            # «разовое исправление навсегда», юзер 07-22). Ретрофит = отдельная команда
+            # `dedup.py --kratko-lang <geo> <lang>`, прогоняется один раз.
+            print(f"{geo}/{lang}: уже готов (новый формат), скип", flush=True)
             return True
         print(f"{geo}/{lang}: старый формат (без groups) — пересборка", flush=True)
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
@@ -218,9 +222,12 @@ def run(geo, lang):
         text, reason = translate_texts(
             en_text, lang
         )  # ПЛАТНАЯ часть, квоту держит мозг
-        if reason:  # пул не отдал (после ретраев) → гео НЕ пишем, доделаем позже
+        if reason:  # пул не отдал (после ретраев внутри translate_texts) → гео НЕ пишем
+            # маркер НЕУДАЧ → цикл перепройдёт фазу (транзиент пула), 3 раза не вышло →
+            # стоп-машина. В fails писать НЕКУДА: языкового файла не создаём (иначе
+            # пустышка встанет как «готово»), поэтому сигнал только маркером в вывод.
             print(
-                f"{geo}/{lang}: {reason}; гео отложен (успел {len(text)})",
+                f"⚠️ НЕУДАЧ: {geo}/{lang} {reason}; гео отложен (успел {len(text)})",
                 flush=True,
             )
             return False

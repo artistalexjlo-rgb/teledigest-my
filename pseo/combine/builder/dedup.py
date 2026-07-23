@@ -183,7 +183,13 @@ def _stopped():
 
 # ── ВЕТВЛЕНИЕ ПОЛОК (штатный шаг комбайна, канон юзера 2026-07-21: полка-гигант — это
 # не гармошка на 400 пунктов, а ХАБ с ветками-страницами; делает конвейер, не руки).
-BRANCH_MIN = 90  # полка > стольких групп → ветвим (иначе обычная полка-страница)
+BRANCH_MIN = int(
+    os.environ.get("KB_BRANCH_MIN", "15")
+)  # полка > стольких групп → ХАБ с ветками
+# 15 — число юзера (07-23): «дай хоть 15, лишь бы не простыни». Было 90 — при нём
+# 53 полки из 31-90 законно оставались простынями (факт: 66 простыней = 6% страниц).
+# ⚠️ Механизм просит у модели 4-9 под-тем: у полки на ~15-20 ветки выйдут по 2-4 пункта.
+# Юзер выбрал дробление вместо простыней осознанно.
 BRANCH_BATCH = 90  # реп-текстов в запрос (окно соска)
 
 BRANCH_SYS = (
@@ -201,10 +207,14 @@ BRANCH_MERGE_SYS = (
 )
 
 
-def branch_shelf(shelf):
+def branch_shelf(shelf, fails=None):
     """Полка-гигант → subshelves: [{name, reps}]. Двухпроходно: батч-carve по текстам
-    репрезентантов → слияние имён батчей в канонические (1 вызов). Сбой → None (полка
-    остаётся как есть, не блокер). Непокрытые репы → без ветки (останутся на хабе)."""
+    репрезентантов → слияние имён батчей в канонические (1 вызов).
+
+    СБОЙ ВИДЕН (07-23, как у carve): пачка не ответила даже с ретраями → пишем в fails,
+    полка остаётся простынёй, но об этом ЗНАЮТ (раньше молча возвращали None — так 12
+    полок и висели простынями, никто не знал). ⚠️ «модель нашла <2 под-темы» — НЕ сбой:
+    значит полка цельная, ветвить нечего; это в fails не пишем."""
     from keybroker import call
 
     by_id = {it["id"]: it for it in shelf["items"]}
@@ -213,7 +223,25 @@ def branch_shelf(shelf):
     for s in range(0, len(reps), BRANCH_BATCH):
         chunk = reps[s : s + BRANCH_BATCH]
         idx = {str(j): by_id[r]["text"] for j, r in enumerate(chunk)}
-        out = call(json.dumps(idx, ensure_ascii=False), BRANCH_SYS, consumer="carve")
+        out = None
+        for _ in range(3):  # 1 + 2 ретрая: сбой пачки обычно транзиентный
+            out = call(
+                json.dumps(idx, ensure_ascii=False), BRANCH_SYS, consumer="carve"
+            )
+            if out is not None:
+                break
+        if out is None:  # три раза подряд молчок → это НЕ «полка цельная», это сбой
+            if fails is not None:
+                fails.append(
+                    {
+                        "step": "branch_shelf",
+                        "shelf": shelf.get("shelf"),
+                        "batch": f"{s // BRANCH_BATCH + 1}/{(len(reps) - 1) // BRANCH_BATCH + 1}",
+                        "groups": len(chunk),
+                        "why": "ветвление не ответило (3 попытки) — полка осталась простынёй",
+                    }
+                )
+            return None
         for sub in (out or {}).get("subs") or []:
             name = (sub.get("name") or "").strip()
             ids = [
@@ -256,6 +284,7 @@ def run(geo, kratko=False):
     all_ids = [it["id"] for c in (views, shelves) for v in c for it in v["items"]]
     vv = load_vecs(list(set(all_ids)))
     n_groups = n_dups = n_k = 0
+    run_fails = []  # сбои ЭТОГО прогона (ветвление не ответило) → в файл гео, в отчёт
     n_need = sum(
         1
         for v in views
@@ -291,10 +320,12 @@ def run(geo, kratko=False):
         n_sdups += len(sv["items"]) - len(sv["groups"])
         # ветвление полки-гиганта — штатный шаг комбайна (идемпотентно: не пере-жжём)
         if kratko and len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
-            subs = branch_shelf(sv)
+            subs = branch_shelf(sv, run_fails)
             if subs:
                 sv["subshelves"] = subs
                 n_b += 1
+    if run_fails:  # неудачи рядом с данными — их читают отчёт и пульт
+        d["fails"] = (d.get("fails") or []) + run_fails
     _atomic_json(fn, d)
     print(
         f"{geo}: видов {len(views)}, групп {n_groups}, схлопнуто дублей {n_dups}"
@@ -316,21 +347,50 @@ def kratko_lang(geo, lang):
         print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
         return 0
     print(f"{geo}/{lang}: нужно kratko: {len(need)}", flush=True)
-    n_k = 0
+    n_k = n_miss = miss_streak = 0
     for v in need:
         if _stopped():
             _atomic_json(fn, d)
             print(f"{geo}/{lang}: остановлен, сохранено kratko +{n_k}", flush=True)
             return n_k
-        k = kratko_for(v, lang)
+        k = None
+        for _ in range(3):  # 1 + 2 ретрая: сбой обычно транзиентный (парс/сеть)
+            k = kratko_for(v, lang)
+            if k:
+                break
         if k:
             v["kratko"] = k
             n_k += 1
+            miss_streak = 0
             if n_k % SAVE_EVERY == 0:
                 _atomic_json(fn, d)
-        print(f"  {geo}/{lang}: kratko {n_k}/{len(need)}", flush=True)
+        else:  # вид не сжался даже с ретраями — промах. Единичный не блокер (блок скрыт).
+            n_miss += 1
+            miss_streak += 1
+            if miss_streak >= 5:  # 5 подряд без успеха → пул мёртв, НЕ долбим впустую
+                _atomic_json(fn, d)
+                print(
+                    f"{geo}/{lang}: 5 промахов подряд — пул не отдаёт, стоп "
+                    f"(сделано {n_k}, осталось {len(need) - n_k - n_miss})",
+                    flush=True,
+                )
+                d = json.load(open(fn, encoding="utf-8"))
+                d["fails"] = (d.get("fails") or []) + [
+                    {
+                        "step": "kratko",
+                        "lang": lang,
+                        "why": "5 kratko подряд не сделались — пул не отдаёт",
+                        "done": n_k,
+                    }
+                ]
+                _atomic_json(fn, d)
+                return n_k
+        print(
+            f"  {geo}/{lang}: kratko {n_k}/{len(need)} (промахов {n_miss})", flush=True
+        )
     _atomic_json(fn, d)
-    print(f"{geo}/{lang}: kratko +{n_k}", flush=True)
+    tail = f", промахов {n_miss}" if n_miss else ""
+    print(f"{geo}/{lang}: kratko +{n_k}{tail}", flush=True)
     return n_k
 
 

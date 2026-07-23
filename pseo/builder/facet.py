@@ -223,12 +223,16 @@ ASSIGN_SYS = (
 )
 
 
-def assign_tail(tail_fids, by_id):
+def assign_tail(tail_fids, by_id, fails=None):
     """Тонкий хвост → раскладка по таксономии. Возвращает (shelves {полка: [items]},
     prochee [items]). Потерь НЕТ: сбой пачки / непокрытие / не-возврат мухи → в prochee.
-    """
+
+    РАЗЛИЧАЕМ (07-23): муха в prochee «не подошла ни под одну полку» = НОРМА (парк-ведро,
+    сигнал роста таксономии); а «пачка не ответила 3 раза» = СБОЙ → в fails, чтобы знали,
+    что раскладка на этой пачке не состоялась (раньше молчало, как ветвление полок)."""
     fids = list(tail_fids)
     shelves, prochee = {}, []
+    stop_at = None  # индекс, на котором нажали стоп (остаток честно уходит в prochee)
 
     def item(fid, typ):
         r = by_id[fid]
@@ -242,6 +246,12 @@ def assign_tail(tail_fids, by_id):
         }
 
     for s in range(0, len(fids), CARVE_BATCH):
+        # ДУБЛЬ КОМБАЙНА: стоп МЕЖДУ ПАЧКАМИ — у facet такая проверка есть, у хвоста
+        # не было, и стоп посреди гео сжигал уже сделанные вызовы впустую.
+        if os.path.exists("RUNNER_STOP"):
+            stop_at = s
+            print(f"  стоп между пачками на {s}/{len(fids)}", flush=True)
+            break
         chunk = fids[s : s + CARVE_BATCH]
         idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
         res = None
@@ -251,6 +261,19 @@ def assign_tail(tail_fids, by_id):
             )
             if res and res.get("assign"):
                 break
+        if not (
+            res and res.get("assign")
+        ):  # пачка молчит 3 раза → СБОЙ (не «не покрыто»)
+            if fails is not None:
+                fails.append(
+                    {
+                        "step": "assign_tail",
+                        "batch": f"{s // CARVE_BATCH + 1}/{(len(fids) - 1) // CARVE_BATCH + 1}",
+                        "flies": len(chunk),
+                        "ids": chunk,
+                        "why": "раскладка хвоста не ответила (3 попытки) → мухи в prochee",
+                    }
+                )
         a = (res or {}).get("assign") or {}
         for j, fid in enumerate(chunk):
             rec = a.get(str(j))
@@ -264,6 +287,12 @@ def assign_tail(tail_fids, by_id):
                 continue
             for sh in shs:
                 shelves.setdefault(sh, []).append(item(fid, typ))
+    if stop_at is not None:  # инвариант «потерь НЕТ»: недоразобранный хвост → prochee
+        prochee.extend(item(fid, "") for fid in fids[stop_at:])
+        print(
+            f"  остаток {len(fids) - stop_at} мух → prochee (следующий запуск разложит)",
+            flush=True,
+        )
     return shelves, prochee
 
 
@@ -318,7 +347,7 @@ def build_views_by_carve(tagged, fails=None):
 
     # ХВОСТ = мухи, не попавшие ни в один плотный карв-вид → раскладка по таксономии
     tail_fids = [fid for fid in by_id if fid not in carved_fids]
-    shelves, prochee = assign_tail(tail_fids, by_id)
+    shelves, prochee = assign_tail(tail_fids, by_id, fails)
     return views, shelves, prochee
 
 
@@ -368,8 +397,12 @@ def run(geo, limit=None):
             # СИСТЕМАТИКА: 0 тегнуто + >=3 провала = бюджет/инфра сдохли, НЕ вина мух →
             # откат (tentative не применяем), стоп прохода. Иначе битую муху виним честно.
             if new_n == 0 and len(tentative) >= 3:
+                # маркер НЕУДАЧ → цикл сам перепройдёт фазу (транзиент пула), 3 раза не
+                # вышло → стоп-машина. Текст ЧЕСТНЫЙ: это «пул не отдал», а НЕ брак сборки
+                # (данные чисты, гео просто недоразмечено) — не путать с carve-комом.
                 print(
-                    f"{geo}: {len(tentative)} провалов без единого тега — бюджет/инфра, откат+стоп",
+                    f"⚠️ НЕУДАЧ: {geo} разметка упёрлась в пул "
+                    f"({len(tentative)} провалов без единого тега) — гео недозрело, не собрано",
                     flush=True,
                 )
                 tentative = []
@@ -475,10 +508,13 @@ def run_assign_tail(geo):
         for it in v["items"]
     }
     tail = [fid for fid in by_id if fid not in on_page]
-    shelves, prochee = assign_tail(tail, by_id)
+    run_fails = []  # сбои раскладки этого прогона → в файл гео, в отчёт
+    shelves, prochee = assign_tail(tail, by_id, run_fails)
     page["shelves"] = [{"shelf": sh, "items": its} for sh, its in shelves.items()]
     page["prochee"] = prochee
     page["taxonomy_version"] = tax.VERSION
+    if run_fails:
+        page["fails"] = (page.get("fails") or []) + run_fails
     _atomic_json(out_fn, page)
     print(
         f"{geo}: хвост {len(tail)} → полок {len(shelves)} "
