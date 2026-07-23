@@ -599,6 +599,10 @@ def call(
                 err = e.read().decode("utf-8", "replace")[:800]
             except Exception:
                 err = str(e)[:120]
+            try:  # СЕТЬ: заголовок называет окно квоты (60=поминутка, больше=жёсткая)
+                err = f"retry-after={e.headers.get('Retry-After', '-')} {err}"
+            except Exception:
+                pass
         except Exception as e:
             status = -1  # сеть/таймаут — ключ не виноват
             err = str(e)[:120]
@@ -606,6 +610,8 @@ def call(
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
 
         if status != 200:
+            # СЕТЬ: pid+ключ на каждом отказе — два разных pid = нахлёст процессов
+            err = f"[pid={os.getpid()} kh={_kh(key)[:8]}] {err}"
             _log_body(
                 consumer, model, status, err
             )  # тело в error_bodies.log — диагностика причины
