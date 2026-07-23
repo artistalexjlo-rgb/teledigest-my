@@ -37,13 +37,44 @@ KRATKO_TOP = (
     12  # сколько топ-абзацев кормим выжимке (окно соска ~16.6К ток — с запасом)
 )
 
-KRATKO_SYS = (
-    "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
-    "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
-    "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
-    "сверх написанного. Естественный русский, без воды и без «в чатах говорят».\n"
-    'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
-)
+# Выжимка делается НА ЯЗЫКЕ ТЕХ ЖЕ АБЗАЦЕВ, что стоят на странице под плашкой.
+# ⛔ НЕ переводить готовую русскую выжимку на другие языки (так было до 07-22): тогда
+# плашка сверху и советы ниже приходят разными путями и могут разъехаться в формулировках,
+# а проверить это на языке, которого никто в команде не читает, нечем. Синтез из видимого
+# текста делает согласованность СВОЙСТВОМ КОНСТРУКЦИИ, а не предметом проверки.
+LANG_NAME = {
+    "ru": "русском",
+    "en": "English",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "zh": "Chinese (Simplified)",
+    "fr": "French",
+    "de": "German",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ar": "Arabic",
+    "th": "Thai",
+    "it": "Italian",
+    "hi": "Hindi",
+    "tr": "Turkish",
+}
+
+
+def kratko_sys(lang="ru"):
+    if lang == "ru":
+        tail = "Естественный русский, без воды и без «в чатах говорят»."
+    else:
+        tail = (
+            f"Write the answer in natural {LANG_NAME.get(lang, lang)} — the SAME language "
+            "as the advice above. No filler, no «people in chats say»."
+        )
+    return (
+        "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
+        "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
+        "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
+        f"сверх написанного. {tail}\n"
+        'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
+    )
 
 
 def _atomic_json(path, obj):
@@ -108,14 +139,23 @@ def group_view(view, vv):
     return groups
 
 
-def kratko_for(view):
-    """LLM-выжимка короткого ответа из топ-групп (тексты репрезентантов).
-    None = инфра-сбой/невалид — страница выйдет без блока, не блокер."""
+def kratko_for(view, lang="ru"):
+    """LLM-выжимка короткого ответа из топ-групп ЭТОГО ЖЕ файла (тексты репрезентантов) —
+    значит на языке файла. None = инфра-сбой/невалид — страница выйдет без блока, не блокер.
+    """
     from keybroker import call  # импорт тут: кластеризация остаётся keyless
 
     by_id = {it["id"]: it for it in view["items"]}
-    tops = [by_id[g["rep"]]["text"] for g in view["groups"][:KRATKO_TOP]]
-    out = call(json.dumps(tops, ensure_ascii=False), KRATKO_SYS, consumer="kratko")
+    tops = [
+        by_id[g["rep"]]["text"]
+        for g in view["groups"][:KRATKO_TOP]
+        if g["rep"] in by_id
+    ]
+    if not tops:
+        return None
+    out = call(
+        json.dumps(tops, ensure_ascii=False), kratko_sys(lang), consumer="kratko"
+    )
     k = (out or {}).get("kratko")
     return k.strip() if isinstance(k, str) and k.strip() else None
 
@@ -141,6 +181,101 @@ def _stopped():
     return _STOP or os.path.exists("RUNNER_STOP")
 
 
+# ── ВЕТВЛЕНИЕ ПОЛОК (штатный шаг комбайна, канон юзера 2026-07-21: полка-гигант — это
+# не гармошка на 400 пунктов, а ХАБ с ветками-страницами; делает конвейер, не руки).
+BRANCH_MIN = int(
+    os.environ.get("KB_BRANCH_MIN", "15")
+)  # полка > стольких групп → ХАБ с ветками
+# 15 — число юзера (07-23): «дай хоть 15, лишь бы не простыни». Было 90 — при нём
+# 53 полки из 31-90 законно оставались простынями (факт: 66 простыней = 6% страниц).
+# ⚠️ Механизм просит у модели 4-9 под-тем: у полки на ~15-20 ветки выйдут по 2-4 пункта.
+# Юзер выбрал дробление вместо простыней осознанно.
+BRANCH_BATCH = 90  # реп-текстов в запрос (окно соска)
+
+BRANCH_SYS = (
+    "Ниже советы ОДНОЙ широкой полки гайда (id: текст). Разбей их на 4-9 ПОД-ТЕМ — "
+    "каждая станет отдельной страницей. Правила: под-тема = конкретная задача/объект "
+    "(«Такси и Uber», «Аэропорт GRU: трансферы»), НЕ тип совета; похожие советы — в одну "
+    "под-тему; каждый совет РОВНО в одной; охвати ВСЕ; названия короткие, из содержимого.\n"
+    'СТРОГО JSON: {"subs":[{"name":"<название>","ids":["0",...]}]}'
+)
+BRANCH_MERGE_SYS = (
+    "Ниже названия под-тем одной полки, полученные кусками — среди них есть дубли одной "
+    "и той же темы разными словами. Сведи к 4-9 КАНОНИЧЕСКИМ под-темам: каждому входному "
+    "названию — ровно одно каноническое (можно совпадающее с входным). Не выдумывай новых тем.\n"
+    'СТРОГО JSON: {"map":{"<входное>":"<каноническое>",...}}'
+)
+
+
+def branch_shelf(shelf, fails=None):
+    """Полка-гигант → subshelves: [{name, reps}]. Двухпроходно: батч-carve по текстам
+    репрезентантов → слияние имён батчей в канонические (1 вызов).
+
+    СБОЙ ВИДЕН (07-23, как у carve): пачка не ответила даже с ретраями → пишем в fails,
+    полка остаётся простынёй, но об этом ЗНАЮТ (раньше молча возвращали None — так 12
+    полок и висели простынями, никто не знал). ⚠️ «модель нашла <2 под-темы» — НЕ сбой:
+    значит полка цельная, ветвить нечего; это в fails не пишем."""
+    from keybroker import call
+
+    by_id = {it["id"]: it for it in shelf["items"]}
+    reps = [g["rep"] for g in shelf["groups"]]
+    raw = {}  # имя-из-батча → [rep...]
+    for s in range(0, len(reps), BRANCH_BATCH):
+        chunk = reps[s : s + BRANCH_BATCH]
+        idx = {str(j): by_id[r]["text"] for j, r in enumerate(chunk)}
+        out = None
+        for _ in range(3):  # 1 + 2 ретрая: сбой пачки обычно транзиентный
+            out = call(
+                json.dumps(idx, ensure_ascii=False), BRANCH_SYS, consumer="carve"
+            )
+            if out is not None:
+                break
+        if out is None:  # три раза подряд молчок → это НЕ «полка цельная», это сбой
+            if fails is not None:
+                fails.append(
+                    {
+                        "step": "branch_shelf",
+                        "shelf": shelf.get("shelf"),
+                        "batch": f"{s // BRANCH_BATCH + 1}/{(len(reps) - 1) // BRANCH_BATCH + 1}",
+                        "groups": len(chunk),
+                        "why": "ветвление не ответило (3 попытки) — полка осталась простынёй",
+                    }
+                )
+            return None
+        for sub in (out or {}).get("subs") or []:
+            name = (sub.get("name") or "").strip()
+            ids = [
+                chunk[int(i)]
+                for i in (sub.get("ids") or [])
+                if isinstance(i, str) and i.isdigit() and int(i) < len(chunk)
+            ]
+            if name and ids:
+                raw.setdefault(name, []).extend(ids)
+    if len(raw) < 2:
+        return None
+    mp = {n: n for n in raw}
+    if len(raw) > 9:  # батчи наплодили дубли имён → слить в канонические
+        out = call(
+            json.dumps(sorted(raw), ensure_ascii=False),
+            BRANCH_MERGE_SYS,
+            consumer="carve",
+        )
+        for k, v in ((out or {}).get("map") or {}).items():
+            if k in raw and v and v.strip():
+                mp[k] = v.strip()
+    merged = {}
+    for name, ids in raw.items():
+        merged.setdefault(mp[name], []).extend(ids)
+    seen = set()
+    subs = []
+    for name, ids in sorted(merged.items(), key=lambda x: -len(x[1])):
+        uniq = [i for i in ids if i not in seen]
+        seen.update(uniq)
+        if len(uniq) >= 4:  # ветка-страница от 4 пунктов (гейт как у страниц)
+            subs.append({"name": name, "reps": uniq})
+    return subs if len(subs) >= 2 else None
+
+
 def run(geo, kratko=False):
     fn = f"{OUT}/{geo}.json"
     d = json.load(open(fn, encoding="utf-8"))
@@ -149,6 +284,7 @@ def run(geo, kratko=False):
     all_ids = [it["id"] for c in (views, shelves) for v in c for it in v["items"]]
     vv = load_vecs(list(set(all_ids)))
     n_groups = n_dups = n_k = 0
+    run_fails = []  # сбои ЭТОГО прогона (ветвление не ответило) → в файл гео, в отчёт
     n_need = sum(
         1
         for v in views
@@ -178,10 +314,18 @@ def run(geo, kratko=False):
                 f"  {geo}: kratko {n_k}/{n_need} ({v.get('zadacha', '')[:40]})",
                 flush=True,
             )
-    n_sdups = 0
+    n_sdups = n_b = 0
     for sv in shelves:  # полкам kratko не даём: антология разнородна, «ответа» нет
         sv["groups"] = group_view(sv, vv)
         n_sdups += len(sv["items"]) - len(sv["groups"])
+        # ветвление полки-гиганта — штатный шаг комбайна (идемпотентно: не пере-жжём)
+        if kratko and len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
+            subs = branch_shelf(sv, run_fails)
+            if subs:
+                sv["subshelves"] = subs
+                n_b += 1
+    if run_fails:  # неудачи рядом с данными — их читают отчёт и пульт
+        d["fails"] = (d.get("fails") or []) + run_fails
     _atomic_json(fn, d)
     print(
         f"{geo}: видов {len(views)}, групп {n_groups}, схлопнуто дублей {n_dups}"
@@ -191,10 +335,74 @@ def run(geo, kratko=False):
     )
 
 
+def kratko_lang(geo, lang):
+    """Короткий ответ ДЛЯ ЯЗЫКОВОГО файла: синтез из абзацев ЭТОГО файла, на ЕГО языке.
+    Зовётся после сборки out_facet_<lang>/<geo>.json. Идемпотентно (готовые не трогает),
+    чекпоинт каждые SAVE_EVERY, стоп-флаг между видами — как в русском run()."""
+    fn = f"out_facet_{lang}/{geo}.json"
+    d = json.load(open(fn, encoding="utf-8"))
+    views = d.get("views_by_task", [])
+    need = [v for v in views if v.get("groups") and not v.get("kratko")]
+    if not need:
+        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
+        return 0
+    print(f"{geo}/{lang}: нужно kratko: {len(need)}", flush=True)
+    n_k = n_miss = miss_streak = 0
+    for v in need:
+        if _stopped():
+            _atomic_json(fn, d)
+            print(f"{geo}/{lang}: остановлен, сохранено kratko +{n_k}", flush=True)
+            return n_k
+        k = None
+        for _ in range(3):  # 1 + 2 ретрая: сбой обычно транзиентный (парс/сеть)
+            k = kratko_for(v, lang)
+            if k:
+                break
+        if k:
+            v["kratko"] = k
+            n_k += 1
+            miss_streak = 0
+            if n_k % SAVE_EVERY == 0:
+                _atomic_json(fn, d)
+        else:  # вид не сжался даже с ретраями — промах. Единичный не блокер (блок скрыт).
+            n_miss += 1
+            miss_streak += 1
+            if miss_streak >= 5:  # 5 подряд без успеха → пул мёртв, НЕ долбим впустую
+                _atomic_json(fn, d)
+                print(
+                    f"{geo}/{lang}: 5 промахов подряд — пул не отдаёт, стоп "
+                    f"(сделано {n_k}, осталось {len(need) - n_k - n_miss})",
+                    flush=True,
+                )
+                d = json.load(open(fn, encoding="utf-8"))
+                d["fails"] = (d.get("fails") or []) + [
+                    {
+                        "step": "kratko",
+                        "lang": lang,
+                        "why": "5 kratko подряд не сделались — пул не отдаёт",
+                        "done": n_k,
+                    }
+                ]
+                _atomic_json(fn, d)
+                return n_k
+        print(
+            f"  {geo}/{lang}: kratko {n_k}/{len(need)} (промахов {n_miss})", flush=True
+        )
+    _atomic_json(fn, d)
+    tail = f", промахов {n_miss}" if n_miss else ""
+    print(f"{geo}/{lang}: kratko +{n_k}{tail}", flush=True)
+    return n_k
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: dedup.py <geo|--all> [--kratko]")
+        print(
+            "usage: dedup.py <geo|--all> [--kratko]  |  dedup.py --kratko-lang <geo> <lang>"
+        )
         sys.exit(1)
+    if sys.argv[1] == "--kratko-lang":  # синтез kratko по готовому языковому файлу
+        kratko_lang(sys.argv[2], sys.argv[3])
+        sys.exit(0)
     kr = "--kratko" in sys.argv
     if sys.argv[1] == "--all":
         geos = sorted(os.path.basename(f)[:-5] for f in glob.glob(f"{OUT}/*.json"))

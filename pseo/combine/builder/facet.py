@@ -162,9 +162,16 @@ def _first_word(z):
     return p[0].lower() if p else z.lower()
 
 
-def carve_family(fids, by_id):
+def carve_family(fids, by_id, fails=None, family=None):
     """Пачка мух семьи (ТЕКСТЫ perevod) → LLM вычленяет подпункты + присваивает. [{name, ids}].
-    Батчами по CARVE_BATCH. None/сбой пачки → каждая её муха как свой вид (fallback, НЕ теряем).
+    Батчами по CARVE_BATCH.
+
+    ⛔ ОТКАТ БОЛЬШЕ НЕ МАСКИРУЕТСЯ (юзер 07-23). Раньше сбой пачки молча давал каждой мухе
+    имя её ИСХОДНОЙ задачи — а это общие рубрики («Транспорт», «Документы и виза»), и склейка
+    по имени лепила ком на 139 пунктов. Снаружи выглядело как нормальная сборка: код 0,
+    файл записан, гео «готово». Так собрались 6 гео (hu/ge/ar/kz/in/kg) — БЕЗ тематической
+    нарезки вообще. Теперь провал пачки ЗАПИСЫВАЕТСЯ в fails: мухи не теряем (откат остаётся),
+    но гео честно помечено недоделанным — попадёт в отчёт и встанет на перепрогон.
     """
     out = []
     for s in range(0, len(fids), CARVE_BATCH):
@@ -172,7 +179,20 @@ def carve_family(fids, by_id):
         idx = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
         res = call(json.dumps(idx, ensure_ascii=False), CARVE_SYS, consumer="carve")
         if not res or not res.get("intents"):
-            for fid in chunk:  # fallback: муха как есть (её первая задача = имя)
+            if (
+                fails is not None
+            ):  # ТОЧКА ОТКАЗА: где именно обломилось (для перепрогона)
+                fails.append(
+                    {
+                        "step": "carve",
+                        "family": family,  # ключ семьи (первое слово метки) — как её собирали
+                        "batch": f"{s // CARVE_BATCH + 1}/{(len(fids) - 1) // CARVE_BATCH + 1}",
+                        "flies": len(chunk),
+                        "ids": chunk,  # ИМЕННО эти мухи не разобраны — можно добить точечно
+                        "why": "carve не вернул intents",
+                    }
+                )
+            for fid in chunk:  # мух НЕ теряем: откат как был, но теперь он виден
                 out.append({"name": by_id[fid]["zadachi"][0], "ids": [fid]})
             continue
         for g in res["intents"]:
@@ -203,10 +223,13 @@ ASSIGN_SYS = (
 )
 
 
-def assign_tail(tail_fids, by_id):
+def assign_tail(tail_fids, by_id, fails=None):
     """Тонкий хвост → раскладка по таксономии. Возвращает (shelves {полка: [items]},
     prochee [items]). Потерь НЕТ: сбой пачки / непокрытие / не-возврат мухи → в prochee.
-    """
+
+    РАЗЛИЧАЕМ (07-23): муха в prochee «не подошла ни под одну полку» = НОРМА (парк-ведро,
+    сигнал роста таксономии); а «пачка не ответила 3 раза» = СБОЙ → в fails, чтобы знали,
+    что раскладка на этой пачке не состоялась (раньше молчало, как ветвление полок)."""
     fids = list(tail_fids)
     shelves, prochee = {}, []
     stop_at = None  # индекс, на котором нажали стоп (остаток честно уходит в prochee)
@@ -238,6 +261,19 @@ def assign_tail(tail_fids, by_id):
             )
             if res and res.get("assign"):
                 break
+        if not (
+            res and res.get("assign")
+        ):  # пачка молчит 3 раза → СБОЙ (не «не покрыто»)
+            if fails is not None:
+                fails.append(
+                    {
+                        "step": "assign_tail",
+                        "batch": f"{s // CARVE_BATCH + 1}/{(len(fids) - 1) // CARVE_BATCH + 1}",
+                        "flies": len(chunk),
+                        "ids": chunk,
+                        "why": "раскладка хвоста не ответила (3 попытки) → мухи в prochee",
+                    }
+                )
         a = (res or {}).get("assign") or {}
         for j, fid in enumerate(chunk):
             rec = a.get(str(j))
@@ -260,7 +296,7 @@ def assign_tail(tail_fids, by_id):
     return shelves, prochee
 
 
-def build_views_by_carve(tagged):
+def build_views_by_carve(tagged, fails=None):
     """Джоб1: плотные фасет-семьи (≥MIN_CARVE) → carve по ТЕКСТАМ (тематические страницы,
     уплотняет дубли). Джоб2: тонкий хвост (мухи, не попавшие в carve) → assign_tail по глобальной
     таксономии полки×тип (антологии, НЕ сырые синглтоны). Возвращает (views {интент: [items]},
@@ -291,7 +327,9 @@ def build_views_by_carve(tagged):
         fids = list(fset)
         if len(fids) < MIN_CARVE:
             continue  # тонкие семьи → хвост-раскладка ниже (НЕ сырые синглтоны)
-        for it in carve_family(fids, by_id):  # плотная семья: carve по текстам
+        for it in carve_family(
+            fids, by_id, fails, w
+        ):  # плотная семья: carve по текстам
             if len(it["ids"]) < 2:
                 continue  # одиночный интент carve = тонкий абзац → в хвост-раскладку, не 1-мушь-страница
             for fid in it["ids"]:
@@ -309,7 +347,7 @@ def build_views_by_carve(tagged):
 
     # ХВОСТ = мухи, не попавшие ни в один плотный карв-вид → раскладка по таксономии
     tail_fids = [fid for fid in by_id if fid not in carved_fids]
-    shelves, prochee = assign_tail(tail_fids, by_id)
+    shelves, prochee = assign_tail(tail_fids, by_id, fails)
     return views, shelves, prochee
 
 
@@ -359,8 +397,12 @@ def run(geo, limit=None):
             # СИСТЕМАТИКА: 0 тегнуто + >=3 провала = бюджет/инфра сдохли, НЕ вина мух →
             # откат (tentative не применяем), стоп прохода. Иначе битую муху виним честно.
             if new_n == 0 and len(tentative) >= 3:
+                # маркер НЕУДАЧ → цикл сам перепройдёт фазу (транзиент пула), 3 раза не
+                # вышло → стоп-машина. Текст ЧЕСТНЫЙ: это «пул не отдал», а НЕ брак сборки
+                # (данные чисты, гео просто недоразмечено) — не путать с carve-комом.
                 print(
-                    f"{geo}: {len(tentative)} провалов без единого тега — бюджет/инфра, откат+стоп",
+                    f"⚠️ НЕУДАЧ: {geo} разметка упёрлась в пул "
+                    f"({len(tentative)} провалов без единого тега) — гео недозрело, не собрано",
                     flush=True,
                 )
                 tentative = []
@@ -400,7 +442,11 @@ def run(geo, limit=None):
 
     # ВИДЫ через CARVE (замена consolidate): группировка по фасет-семье → carve плотных семей
     # по ТЕКСТАМ мух / тонкий хвост как facet. Инвертированный индекс строится внутри.
-    views, shelves, prochee = build_views_by_carve(tagged)
+    # ⚠ имя НЕ `fails` — так зовётся дед-леттер мух выше в этой же функции.
+    run_fails = (
+        []
+    )  # неудачи ЭТОГО прогона (carve не разобрал) → в файл гео, в отчёт, в перепрогон
+    views, shelves, prochee = build_views_by_carve(tagged, run_fails)
 
     # индекс по сущности (для видов-страниц вида «CPF»: всё, где CPF — цель/требование/обход)
     ent_index = {}
@@ -419,12 +465,23 @@ def run(geo, limit=None):
         "taxonomy_version": tax.VERSION,
         "entity_index": {k: v for k, v in ent_index.items() if len(v) > 1},
     }
+    # НЕУДАЧИ прогона — рядом с данными. Пусто = гео разобрано честно; непусто = гео
+    # собрано с откатом (нарезки не было) и ЖДЁТ ПЕРЕПРОГОНА. Читают: отчёт и пульт.
+    if run_fails:
+        page["fails"] = run_fails
     _atomic_json(f"out_facet/{geo}.json", page)  # атомарно
 
     print(
         f"\n{geo}: +{new_n} новых → всего {len(tagged)} мух, видов-задач {len(views)}, "
         f"полок {len(shelves)}, прочее {len(prochee)}, "
-        f"сущностей-кросс {len(page['entity_index'])} → out_facet/{geo}.json remaining=0",
+        f"сущностей-кросс {len(page['entity_index'])} → out_facet/{geo}.json remaining=0"
+        + (
+            f"\n⚠️ НЕУДАЧ: {len(run_fails)} — carve не разобрал "
+            f"{sum(f['flies'] for f in run_fails)} мух ({', '.join(f['family'] for f in run_fails[:3])}). "
+            f"Гео собрано ОТКАТОМ, нужен перепрогон."
+            if run_fails
+            else ""
+        ),
         flush=True,
     )
     return new_n
@@ -451,10 +508,13 @@ def run_assign_tail(geo):
         for it in v["items"]
     }
     tail = [fid for fid in by_id if fid not in on_page]
-    shelves, prochee = assign_tail(tail, by_id)
+    run_fails = []  # сбои раскладки этого прогона → в файл гео, в отчёт
+    shelves, prochee = assign_tail(tail, by_id, run_fails)
     page["shelves"] = [{"shelf": sh, "items": its} for sh, its in shelves.items()]
     page["prochee"] = prochee
     page["taxonomy_version"] = tax.VERSION
+    if run_fails:
+        page["fails"] = (page.get("fails") or []) + run_fails
     _atomic_json(out_fn, page)
     print(
         f"{geo}: хвост {len(tail)} → полок {len(shelves)} "
