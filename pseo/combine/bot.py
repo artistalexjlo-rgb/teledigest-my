@@ -241,6 +241,26 @@ def brain_stats():
 
 LANGS = ["en", "es", "pt", "de", "fr", "it", "zh", "ja", "ko", "ar", "hi", "th", "tr"]
 
+# Широкие рубрики-категории экстрактора (исходные метки мух). facet-фолбэк при сбое carve
+# называет вид ЭТИМИ рубриками вместо конкретных подпунктов — по ним и распознаём откат в
+# СТАРЫХ данных (без метки fails). Список — эвристика: промах = гео не подсветится, не беда
+# (новый facet запишет fails и подсветит точно). Не жёсткая логика, а подсказка для ремонта.
+_RUBRICS = {
+    "Документы и виза",
+    "Транспорт",
+    "Жильё",
+    "Банк и деньги",
+    "Здоровье",
+    "Обмен и переводы",
+    "Билеты и развлечения",
+    "Безопасность",
+    "Покупки",
+    "SIM и интернет",
+    "Работа и налоги",
+    "Связь и интернет",
+    "Еда и рестораны",
+}
+
 
 def pipeline_state():
     """ЧТО СЕЙЧАС ПРОСРОЧЕНО — считается из данных, не из моей памяти.
@@ -288,6 +308,23 @@ def pipeline_state():
                         ),
                     }
                 )
+            elif vs:
+                # СТАРЫЕ ДАННЫЕ без метки fails (собраны до записи сбоев): распознаём откат
+                # ЭВРИСТИКОЙ. Признак — имена видов = ОБЩИЕ РУБРИКИ (facet-фолбэк называет
+                # вид первой задачей мухи; carve дал бы конкретный подпункт). ≥60% рубричных
+                # = carve откатился, гео простыня-ком. Порог разделяет: сломанные 77-100%,
+                # целые ~3% (факт 07-23). Как только гео пройдёт новый facet — метка fails
+                # заменит эвристику.
+                rub = sum(1 for v in vs if v.get("zadacha") in _RUBRICS)
+                if rub / len(vs) >= 0.6:
+                    st["failed"].append(
+                        {
+                            "geo": geo,
+                            "n": rub,
+                            "flies": sum(len(v.get("items") or []) for v in vs),
+                            "what": f"откат carve ({rub}/{len(vs)} видов = рубрики)",
+                        }
+                    )
         for lang in LANGS:
             d = f"{BRAIN}/out_facet_{lang}"
             have = glob.glob(f"{d}/*.json")
@@ -636,18 +673,29 @@ def send_menu(job):
         rows.append(
             [{"text": "▶️ ПОЛНЫЙ ЦИКЛ по порядку", "callback_data": "run:cycle"}]
         )
-    # ПЕРЕПРОГОН сломанных гео — отдельной строкой СВЕРХУ, с уже подставленным гео:
-    # новую кнопку не плодим (юзер: «зачем плодить»), это тот же facet, просто пульт
-    # сам знает, какое гео чинить, и жать не глядя в файлы.
-    for x in s["failed"][:5]:
+    # ПЕРЕПРОГОН сломанных гео. Это тот же facet — новую кнопку-тип не плодим (юзер:
+    # «зачем плодить»), пульт сам знает список и жмёт за тебя. Одна кнопка «починить всё»
+    # гонит цепочкой (как assign по гео без полок), плюс по гео — для точечного.
+    if s["failed"]:
+        geos = [x["geo"] for x in s["failed"]]
         rows.append(
             [
                 {
-                    "text": f"🔧 перепрогнать {x['geo']} ({x['flies']} мух не разобрано)",
-                    "callback_data": f"run:facet:{x['geo']}",
+                    "text": f"🔧 починить ВСЕ сломанные ({len(geos)}): {', '.join(geos[:6])}"
+                    + ("…" if len(geos) > 6 else ""),
+                    "callback_data": "run:facet:all",
                 }
             ]
         )
+        for x in s["failed"][:8]:
+            rows.append(
+                [
+                    {
+                        "text": f"   └ {x['geo']} ({x['flies']} мух)",
+                        "callback_data": f"run:facet:{x['geo']}",
+                    }
+                ]
+            )
     for kind in ("facet", "assign", "kratko", "translate"):
         mark = "➡️ " if todo and kind == todo[0] else ""
         rows.append([{"text": mark + labels[kind], "callback_data": f"run:{kind}"}])
@@ -719,7 +767,17 @@ def main():
                     start_cycle(job)
                 elif data.startswith("run:"):
                     _, kind, geo = (data + ":").split(":")[:3]
-                    if kind == "facet" and not geo:
+                    if (
+                        kind == "facet" and geo == "all"
+                    ):  # починить ВСЕ сломанные цепочкой
+                        s = pipeline_state()
+                        geos = [x["geo"] for x in s["failed"]]
+                        if not geos:
+                            say("сломанных гео нет — чинить нечего.")
+                        else:
+                            job.chain = [("facet", g) for g in geos[1:]]
+                            job.start("facet", geos[0], _chain=True)
+                    elif kind == "facet" and not geo:
                         say("facet нужен гео: пришли текстом `facet br`")
                     elif kind == "assign" and not geo:
                         s = pipeline_state()  # без гео — разложить все, где полок нет
