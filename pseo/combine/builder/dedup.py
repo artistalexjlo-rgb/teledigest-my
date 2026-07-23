@@ -181,6 +181,73 @@ def _stopped():
     return _STOP or os.path.exists("RUNNER_STOP")
 
 
+# ── ВЕТВЛЕНИЕ ПОЛОК (штатный шаг комбайна, канон юзера 2026-07-21: полка-гигант — это
+# не гармошка на 400 пунктов, а ХАБ с ветками-страницами; делает конвейер, не руки).
+BRANCH_MIN = 90  # полка > стольких групп → ветвим (иначе обычная полка-страница)
+BRANCH_BATCH = 90  # реп-текстов в запрос (окно соска)
+
+BRANCH_SYS = (
+    "Ниже советы ОДНОЙ широкой полки гайда (id: текст). Разбей их на 4-9 ПОД-ТЕМ — "
+    "каждая станет отдельной страницей. Правила: под-тема = конкретная задача/объект "
+    "(«Такси и Uber», «Аэропорт GRU: трансферы»), НЕ тип совета; похожие советы — в одну "
+    "под-тему; каждый совет РОВНО в одной; охвати ВСЕ; названия короткие, из содержимого.\n"
+    'СТРОГО JSON: {"subs":[{"name":"<название>","ids":["0",...]}]}'
+)
+BRANCH_MERGE_SYS = (
+    "Ниже названия под-тем одной полки, полученные кусками — среди них есть дубли одной "
+    "и той же темы разными словами. Сведи к 4-9 КАНОНИЧЕСКИМ под-темам: каждому входному "
+    "названию — ровно одно каноническое (можно совпадающее с входным). Не выдумывай новых тем.\n"
+    'СТРОГО JSON: {"map":{"<входное>":"<каноническое>",...}}'
+)
+
+
+def branch_shelf(shelf):
+    """Полка-гигант → subshelves: [{name, reps}]. Двухпроходно: батч-carve по текстам
+    репрезентантов → слияние имён батчей в канонические (1 вызов). Сбой → None (полка
+    остаётся как есть, не блокер). Непокрытые репы → без ветки (останутся на хабе)."""
+    from keybroker import call
+
+    by_id = {it["id"]: it for it in shelf["items"]}
+    reps = [g["rep"] for g in shelf["groups"]]
+    raw = {}  # имя-из-батча → [rep...]
+    for s in range(0, len(reps), BRANCH_BATCH):
+        chunk = reps[s : s + BRANCH_BATCH]
+        idx = {str(j): by_id[r]["text"] for j, r in enumerate(chunk)}
+        out = call(json.dumps(idx, ensure_ascii=False), BRANCH_SYS, consumer="carve")
+        for sub in (out or {}).get("subs") or []:
+            name = (sub.get("name") or "").strip()
+            ids = [
+                chunk[int(i)]
+                for i in (sub.get("ids") or [])
+                if isinstance(i, str) and i.isdigit() and int(i) < len(chunk)
+            ]
+            if name and ids:
+                raw.setdefault(name, []).extend(ids)
+    if len(raw) < 2:
+        return None
+    mp = {n: n for n in raw}
+    if len(raw) > 9:  # батчи наплодили дубли имён → слить в канонические
+        out = call(
+            json.dumps(sorted(raw), ensure_ascii=False),
+            BRANCH_MERGE_SYS,
+            consumer="carve",
+        )
+        for k, v in ((out or {}).get("map") or {}).items():
+            if k in raw and v and v.strip():
+                mp[k] = v.strip()
+    merged = {}
+    for name, ids in raw.items():
+        merged.setdefault(mp[name], []).extend(ids)
+    seen = set()
+    subs = []
+    for name, ids in sorted(merged.items(), key=lambda x: -len(x[1])):
+        uniq = [i for i in ids if i not in seen]
+        seen.update(uniq)
+        if len(uniq) >= 4:  # ветка-страница от 4 пунктов (гейт как у страниц)
+            subs.append({"name": name, "reps": uniq})
+    return subs if len(subs) >= 2 else None
+
+
 def run(geo, kratko=False):
     fn = f"{OUT}/{geo}.json"
     d = json.load(open(fn, encoding="utf-8"))
@@ -218,10 +285,16 @@ def run(geo, kratko=False):
                 f"  {geo}: kratko {n_k}/{n_need} ({v.get('zadacha', '')[:40]})",
                 flush=True,
             )
-    n_sdups = 0
+    n_sdups = n_b = 0
     for sv in shelves:  # полкам kratko не даём: антология разнородна, «ответа» нет
         sv["groups"] = group_view(sv, vv)
         n_sdups += len(sv["items"]) - len(sv["groups"])
+        # ветвление полки-гиганта — штатный шаг комбайна (идемпотентно: не пере-жжём)
+        if kratko and len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
+            subs = branch_shelf(sv)
+            if subs:
+                sv["subshelves"] = subs
+                n_b += 1
     _atomic_json(fn, d)
     print(
         f"{geo}: видов {len(views)}, групп {n_groups}, схлопнуто дублей {n_dups}"

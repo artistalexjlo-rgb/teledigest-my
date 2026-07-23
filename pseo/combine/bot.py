@@ -35,6 +35,8 @@ REPORT_EVERY = int(os.environ.get("COMBINE_REPORT_EVERY", "50"))  # попыто
 # сколько ждём вежливого выхода рта после стоп-флага (один вызов к Gemini + запись;
 # у lang_runner шаг крупнее — гео×язык, потому не секунды)
 GRACE_S = int(os.environ.get("COMBINE_GRACE_S", "180"))
+# сколько раз перепробовать ФАЗУ при неудаче внутри шага, прежде чем звать юзера
+MAX_PHASE_TRIES = int(os.environ.get("COMBINE_PHASE_TRIES", "3"))
 LIVE_EVERY = int(
     os.environ.get("COMBINE_LIVE_EVERY", "25")
 )  # сек между правками живой строки
@@ -249,7 +251,14 @@ def pipeline_state():
     """
     import glob
 
-    st = {"geos": 0, "views": 0, "no_kratko": 0, "no_shelf": [], "langs": []}
+    st = {
+        "geos": 0,
+        "views": 0,
+        "no_kratko": 0,
+        "no_shelf": [],
+        "langs": [],
+        "failed": [],
+    }
     try:
         files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
         st["geos"] = len(files)
@@ -265,6 +274,20 @@ def pipeline_state():
             st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
             if not (d.get("shelves") or []):
                 st["no_shelf"].append(geo)
+            # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
+            # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
+            # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
+            if d.get("fails"):
+                st["failed"].append(
+                    {
+                        "geo": geo,
+                        "n": len(d["fails"]),
+                        "flies": sum(f.get("flies", 0) for f in d["fails"]),
+                        "what": ", ".join(
+                            str(f.get("family") or "?") for f in d["fails"][:3]
+                        ),
+                    }
+                )
         for lang in LANGS:
             d = f"{BRAIN}/out_facet_{lang}"
             have = glob.glob(f"{d}/*.json")
@@ -289,6 +312,16 @@ def state_card():
         return f"⚠️ не смог прочитать данные: {s['error']}", None
     lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц-видов"]
     todo = []
+    # НЕУДАЧИ — ПЕРВЫМИ: это не «недоделка», а БРАК. Гео собрано откатом (carve не
+    # разобрал), тематической нарезки в нём нет. Чинить раньше остальных шагов —
+    # иначе kratko/переводы лягут поверх непорезанного кома.
+    if s["failed"]:
+        worst = ", ".join(f"{x['geo']}({x['flies']} мух)" for x in s["failed"][:5])
+        lines.append(
+            f"⚠️ НЕУДАЧИ прошлых прогонов: {len(s['failed'])} гео — {worst}\n"
+            f"   carve не разобрал → собрано откатом, нужен перепрогон"
+        )
+        todo.append("failed")
     if s["no_shelf"]:
         lines.append(f"1) хвост не разложен по полкам: {len(s['no_shelf'])} гео")
         todo.append("assign")
@@ -311,6 +344,7 @@ def state_card():
         "\n➡️ СЕЙЧАС НАДО: "
         + (
             {
+                "failed": f"перепрогнать сломанные гео: {', '.join(x['geo'] for x in s['failed'][:5])}",
                 "assign": "разложить хвост (assign)",
                 "kratko": "дожать kratko",
                 "translate": "гнать переводы",
@@ -332,6 +366,7 @@ class Job:
     def __init__(self):
         self.proc = None
         self.kind = None
+        self.geo = None
         self.t0 = 0.0
         self.base_attempts = 0
         self.last_report_at = 0
@@ -339,6 +374,7 @@ class Job:
         self.live_msg = None  # id сообщения с живым прогрессом (правим его же)
         self.lock = threading.Lock()
         self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
+        self.tries = {}  # (шаг, гео) → сколько раз уже пробовали в этой фазе цикла
 
     def busy(self):
         return self.proc is not None and self.proc.poll() is None
@@ -361,7 +397,7 @@ class Job:
             )
             j.commit()
             j.close()
-            self.kind, self.t0 = kind, time.time()
+            self.kind, self.geo, self.t0 = kind, geo, time.time()
             self.base_attempts = brain_stats()[0]
             self.last_report_at = 0
             self.tail = ""
@@ -397,7 +433,10 @@ class Job:
         rc = self.proc.wait()
         spent = brain_stats()[0] - self.base_attempts
         mins = (time.time() - self.t0) / 60
-        icon = "✅" if rc == 0 else "💀"
+        # ЗНАЧОК ПО СУТИ, А НЕ ПО КОДУ ВЫХОДА: процесс с откатом внутри выходит с кодом 0
+        # («сделал что мог»), и зелёная галочка врала бы — брак виден только в тексте.
+        # Есть «НЕУДАЧ» в выводе → ⚠️, чтобы в ленте цикла брак было видно значком.
+        icon = "💀" if rc != 0 else ("⚠️" if "НЕУДАЧ" in (self.tail or "") else "✅")
         j = jobs_conn()
         j.execute(
             "UPDATE jobs SET status=?, note=? WHERE id=(SELECT MAX(id) FROM jobs)",
@@ -410,6 +449,56 @@ class Job:
             f"последнее: {self.tail[-300:] or '—'}\n"
             f"лог: {self.logpath}"
         )
+        # ⚠️ НЕУДАЧА ВНУТРИ ШАГА (carve не разобрал → гео собрано откатом). Процесс вышел
+        # с кодом 0 — по коду не отличить. Смотрим вывод: провал транзиентный (модель не
+        # ответила), поэтому ПЕРЕПРОБУЕМ ЭТУ ЖЕ ФАЗУ, до MAX_PHASE_TRIES. Не рвём цикл на
+        # случайности (юзер: «глупо рвать»), но и не наслаиваем kratko/переводы на брак.
+        stopped = any(os.path.exists(f) for f in STOP_FLAGS)
+        if "НЕУДАЧ" in (self.tail or "") and not stopped:
+            key = (self.kind, self.geo)
+            self.tries[key] = self.tries.get(key, 1) + 1
+            if self.tries[key] <= MAX_PHASE_TRIES:
+                say(
+                    f"⚠️ {self.kind}"
+                    + (f" ({self.geo})" if self.geo else "")
+                    + f": неудача внутри шага — попытка {self.tries[key]}/{MAX_PHASE_TRIES}\n"
+                    f"{self.tail[-200:]}"
+                )
+                self.start(self.kind, self.geo, _chain=bool(self.chain))
+                return
+            # три раза подряд — это не случайность. СТОП-МАШИНА с разбором.
+            n = len(self.chain)
+            self.chain = []
+            card, _ = state_card()
+            tg(
+                "sendMessage",
+                chat_id=CHAT,
+                text=(
+                    f"🛑 СТОП: {self.kind}"
+                    + (f" ({self.geo})" if self.geo else "")
+                    + f" не прошёл {MAX_PHASE_TRIES} раза подряд.\n\n"
+                    f"ЧТО СЛУЧИЛОСЬ: {self.tail[-250:]}\n\n"
+                    f"ЦИКЛ ОСТАНОВЛЕН (пропущено шагов: {n}) — дальше не идём, чтобы не "
+                    f"класть короткие ответы и переводы поверх неразобранного.\n\n"
+                    f"ЧТО ДЕЛАТЬ: посмотреть лог {self.logpath}; если модель молчит — "
+                    f"подождать и нажать ремонт вручную; если стабильно — смотреть данные гео.\n\n"
+                    f"{card}"
+                ),
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": f"🔧 повторить {self.kind}"
+                                + (f" {self.geo}" if self.geo else ""),
+                                "callback_data": f"run:{self.kind}"
+                                + (f":{self.geo}" if self.geo else ""),
+                            }
+                        ],
+                        [{"text": "☰ меню", "callback_data": "menu"}],
+                    ]
+                },
+            )
+            return
         # цепочка полного цикла: следующий шаг только если предыдущий вышел чисто
         # и стоп не нажат (нажатый стоп = юзер сказал «хватит», цепочка рвётся)
         if self.chain and rc == 0 and not any(os.path.exists(f) for f in STOP_FLAGS):
@@ -546,6 +635,18 @@ def send_menu(job):
     if todo:
         rows.append(
             [{"text": "▶️ ПОЛНЫЙ ЦИКЛ по порядку", "callback_data": "run:cycle"}]
+        )
+    # ПЕРЕПРОГОН сломанных гео — отдельной строкой СВЕРХУ, с уже подставленным гео:
+    # новую кнопку не плодим (юзер: «зачем плодить»), это тот же facet, просто пульт
+    # сам знает, какое гео чинить, и жать не глядя в файлы.
+    for x in s["failed"][:5]:
+        rows.append(
+            [
+                {
+                    "text": f"🔧 перепрогнать {x['geo']} ({x['flies']} мух не разобрано)",
+                    "callback_data": f"run:facet:{x['geo']}",
+                }
+            ]
         )
     for kind in ("facet", "assign", "kratko", "translate"):
         mark = "➡️ " if todo and kind == todo[0] else ""
