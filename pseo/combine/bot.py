@@ -553,9 +553,21 @@ class Job:
         card, todo = state_card()
         if todo:
             nxt = todo[0]
-            rows = [
-                [{"text": f"➡️ дальше: {MENU[nxt][0]}", "callback_data": f"run:{nxt}"}]
-            ]
+            # 'failed' — не рот из MENU, а брак прошлых прогонов: следующий шаг это
+            # «починить ВСЕ сломанные» (та же кнопка, что в меню), НЕ MENU['failed'].
+            if nxt == "failed":
+                s = pipeline_state()
+                geos = [x["geo"] for x in s["failed"]]
+                nxt_row = {
+                    "text": f"➡️ дальше: 🔧 починить сломанные ({len(geos)})",
+                    "callback_data": "run:facet:all",
+                }
+            else:
+                nxt_row = {
+                    "text": f"➡️ дальше: {MENU[nxt][0]}",
+                    "callback_data": f"run:{nxt}",
+                }
+            rows = [[nxt_row]]
             rows.append([{"text": "☰ меню", "callback_data": "menu"}])
             tg(
                 "sendMessage",
