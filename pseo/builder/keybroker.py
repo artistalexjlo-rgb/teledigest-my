@@ -165,6 +165,40 @@ def _log_event(consumer, model, event, status=0):
 
 
 _BODY_LOG = os.path.join(os.path.dirname(DB) or ".", "error_bodies.log")
+_HDR_LOG = os.path.join(os.path.dirname(DB) or ".", "ratelimit_headers.log")
+_HDR_SEEN = [0]  # первые N ответов логируем ВСЕ имена заголовков (разведка)
+
+
+def _log_hdrs(consumer, model, status, hdrs):
+    """РАЗВЕДКА: шлёт ли Google остаток квоты в заголовках ответа (доку это НЕ подтверждает,
+    но многие API шлют недокументированно). Пишем квота-подобные заголовки; первые 3 ответа —
+    ВСЕ имена, чтобы увидеть, что вообще есть. Пассивно, лишней квоты не жжёт."""
+    try:
+        items = list(hdrs.items())
+        quota = {
+            k: v
+            for k, v in items
+            if any(
+                t in k.lower()
+                for t in ("ratelimit", "quota", "remaining", "reset", "x-goog")
+            )
+        }
+        extra = ""
+        if _HDR_SEEN[0] < 3:
+            _HDR_SEEN[0] += 1
+            extra = " | ВСЕ=" + ",".join(k for k, _ in items)
+        line = "%.0f\t%s\t%s\t%s\tquota=%s%s\n" % (
+            time.time(),
+            status,
+            consumer,
+            model,
+            json.dumps(quota, ensure_ascii=False),
+            extra,
+        )
+        with open(_HDR_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def _log_body(consumer, model, status, body):
@@ -588,13 +622,15 @@ def call(
         req = urllib.request.Request(
             url, data=data, headers={"Content-Type": "application/json"}
         )
-        body, status, err = None, 0, ""
+        body, status, err, hdrs = None, 0, "", None
         try:
             r = urllib.request.urlopen(req, timeout=timeout)
             body = r.read()
             status = 200
+            hdrs = r.headers  # РАЗВЕДКА квота-заголовков (см. _log_hdrs)
         except urllib.error.HTTPError as e:
             status = e.code
+            hdrs = e.headers
             try:
                 err = e.read().decode("utf-8", "replace")[:800]
             except Exception:
@@ -608,6 +644,8 @@ def call(
             err = str(e)[:120]
         finally:
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
+        if hdrs is not None:  # шлёт ли Google остаток RPD в заголовках — узнаём фактом
+            _log_hdrs(consumer, model, status, hdrs)
 
         if status != 200:
             # СЕТЬ: pid+ключ на каждом отказе — два разных pid = нахлёст процессов
@@ -620,7 +658,12 @@ def call(
             try:
                 api = json.loads(body)
                 raw = api["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(re.sub(r"```json|```", "", raw).strip())
+                # LLM РЕГУЛЯРНО лепит хвост после объекта (второй JSON, пояснение) →
+                # строгий json.loads падает 'Extra data'. Берём ПЕРВЫЙ валидный объект
+                # через raw_decode, хвост игнорируем (факт 07-24: Extra data ронял carve).
+                parsed, _ = json.JSONDecoder().raw_decode(
+                    re.sub(r"```json|```", "", raw).strip()
+                )
                 # КОНТРАКТ: все рты просят JSON-ОБЪЕКТ. Модель иногда отдаёт массив
                 # `[...]` — валидный JSON, но не dict → у потребителя `.items()` = краш
                 # (факт 07-22: 'list' object has no attribute 'items' рушил перевод гео).
