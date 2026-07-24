@@ -278,6 +278,7 @@ def pipeline_state():
         "no_shelf": [],
         "langs": [],
         "failed": [],
+        "pending_facet": [],  # гео с новыми (непротегованными) мухами → ждут facet
     }
     try:
         files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
@@ -325,6 +326,51 @@ def pipeline_state():
                             "what": f"откат carve ({rub}/{len(vs)} видов = рубрики)",
                         }
                     )
+        # НОВЫЕ МУХИ, ждущие разметки: extracted_patterns минус теги/дед-леттер. Считаем
+        # тем же источником и фильтром, что facet.load_flies (импорт facet, НЕ дублируем
+        # DB/MIN_LEN/is_junk — иначе дрейф). Теги читаем по абсолютному пути (facet пишет их
+        # в {BRAIN}/tags при cwd=BRAIN), поэтому cwd пульта роли не играет.
+        try:  # СВОЙ try: сбой чтения базы мух НЕ должен глушить всю карточку
+            import sys as _sys
+
+            if BUILDER not in _sys.path:
+                _sys.path.insert(0, BUILDER)
+            import facet as _facet
+
+            m = sqlite3.connect(f"file:{_facet.DB}?mode=ro", uri=True, timeout=30)
+            rows = m.execute(
+                "SELECT country, id, ai_lesson FROM extracted_patterns "
+                "WHERE country IS NOT NULL AND ai_lesson IS NOT NULL "
+                "AND length(ai_lesson)>?",
+                (_facet.MIN_LEN,),
+            ).fetchall()
+            m.close()
+            by_geo = {}
+            for country, fid, lesson in rows:
+                if not _facet.is_junk(lesson):
+                    by_geo.setdefault(country, []).append(fid)
+            for geo, fids in by_geo.items():
+                done = set()
+                tf = f"{BRAIN}/tags/{geo}.json"
+                if os.path.exists(tf):
+                    try:
+                        done = {r["id"] for r in json.load(open(tf, encoding="utf-8"))}
+                    except Exception:
+                        pass
+                dead = set()  # дед-леттер: непереваримые мухи (facet бросил >=3 раз)
+                try:
+                    with open(f"{BRAIN}/tags/{geo}_fails.json", encoding="utf-8") as fh:
+                        fl = json.load(fh)
+                    dead = {int(k) for k, c in fl.items() if c >= 3}
+                except Exception:
+                    pass
+                n = sum(1 for fid in fids if fid not in done and fid not in dead)
+                if n:
+                    st["pending_facet"].append({"geo": geo, "n": n})
+            st["pending_facet"].sort(key=lambda x: -x["n"])
+        except Exception as e:
+            st["pending_facet_err"] = f"{type(e).__name__}: {e}"
+
         for lang in LANGS:
             d = f"{BRAIN}/out_facet_{lang}"
             have = glob.glob(f"{d}/*.json")
@@ -349,7 +395,17 @@ def state_card():
         return f"⚠️ не смог прочитать данные: {s['error']}", None
     lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц-видов"]
     todo = []
-    # НЕУДАЧИ — ПЕРВЫМИ: это не «недоделка», а БРАК. Гео собрано откатом (carve не
+    # 0) НОВЫЕ МУХИ → facet ПЕРВЫМ: разметка — начало тракта. Пока в базе есть
+    # непротегованные мухи, kratko/переводы рано (соберутся без них). Пульт теперь
+    # ВИДИТ их из базы, а не по мёртвой подписи кнопки.
+    if s["pending_facet"]:
+        tot = sum(x["n"] for x in s["pending_facet"])
+        worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["pending_facet"][:6])
+        lines.append(
+            f"0) новые мухи ждут разметки: {len(s['pending_facet'])} гео, {tot} мух — {worst}"
+        )
+        todo.append("facet")
+    # НЕУДАЧИ — это не «недоделка», а БРАК. Гео собрано откатом (carve не
     # разобрал), тематической нарезки в нём нет. Чинить раньше остальных шагов —
     # иначе kratko/переводы лягут поверх непорезанного кома.
     if s["failed"]:
@@ -381,6 +437,7 @@ def state_card():
         "\n➡️ СЕЙЧАС НАДО: "
         + (
             {
+                "facet": f"разметить новые мухи: {', '.join(x['geo'] for x in s['pending_facet'][:5])}",
                 "failed": f"перепрогнать сломанные гео: {', '.join(x['geo'] for x in s['failed'][:5])}",
                 "assign": "разложить хвост (assign)",
                 "kratko": "дожать kratko",
@@ -678,7 +735,12 @@ def send_menu(job):
         "assign": f"1. Хвост→полки ({len(s['no_shelf'])} гео)",
         "kratko": f"2. Kratko ({s['no_kratko']} видов)",
         "translate": f"3. Переводы ({len(s['langs'])} языков)",
-        "facet": "0. Facet+carve <гео> (новые мухи)",
+        "facet": (
+            f"0. Facet: {len(s['pending_facet'])} гео, "
+            f"{sum(x['n'] for x in s['pending_facet'])} новых мух"
+            if s["pending_facet"]
+            else "0. Facet+carve <гео> (новых мух нет)"
+        ),
     }
     rows = []
     if todo:
@@ -704,6 +766,28 @@ def send_menu(job):
                 [
                     {
                         "text": f"   └ {x['geo']} ({x['flies']} мух)",
+                        "callback_data": f"run:facet:{x['geo']}",
+                    }
+                ]
+            )
+    # НОВЫЕ МУХИ → facet по гео. Тот же паттерн, что «починить сломанные»: одна кнопка
+    # «разметить ВСЕ новые» цепочкой + по гео для точечного. Пульт сам знает список.
+    if s["pending_facet"]:
+        pg = [x["geo"] for x in s["pending_facet"]]
+        rows.append(
+            [
+                {
+                    "text": f"🆕 разметить ВСЕ новые ({len(pg)}): {', '.join(pg[:6])}"
+                    + ("…" if len(pg) > 6 else ""),
+                    "callback_data": "run:facet:new",
+                }
+            ]
+        )
+        for x in s["pending_facet"][:8]:
+            rows.append(
+                [
+                    {
+                        "text": f"   └ {x['geo']} ({x['n']} новых мух)",
                         "callback_data": f"run:facet:{x['geo']}",
                     }
                 ]
@@ -758,6 +842,12 @@ def main():
     threading.Thread(target=job.reporter, daemon=True).start()
     threading.Thread(target=ban_watch, daemon=True).start()  # сигнал о банах ключей
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
+    # АВТОНОМНО: при старте сразу показываем реальное состояние тракта + кнопки, чтобы
+    # не держать его в голове и не жать /combine вручную (заказ юзера 07-24).
+    try:
+        send_menu(job)
+    except Exception as e:
+        log("стартовое меню не отправилось:", type(e).__name__, e)
     offset = 0
     while True:
         r = tg("getUpdates", offset=offset, timeout=30)
@@ -786,6 +876,14 @@ def main():
                         geos = [x["geo"] for x in s["failed"]]
                         if not geos:
                             say("сломанных гео нет — чинить нечего.")
+                        else:
+                            job.chain = [("facet", g) for g in geos[1:]]
+                            job.start("facet", geos[0], _chain=True)
+                    elif kind == "facet" and geo == "new":  # разметить ВСЕ новые мухи
+                        s = pipeline_state()
+                        geos = [x["geo"] for x in s["pending_facet"]]
+                        if not geos:
+                            say("новых мух нет — размечать нечего.")
                         else:
                             job.chain = [("facet", g) for g in geos[1:]]
                             job.start("facet", geos[0], _chain=True)
