@@ -179,6 +179,32 @@ def _log_event(consumer, model, event, status=0):
 _BODY_LOG = os.path.join(os.path.dirname(DB) or ".", "error_bodies.log")
 _HDR_LOG = os.path.join(os.path.dirname(DB) or ".", "ratelimit_headers.log")
 _HDR_SEEN = [0]  # первые N ответов логируем ВСЕ имена заголовков (разведка)
+_TRACE = os.path.join(os.path.dirname(DB) or ".", "grant_trace.tsv")
+_TRACE_CTX = (
+    {}
+)  # контекст последнего гранта (acquire кладёт, call пишет строку с исходом)
+
+
+def _trace_row(status):
+    """ТУПЕЙШАЯ ТРАССА (по строке на запрос): сек | №ключа | 429 | alive | step | rpd_ключа.
+    Контекст (всё кроме 429) кладёт acquire на гранте; исход 429 знает call после HTTP.
+    """
+    try:
+        d = _TRACE_CTX
+        if not d:
+            return
+        row = [
+            round(d.get("t", 0.0), 1),
+            d.get("keyno", "?"),
+            1 if status == 429 else 0,
+            d.get("alive", "?"),
+            d.get("step", 0.0),
+            d.get("rpd", "?"),
+        ]
+        with open(_TRACE, "a", encoding="utf-8") as f:
+            f.write("\t".join(str(x) for x in row) + "\n")
+    except Exception:
+        pass
 
 
 def _log_hdrs(consumer, model, status, hdrs):
@@ -443,6 +469,16 @@ def acquire(consumer, role, model, keys):
             c.execute("ROLLBACK")
             return (None, -1.0)  # все на капе/бане/в кулдауне
         key, kh = elig[0]  # порядок списка ключей = порядок круга
+        _TRACE_CTX.clear()  # ТРАССА: контекст гранта (429 допишет call после HTTP)
+        _TRACE_CTX.update(
+            {
+                "t": now,
+                "keyno": keys.index(key),
+                "alive": alive,
+                "step": step,
+                "rpd": used.get(kh, (0, 0))[0],
+            }
+        )
         c.execute(
             "INSERT INTO key_clock(key_hash, served_round) VALUES(?,?) "
             "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
@@ -675,6 +711,7 @@ def call(
             err = str(e)[:120]
         finally:
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
+        _trace_row(status)  # ТРАССА: строка на запрос (контекст гранта + исход 429)
         if hdrs is not None:  # шлёт ли Google остаток RPD в заголовках — узнаём фактом
             _log_hdrs(consumer, model, status, hdrs)
 
