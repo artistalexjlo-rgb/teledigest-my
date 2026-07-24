@@ -84,7 +84,19 @@ COOLDOWN_LADDER = (60.0, 300.0, 1800.0, 6000.0)
 # в общей SQLite — один на все процессы.
 GRANT_STEP = float(
     os.environ.get("KB_GRANT_STEP", "5")
-)  # 5с между выдачами — контрольный тест 1 ключ (юзер 07-24)
+)  # легаси-дефолт; такт теперь ДИНАМИЧЕСКИЙ (см. _dyn_grant_step)
+# ДИНАМИЧЕСКИЙ ТАКТ (юзер 07-24): меньше ЖИВЫХ ключей → больше такт, чтобы темп НА КЛЮЧ
+# держался безопасным. Round-robin: интервал/ключ = живых×такт. clamp((MAX+1)−живых/2, MIN, MAX):
+# 1→5, 2→5, 4→4, 6→3, 8→2, 10→1, 12→1 (кламп). RPM/ключ 3-12, с запасом под 15.
+GRANT_MAX = float(os.environ.get("KB_GRANT_MAX", "5"))  # верх такта
+GRANT_MIN = float(os.environ.get("KB_GRANT_MIN", "1"))  # низ такта
+
+
+def _dyn_grant_step(alive):
+    alive = max(1, alive)
+    return max(GRANT_MIN, min(GRANT_MAX, (GRANT_MAX + 1.0) - alive / 2.0))
+
+
 # ПАУЗА НА ЗАКРЫТИИ КРУГА — эталон extraction._INTER_MODEL_SLEEP_S: прошли все ключи →
 # ждём перед новым оборотом. Единственный тормоз темпа; пауз внутри круга нет.
 ROUND_PAUSE = float(os.environ.get("KB_ROUND_PAUSE", "0"))  # 60с были из экстрактора
@@ -353,14 +365,8 @@ def acquire(consumer, role, model, keys):
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
-        # ОЧЕРЕДЬ ПУЛА: такт на выдачу — с последней выдачи прошло < GRANT_STEP → ждать.
-        brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
-        if brow and now - (brow[0] or 0) < GRANT_STEP:
-            c.execute("ROLLBACK")
-            return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
-        # Капы ртов СНЯТЫ (юзер 2026-07-21: «убрать капы и измерить реальные запросы»).
-        # Учёт consumer_usage ЖИВ — по нему меряем реальный расход каждого рта; единственный
-        # enforce-забор = per-ключ RPD + такт очереди. Таблица consumer_cap осталась заделом.
+        # Капы ртов СНЯТЫ (юзер 2026-07-21). Состояние ключей грузим ДО такт-проверки:
+        # такт теперь ДИНАМИЧЕСКИЙ от числа ЖИВЫХ ключей (не бан/кап/кулдаун).
         clocks = {
             r[0]: (r[1], r[2])
             for r in c.execute(
@@ -378,6 +384,19 @@ def acquire(consumer, role, model, keys):
                 (model, day),
             )
         }
+        alive = 0  # ключи, годные СЕГОДНЯ (не бан/кап/кулдаун) — от них зависит такт
+        for k in keys:
+            kh = _kh(k)
+            _, cd = clocks.get(kh, (0.0, 0.0))
+            cnt, ban = used.get(kh, (0, 0))
+            if not (ban or cnt >= cap or cd > now):
+                alive += 1
+        step = _dyn_grant_step(alive)
+        # ОЧЕРЕДЬ ПУЛА: такт на выдачу (ДИНАМИЧЕСКИЙ) — с последней выдачи < step → ждать.
+        brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
+        if brow and now - (brow[0] or 0) < step:
+            c.execute("ROLLBACK")
+            return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
         # ⭐ КРУГ (эталон extraction.py:182 «одна модель — по всем ключам — потом дальше»):
         # ключ отдаётся РОВНО ОДИН РАЗ за оборот, в порядке списка. Отработал — ждёт,
         # пока оборот не закроется, сколько бы быстро он ни освободился.
@@ -429,12 +448,10 @@ def acquire(consumer, role, model, keys):
             "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
             (kh, rnd),
         )
-        c.execute(
-            "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "
-            "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET count=count+1",
-            (kh, model, day),
-        )
-        c.execute(  # per-РОТ счёт дня — рядом с per-ключ usage, в той же транзакции
+        # usage.count НЕ инкрементим тут: RPD считается по УСПЕХУ (status 200) в report(),
+        # а не по гранту. Грант с 429 в дневную квоту Google НЕ идёт (не обслужили) —
+        # считать его в кап значило завышать RPD (факт 07-24: наш 440 vs Google 249).
+        c.execute(  # per-РОТ счёт дня — по грантам (это НЕ RPD-кап, а расход рта)
             "INSERT INTO consumer_usage(consumer, pt_day, count) VALUES(?,?,1) "
             "ON CONFLICT(consumer, pt_day) DO UPDATE SET count=count+1",
             (consumer, day),
@@ -512,6 +529,13 @@ def report(consumer, key, model, status):
             c.execute(
                 "UPDATE key_clock SET cooldown_until=0, cd_level=0, struck=0 WHERE key_hash=?",
                 (kh,),
+            )
+            # RPD-СЧЁТ: инкремент ТОЛЬКО на успехе (не на гранте) — совпадает с Google-RPD,
+            # который считает обслуженные запросы, а не отклонённые 429.
+            c.execute(
+                "INSERT INTO usage(key_hash, model, pt_day, count) VALUES(?,?,?,1) "
+                "ON CONFLICT(key_hash, model, pt_day) DO UPDATE SET count=count+1",
+                (kh, model, _pt_day()),
             )
         c.execute("COMMIT")
     finally:
