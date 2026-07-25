@@ -147,6 +147,30 @@ def jobs_conn():
     return c
 
 
+def close_interrupted_jobs():
+    """Рестарт контейнера убивает рот вместе с PID-namespace (пульт = PID 1), но строка
+    в jobs остаётся 'running' навсегда, и юзеру никто не говорит — а канон обещает
+    «финальный отчёт при ЛЮБОМ исходе, молчаливых смертей нет». Закрываем на старте и
+    докладываем. Возвращает список оборванных (kind, ts).
+    """
+    try:
+        c = jobs_conn()
+        rows = c.execute(
+            "SELECT id, kind, ts FROM jobs WHERE status='running' ORDER BY id"
+        ).fetchall()
+        if rows:
+            c.execute(
+                "UPDATE jobs SET status='interrupted', note=? WHERE status='running'",
+                ("оборван рестартом пульта",),
+            )
+            c.commit()
+        c.close()
+        return [(k, ts) for _, k, ts in rows]
+    except Exception as e:
+        log("close_interrupted_jobs сбой:", type(e).__name__, e)
+        return []
+
+
 def kb():
     return sqlite3.connect(f"file:{KB_DB}?mode=ro", uri=True, timeout=30)
 
@@ -461,6 +485,7 @@ class Job:
         self.proc = None
         self.kind = None
         self.geo = None
+        self.job_id = None  # id своей строки в jobs (не MAX(id) — тот уедет в чужую)
         self.t0 = 0.0
         self.base_attempts = 0
         self.last_report_at = 0
@@ -485,10 +510,14 @@ class Job:
                 if os.path.exists(f):
                     os.remove(f)
             j = jobs_conn()
-            j.execute(
+            cur = j.execute(
                 "INSERT INTO jobs(ts,kind,args,status) VALUES(?,?,?,?)",
                 (time.time(), kind, json.dumps(argv), "running"),
             )
+            # ⭐ СВОЯ строка журнала (2026-07-25): раньше исход писали по MAX(id), а к тому
+            # моменту следующий шаг цепочки/ретрая уже вставил СВОЮ — и результат уезжал в
+            # чужую запись. Журнал врал ровно там, где нужен для разбора.
+            self.job_id = cur.lastrowid
             j.commit()
             j.close()
             self.kind, self.geo, self.t0 = kind, geo, time.time()
@@ -509,56 +538,79 @@ class Job:
                 start_new_session=True,
             )
             log(f"ЗАПУСК {kind} pid={self.proc.pid} argv={argv} лог={self.logpath}")
-            threading.Thread(target=self._pump, daemon=True).start()
+            # ⭐ СНИМОК СВОЕЙ ЗАДАЧИ (2026-07-25): _pump работает с ЛОКАЛЬНЫМИ копиями, а не
+            # с self.*. Иначе гонка: рот вышел → busy() уже False → юзер жмёт кнопку →
+            # start() подменяет self.proc/kind/job_id → старый _pump дожидается ЧУЖОГО
+            # процесса и отчитывается за него.
+            threading.Thread(
+                target=self._pump,
+                args=(
+                    self.proc,
+                    self.job_id,
+                    kind,
+                    geo,
+                    self.logpath,
+                    self.base_attempts,
+                ),
+                daemon=True,
+            ).start()
             self.live_msg = say(  # это сообщение будем ПРАВИТЬ живым прогрессом
                 f"▶️ пошёл: {kind}" + (f" ({geo})" if geo else "") + "\nразогрев…",
                 stop_btn=True,
             )
 
-    def _pump(self):
-        with open(self.logpath, "a", encoding="utf-8") as lf:
-            for line in self.proc.stdout:
+    def _pump(self, proc, job_id, kind, geo, logpath, base_attempts):
+        t0 = time.time()
+        with open(logpath, "a", encoding="utf-8") as lf:
+            for line in proc.stdout:
                 lf.write(line)  # полный вывод рта — в файл лога
                 lf.flush()
-                print(f"[{self.kind}] {line}", end="")  # и в docker logs
+                print(f"[{kind}] {line}", end="")  # и в docker logs
                 line = line.strip()
                 if line:
-                    self.tail = line  # последняя строка — в отчёты
-        rc = self.proc.wait()
-        spent = brain_stats()[0] - self.base_attempts
-        mins = (time.time() - self.t0) / 60
+                    self.tail = line  # последняя строка — в отчёты (живая, общая)
+        rc = proc.wait()
+        spent = brain_stats()[0] - base_attempts
+        mins = (time.time() - t0) / 60
         # ЗНАЧОК ПО СУТИ, А НЕ ПО КОДУ ВЫХОДА: процесс с откатом внутри выходит с кодом 0
         # («сделал что мог»), и зелёная галочка врала бы — брак виден только в тексте.
         # Есть «НЕУДАЧ» в выводе → ⚠️, чтобы в ленте цикла брак было видно значком.
         icon = "💀" if rc != 0 else ("⚠️" if "НЕУДАЧ" in (self.tail or "") else "✅")
         j = jobs_conn()
         j.execute(
-            "UPDATE jobs SET status=?, note=? WHERE id=(SELECT MAX(id) FROM jobs)",
-            (f"exit={rc}", self.tail[-300:]),
+            "UPDATE jobs SET status=?, note=? WHERE id=?",
+            (f"exit={rc}", self.tail[-300:], job_id),
         )
         j.commit()
         j.close()
         say(
-            f"{icon} {self.kind}: код {rc}, {mins:.0f} мин, попыток ~{spent}\n"
+            f"{icon} {kind}: код {rc}, {mins:.0f} мин, попыток ~{spent}\n"
             f"последнее: {self.tail[-300:] or '—'}\n"
-            f"лог: {self.logpath}"
+            f"лог: {logpath}"
         )
         # ⚠️ НЕУДАЧА ВНУТРИ ШАГА (carve не разобрал → гео собрано откатом). Процесс вышел
         # с кодом 0 — по коду не отличить. Смотрим вывод: провал транзиентный (модель не
         # ответила), поэтому ПЕРЕПРОБУЕМ ЭТУ ЖЕ ФАЗУ, до MAX_PHASE_TRIES. Не рвём цикл на
         # случайности (юзер: «глупо рвать»), но и не наслаиваем kratko/переводы на брак.
         stopped = any(os.path.exists(f) for f in STOP_FLAGS)
+        if rc == 0 and "НЕУДАЧ" not in (self.tail or ""):
+            # ⭐ УСПЕХ ПРОЩАЕТ (2026-07-25). Счётчик попыток жил до конца жизни пульта:
+            # гео споткнулось дважды утром, вечером прошло, потом споткнулось ОДИН раз —
+            # и сразу «не прошёл 3 раза подряд, цикл остановлен». Считать надо ПОДРЯД
+            # идущие неудачи, а чистый проход обрывает серию (та же болезнь, что лечили
+            # в лестнице ключей: наказание переживало эпизод).
+            self.tries.pop((kind, geo), None)
         if "НЕУДАЧ" in (self.tail or "") and not stopped:
-            key = (self.kind, self.geo)
+            key = (kind, geo)
             self.tries[key] = self.tries.get(key, 1) + 1
             if self.tries[key] <= MAX_PHASE_TRIES:
                 say(
-                    f"⚠️ {self.kind}"
-                    + (f" ({self.geo})" if self.geo else "")
+                    f"⚠️ {kind}"
+                    + (f" ({geo})" if geo else "")
                     + f": неудача внутри шага — попытка {self.tries[key]}/{MAX_PHASE_TRIES}\n"
                     f"{self.tail[-200:]}"
                 )
-                self.start(self.kind, self.geo, _chain=bool(self.chain))
+                self.start(kind, geo, _chain=bool(self.chain))
                 return
             # три раза подряд — это не случайность. СТОП-МАШИНА с разбором.
             n = len(self.chain)
@@ -568,13 +620,13 @@ class Job:
                 "sendMessage",
                 chat_id=CHAT,
                 text=(
-                    f"🛑 СТОП: {self.kind}"
-                    + (f" ({self.geo})" if self.geo else "")
+                    f"🛑 СТОП: {kind}"
+                    + (f" ({geo})" if geo else "")
                     + f" не прошёл {MAX_PHASE_TRIES} раза подряд.\n\n"
                     f"ЧТО СЛУЧИЛОСЬ: {self.tail[-250:]}\n\n"
                     f"ЦИКЛ ОСТАНОВЛЕН (пропущено шагов: {n}) — дальше не идём, чтобы не "
                     f"класть короткие ответы и переводы поверх неразобранного.\n\n"
-                    f"ЧТО ДЕЛАТЬ: посмотреть лог {self.logpath}; если модель молчит — "
+                    f"ЧТО ДЕЛАТЬ: посмотреть лог {logpath}; если модель молчит — "
                     f"подождать и нажать ремонт вручную; если стабильно — смотреть данные гео.\n\n"
                     f"{card}"
                 ),
@@ -582,10 +634,10 @@ class Job:
                     "inline_keyboard": [
                         [
                             {
-                                "text": f"🔧 повторить {self.kind}"
-                                + (f" {self.geo}" if self.geo else ""),
-                                "callback_data": f"run:{self.kind}"
-                                + (f":{self.geo}" if self.geo else ""),
+                                "text": f"🔧 повторить {kind}"
+                                + (f" {geo}" if geo else ""),
+                                "callback_data": f"run:{kind}"
+                                + (f":{geo}" if geo else ""),
                             }
                         ],
                         [{"text": "☰ меню", "callback_data": "menu"}],
@@ -842,6 +894,14 @@ def main():
     threading.Thread(target=job.reporter, daemon=True).start()
     threading.Thread(target=ban_watch, daemon=True).start()  # сигнал о банах ключей
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
+    # Рестарт контейнера убил рот вместе с PID-namespace (пульт = PID 1 — проверено
+    # NSpid). Задача оборвалась молча, а канон обещает отчёт при ЛЮБОМ исходе.
+    for kind, ts in close_interrupted_jobs():
+        say(
+            f"⚠️ прошлый прогон «{kind}» оборван рестартом пульта "
+            f"(запущен был {time.strftime('%d.%m %H:%M', time.localtime(ts))}).\n"
+            f"Сделанное сохранено до последней точки выхода рта; продолжить — кнопкой ниже."
+        )
     # АВТОНОМНО: при старте сразу показываем реальное состояние тракта + кнопки, чтобы
     # не держать его в голове и не жать /combine вручную (заказ юзера 07-24).
     try:
