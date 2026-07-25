@@ -73,25 +73,35 @@ DEFAULT_LIMIT = {
 # исчерпание — тут подтверждение делом, ~2.3 часа эскалации; тело 429 у Google немое).
 # ⛔ Бан НИКОГДА не ставится раньше полной лестницы (катастрофа экстрактора — бан с первого
 # 429) и истекает по PACIFIC: usage ведётся по pt_day, завтрашняя строка чистая.
-# Отсидка ступень НЕ обнуляет («он же не остыл» — юзер): обнуляет только УСПЕХ.
+# Отсидка САМА ПО СЕБЕ ступень не обнуляет («он же не остыл» — юзер): обнуляет УСПЕХ либо
+# ДАВНОСТЬ СЕРИИ (см. ниже).
 COOLDOWN_LADDER = (60.0, 300.0, 1800.0, 6000.0)
+# ДАВНОСТЬ СЕРИИ (2026-07-25). Ступень принадлежит СЕРИИ подряд идущих отказов, а НЕ ключу:
+# «первый 429» — первый В СЕРИИ, а где серия кончается, до сих пор не было сказано нигде.
+# Срок забвения = только что отсиженная отсидка (у голой метки — первая ступень): отказал
+# снова в пределах этого срока → та же серия, лестница вверх; прожил тихо дольше → серия
+# кончилась, счёт с нуля.
+# ⛔ Отдельного числа НЕ вводим: масштаб уже задан самой лестницей. Фиксированный порог
+# обрезал бы её верх — отсидевший 1800с всегда возвращался бы «нескоро», и до 6000 ключ не
+# дошёл бы никогда. Это reset timeout из circuit breaker, стандарт, а не наша выдумка.
+# Зачем понадобилось: 07-24 все 12 ключей остались с cd_level≥1 при кулдаунах, истёкших
+# ЧЕТЫРЕ ЧАСА назад — по часам здоровы, по лестнице больны, и первый же 429 наказал бы их
+# тремястами секунд вместо бесплатной метки. Поэтому cooldown_until пишется И на метке
+# (отсидка нулевой длины): поле всегда значит «когда закончилось последнее наказание».
 # ОЧЕРЕДЬ ПУЛА (канон юзера 2026-07-20: раннеры снесены — очередь держит МОЗГ).
-# Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в GRANT_STEP
+# Такт НА ВЫДАЧУ, не на полёт: мозг отдаёт ключи по одному и не чаще раза в такт
 # на весь пул; выдал — следующий подходит через такт, а полёт (HTTP) идёт сам и никого
 # не держит (юзер: «рот получил ключ и пошёл — сосок ему не нужен»; длинный перевод
-# больше не блокирует пул). Такт держит частоту запусков: 1с между ключами (юзер 07-21).
-# В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол», осьминог), такт живёт
-# в общей SQLite — один на все процессы.
-GRANT_STEP = float(
-    os.environ.get("KB_GRANT_STEP", "5")
-)  # легаси-дефолт; такт теперь ДИНАМИЧЕСКИЙ (см. _dyn_grant_step)
-# ДИНАМИЧЕСКИЙ ТАКТ (юзер 07-24): меньше ЖИВЫХ ключей → больше такт. 429 гонит СУММАРНЫЙ
-# темп пула (не per-key — факт из трассы 07-24: 12кл/step1 падает при 5 RPM/ключ, а 3кл/step3
-# живёт при 6.7). clamp((MAX+1)−живых/2, MIN, MAX), низ=2: 2→5, 4→4, 6→3, 8..12→2 (пул ≤30/мин).
+# больше не блокирует пул). В отличие от GLOBAL_FLOOR из build.py (пер-процессный «пол»,
+# осьминог), такт живёт в общей SQLite — один на все процессы.
+# ДИНАМИЧЕСКИЙ ТАКТ (юзер 07-24): меньше ЖИВЫХ ключей → больше такт, чтобы темп НА КЛЮЧ
+# держался безопасным. clamp((MAX+1)−живых/2, MIN, MAX): 1→5, 2→5, 3→4.5, 8→2, 12→1.
+# Худший случай на ключ — 12 RPM при ОДНОМ живом (5с × 1 ключ), под лимитом 15. Поэтому
+# отдельный пол на ключ не нужен: такт покрывает его на всём диапазоне.
+# ⛔ Низ 2 (07-24, «пул ≤30/мин») был ПРОВЕРКОЙ ТОРМОЖЕНИЕМ — не помогло, дело было не в
+# темпе (юзер снял 07-25). Вернули 1: при 12 ключах круг 12с, обращение к ключу 5 раз/мин.
 GRANT_MAX = float(os.environ.get("KB_GRANT_MAX", "5"))  # верх такта
-GRANT_MIN = float(
-    os.environ.get("KB_GRANT_MIN", "2")
-)  # низ такта (07-24: проверяем падёж 429)
+GRANT_MIN = float(os.environ.get("KB_GRANT_MIN", "1"))  # низ такта
 
 
 def _dyn_grant_step(alive):
@@ -99,10 +109,9 @@ def _dyn_grant_step(alive):
     return max(GRANT_MIN, min(GRANT_MAX, (GRANT_MAX + 1.0) - alive / 2.0))
 
 
-# ПАУЗА НА ЗАКРЫТИИ КРУГА — эталон extraction._INTER_MODEL_SLEEP_S: прошли все ключи →
-# ждём перед новым оборотом. Единственный тормоз темпа; пауз внутри круга нет.
-ROUND_PAUSE = float(os.environ.get("KB_ROUND_PAUSE", "0"))  # 60с были из экстрактора
-# (пауза между МОДЕЛЯМИ с RPD 20) — не наш случай: одна модель, 15 RPM. Юзер снял 07-21.
+# ⛔ ПАУЗА НА ЗАКРЫТИИ КРУГА (ROUND_PAUSE) УДАЛЕНА 2026-07-25 вместе со сквозной нумерацией
+# оборотов: наследие эмбеддинга/экстрактора (пауза между МОДЕЛЯМИ с RPD 20) — у нас одна
+# модель, а очередь теперь без «оборотов», приткнуть паузу некуда. Темп держит такт.
 # ⛔ Глобальная abuse-пауза ВЫЧИЩЕНА (канон §2.5, 2026-07-18): была слепо скопирована из embed.
 # Защита от пулемётинга = лестница отдыха (COOLDOWN_LADDER выше): задолбанный ключ сам остывает,
 # залп 429 гасится ПОШТУЧНО. Останавливать весь пул из-за нескольких ключей — лишнее.
@@ -318,9 +327,7 @@ def init():
         """
         CREATE TABLE IF NOT EXISTS key_clock(
             key_hash TEXT PRIMARY KEY,
-            next_free REAL DEFAULT 0,
-            cooldown_until REAL DEFAULT 0,
-            was_cd INTEGER DEFAULT 0
+            cooldown_until REAL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS usage(
             key_hash TEXT, model TEXT, pt_day TEXT,
@@ -343,19 +350,17 @@ def init():
         );
         """
     )
-    # defensive-миграция для старых broker.db без was_cd
-    try:
-        c.execute("ALTER TABLE key_clock ADD COLUMN was_cd INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    # очередь пула: busy_ts в broker_global = время последней выдачи (такт GRANT_STEP);
+    # очередь пула: busy_ts в broker_global = время последней выдачи (такт);
     # busy_consumer — кто взял последним (диагностика)
     c.execute(
         "CREATE TABLE IF NOT EXISTS broker_global("
         "id INTEGER PRIMARY KEY CHECK(id=1), abuse_pause_until REAL DEFAULT 0)"
     )
+    # ⛔ served_round/next_free/was_cd БОЛЬШЕ НЕ ЗАВОДЯТСЯ (2026-07-25): очередь идёт по
+    # last_grant_ts, сквозной нумерации оборотов нет. В старых базах эти колонки остаются
+    # лежать — код их просто не читает, дропать (и рисковать живой базой) незачем.
     for col, typ in (
-        ("served_round", "INTEGER DEFAULT -1"),  # какой оборот ключ уже отработал
+        ("last_grant_ts", "REAL DEFAULT 0"),  # когда ключом пользовались последний раз
         ("struck", "INTEGER DEFAULT 0"),  # метка первого 429 (без наказания)
         ("cd_level", "INTEGER DEFAULT 0"),  # ступень лестницы отдыха (0 = здоров)
     ):
@@ -366,8 +371,6 @@ def init():
     for col, typ in (
         ("busy_consumer", "TEXT"),
         ("busy_ts", "REAL DEFAULT 0"),
-        ("round_no", "INTEGER DEFAULT 0"),  # текущий оборот круга
-        ("round_gate", "REAL DEFAULT 0"),  # когда можно открыть следующий оборот
     ):
         try:
             c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
@@ -384,8 +387,8 @@ def acquire(consumer, role, model, keys):
       (key, None)        — выдан ключ;
       (None, 0.0)        — ОЧЕРЕДЬ: такт выдачи ещё не прошёл; ждать НЕ тратит бюджет
                            вызова (канон юзера: пауз нет, только очередь);
-      (None, wait_s>0)   — сейчас нет, но освободится через wait_s (RPM/clock);
-      (None, -1.0)       — все ключи на капе/бане (бюджет модели выбран).
+      (None, wait_s>0)   — годных сейчас нет, но через wait_s кто-то выйдет из кулдауна;
+      (None, -1.0)       — все ключи на капе/бане: до конца PT-суток ждать НЕЧЕГО.
     """
     cap = cap_for(model, role)
     now = time.time()
@@ -394,16 +397,12 @@ def acquire(consumer, role, model, keys):
     try:
         c.execute("BEGIN IMMEDIATE")
         # Капы ртов СНЯТЫ (юзер 2026-07-21). Состояние ключей грузим ДО такт-проверки:
-        # такт теперь ДИНАМИЧЕСКИЙ от числа ЖИВЫХ ключей (не бан/кап/кулдаун).
+        # такт ДИНАМИЧЕСКИЙ от числа ЖИВЫХ ключей (не бан/кап/кулдаун).
         clocks = {
             r[0]: (r[1], r[2])
             for r in c.execute(
-                "SELECT key_hash, next_free, cooldown_until FROM key_clock"
+                "SELECT key_hash, last_grant_ts, cooldown_until FROM key_clock"
             )
-        }
-        rounds = {  # какой оборот ключ уже отработал (круг, эталон extraction)
-            r[0]: r[1]
-            for r in c.execute("SELECT key_hash, served_round FROM key_clock")
         }
         used = {
             r[0]: (r[1], r[2])
@@ -412,79 +411,59 @@ def acquire(consumer, role, model, keys):
                 (model, day),
             )
         }
-        alive = 0  # ключи, годные СЕГОДНЯ (не бан/кап/кулдаун) — от них зависит такт
-        for k in keys:
+        # ⭐ ОЧЕРЕДЬ БЕЗ СКВОЗНОЙ НУМЕРАЦИИ (2026-07-25). Круг не ВЕДУТ счётчиком — круг
+        # ВЫТЕКАЕТ из порядка: всегда берём того, кем дольше всех не пользовались. После N
+        # выдач каждый из N ключей отработал ровно один ход — нумеровать нечего.
+        # ⛔ Прежняя пара round_no (broker_global) + served_round (key_clock) — ДВА числа в
+        # РАЗНЫХ таблицах, обязанные совпадать. Обрыв прогона посреди оборота замораживал
+        # рассинхрон в базе, и следующий прогон пропускал ключи, «отработавшие» в позапрошлой
+        # жизни (факт 07-24: round_no=749, ключи с 749/748/745 — первый оборот шёл огрызком).
+        # ⛔ И это НЕ возврат к снятому 07-21 `elig.sort()`: тот сортировал по cooldown_until
+        # («когда ОСВОБОДИТСЯ») и поднимал наверх того, кто быстрее всех отказал — пул из 12
+        # вырождался в 5. Здесь ключ last_grant_ts («когда ПОЛЬЗОВАЛИСЬ»): только что выданный
+        # уходит в конец очереди всегда, больной очередь не перепрыгивает.
+        elig, min_cd = [], None
+        for idx, k in enumerate(keys):
             kh = _kh(k)
-            _, cd = clocks.get(kh, (0.0, 0.0))
+            last_ts, cd = clocks.get(kh, (0.0, 0.0))
             cnt, ban = used.get(kh, (0, 0))
-            if not (ban or cnt >= cap or cd > now):
-                alive += 1
+            if ban or cnt >= cap:
+                continue  # RPD/бан — до конца PT-суток мёртв, ждать его бессмысленно
+            if cd > now:  # в 429-кулдауне: это ВРЕМЕННО, помним когда вернётся
+                min_cd = cd if min_cd is None else min(min_cd, cd)
+                continue
+            elig.append((last_ts or 0.0, idx, k, kh))
+        alive = len(elig)  # годные И ЕСТЬ живые: отсеивать «по обороту» больше нечего
+        if not elig:
+            c.execute("ROLLBACK")
+            # ЧЕСТНАЯ РАЗВИЛКА (2026-07-25): «все отдыхают» ≠ «бюджет выбран». Раньше оба
+            # случая отдавали -1.0, и call() сдавался НАВСЕГДА при живой квоте — 07-24 так
+            # вылетела 31 муха при расходе 6-8 из 440 (combine_logs/1784908198_facet.log).
+            if min_cd is not None:
+                return (None, max(0.1, min_cd - now))  # подождать и спросить снова
+            return (None, -1.0)  # бан/кап у ВСЕХ — сегодня работать правда нечем
         step = _dyn_grant_step(alive)
         # ОЧЕРЕДЬ ПУЛА: такт на выдачу (ДИНАМИЧЕСКИЙ) — с последней выдачи < step → ждать.
         brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
         if brow and now - (brow[0] or 0) < step:
             c.execute("ROLLBACK")
             return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
-        # ⭐ КРУГ (эталон extraction.py:182 «одна модель — по всем ключам — потом дальше»):
-        # ключ отдаётся РОВНО ОДИН РАЗ за оборот, в порядке списка. Отработал — ждёт,
-        # пока оборот не закроется, сколько бы быстро он ни освободился.
-        # ⛔ Прежний `elig.sort(...)` («самый остывший») давал ОБРАТНОЕ: ключ, который
-        # быстрее всех отказал, освобождался первым и получал следующий запрос — пул
-        # из 12 ключей вырождался в 5 (факт 2026-07-21: 10 отказов/мин на 5 ключах).
-        grow = c.execute(
-            "SELECT round_no, round_gate FROM broker_global WHERE id=1"
-        ).fetchone() or (0, 0)
-        rnd, round_gate = (grow[0] or 0), (grow[1] or 0)
-        elig, served = [], []
-        for k in keys:
-            kh = _kh(k)
-            _, cd = clocks.get(kh, (0.0, 0.0))
-            cnt, ban = used.get(kh, (0, 0))
-            if ban or cnt >= cap:
-                continue  # RPD/бан — этот ключ не годен вовсе
-            if cd > now:
-                continue  # в 429-cooldown — отдыхает, в круг не входит
-            if rounds.get(kh, -1) >= rnd:
-                served.append(kh)  # свой ход в этом обороте уже отработал
-                continue
-            elig.append((k, kh))
-        if not elig and served:
-            # КРУГ ЗАКРЫТ (все живые ключи отработали свой ход) → ПАУЗА перед новым
-            # оборотом. Это единственный тормоз темпа: пауз между ключами внутри круга
-            # НЕТ (эталон extraction: «одна модель — по всем ключам — потом sleep 60s»).
-            if now < round_gate:
-                c.execute("ROLLBACK")
-                return (None, round_gate - now)
-            rnd += 1
-            c.execute(
-                "UPDATE broker_global SET round_no=?, round_gate=? WHERE id=1",
-                (rnd, now + ROUND_PAUSE),
-            )
-            for k in keys:
-                kh = _kh(k)
-                _, cd = clocks.get(kh, (0.0, 0.0))
-                cnt, ban = used.get(kh, (0, 0))
-                if ban or cnt >= cap or cd > now:
-                    continue
-                elig.append((k, kh))
-        if not elig:
-            c.execute("ROLLBACK")
-            return (None, -1.0)  # все на капе/бане/в кулдауне
-        key, kh = elig[0]  # порядок списка ключей = порядок круга
+        elig.sort()  # дольше всех не трогали — первым; idx = устойчивый тайбрейк
+        _, keyno, key, kh = elig[0]
         _TRACE_CTX.clear()  # ТРАССА: контекст гранта (429 допишет call после HTTP)
         _TRACE_CTX.update(
             {
                 "t": now,
-                "keyno": keys.index(key),
+                "keyno": keyno,
                 "alive": alive,
                 "step": step,
                 "rpd": used.get(kh, (0, 0))[0],
             }
         )
         c.execute(
-            "INSERT INTO key_clock(key_hash, served_round) VALUES(?,?) "
-            "ON CONFLICT(key_hash) DO UPDATE SET served_round=excluded.served_round",
-            (kh, rnd),
+            "INSERT INTO key_clock(key_hash, last_grant_ts) VALUES(?,?) "
+            "ON CONFLICT(key_hash) DO UPDATE SET last_grant_ts=excluded.last_grant_ts",
+            (kh, now),
         )
         # usage.count НЕ инкрементим тут: RPD считается по УСПЕХУ (status 200) в report(),
         # а не по гранту. Грант с 429 в дневную квоту Google НЕ идёт (не обслужили) —
@@ -498,7 +477,7 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
         )
-        c.execute(  # метка выдачи: следующий рот подойдёт через GRANT_STEP
+        c.execute(  # метка выдачи: следующий рот подойдёт через такт
             "UPDATE broker_global SET busy_consumer=?, busy_ts=? WHERE id=1",
             (consumer, now),
         )
@@ -509,14 +488,16 @@ def acquire(consumer, role, model, keys):
 
 
 def report(consumer, key, model, status):
-    """Отчёт об исходе — эскалация 429 ПО ОБОРОТАМ КРУГА (правило юзера 2026-07-21):
+    """Отчёт об исходе — эскалация 429 ПО ОБОРОТАМ ОЧЕРЕДИ (правило юзера 2026-07-21):
 
-    1-й 429  → только МЕТКА (strike), ключ остаётся в обороте. Наказывать сразу не за
-               что: следующий его ход всё равно наступит не раньше, чем через паузу
-               круга (60с) — этого может хватить.
-    2-й 429  → тот же ключ отказал СНОВА на следующем обороте, то есть пауза не помогла
+    1-й 429  → только МЕТКА (strike), ключ остаётся в очереди. Наказывать сразу не за
+               что: следующий его ход всё равно наступит не раньше, чем очередь обойдёт
+               все остальные ключи — этого может хватить.
+    2-й 429  → тот же ключ отказал СНОВА, дойдя до своего хода, то есть обход не помог
                → cooldown 300с (и 1800с, если он уже сидел в кулдауне раньше).
-    успех    → прощение: снимаем и метку, и cooldown, и историю was_cd.
+    успех    → прощение: снимаем и метку, и cooldown, и ступень лестницы.
+    давность → серия «рассасывается» сама: тихо прожил дольше только что отсиженного —
+               следующий отказ считается ПЕРВЫМ (см. COOLDOWN_LADDER, «давность серии»).
     """
     kh = _kh(key)
     now = time.time()
@@ -529,16 +510,28 @@ def report(consumer, key, model, status):
         )
         if status == 429:
             row = c.execute(
-                "SELECT cd_level, struck FROM key_clock WHERE key_hash=?", (kh,)
+                "SELECT cd_level, struck, cooldown_until FROM key_clock WHERE key_hash=?",
+                (kh,),
             ).fetchone()
-            lvl, struck = (row[0] or 0, row[1] or 0) if row else (0, 0)
+            lvl, struck, cd_end = (
+                (row[0] or 0, row[1] or 0, row[2] or 0.0) if row else (0, 0, 0.0)
+            )
+            # ДАВНОСТЬ СЕРИИ: срок забвения = только что отсиженное (у метки — первая
+            # ступень). Прожил тихо дольше — прошлая серия к делу не относится, счёт с нуля.
+            grace = COOLDOWN_LADDER[lvl - 1] if lvl else COOLDOWN_LADDER[0]
+            if cd_end and now - cd_end > grace:
+                lvl, struck = 0, 0
             if (
                 lvl == 0 and not struck
-            ):  # ПЕРВЫЙ отказ — только метка, ключ остаётся в круге
+            ):  # ПЕРВЫЙ в серии — только метка, ключ остаётся в очереди.
+                # cooldown_until=now: наказания нет (в очередь пускают сразу, `cd > now`
+                # ложно), но отметка «когда закончилось последнее» есть — по ней считается
+                # давность следующего отказа.
                 c.execute(
-                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, struck) "
-                    "VALUES(?,0,0,1) ON CONFLICT(key_hash) DO UPDATE SET struck=1",
-                    (kh,),
+                    "INSERT INTO key_clock(key_hash, cooldown_until, struck) "
+                    "VALUES(?,?,1) ON CONFLICT(key_hash) DO UPDATE SET "
+                    "cooldown_until=excluded.cooldown_until, struck=1, cd_level=0",
+                    (kh, now),
                 )
             elif lvl >= len(
                 COOLDOWN_LADDER
@@ -558,8 +551,8 @@ def report(consumer, key, model, status):
             else:  # отказал снова → следующая ступень (отсидка не прощает)
                 lvl += 1
                 c.execute(
-                    "INSERT INTO key_clock(key_hash, next_free, cooldown_until, cd_level, struck) "
-                    "VALUES(?,0,?,?,0) ON CONFLICT(key_hash) DO UPDATE SET "
+                    "INSERT INTO key_clock(key_hash, cooldown_until, cd_level, struck) "
+                    "VALUES(?,?,?,0) ON CONFLICT(key_hash) DO UPDATE SET "
                     "cooldown_until=excluded.cooldown_until, cd_level=excluded.cd_level, struck=0",
                     (kh, now + COOLDOWN_LADDER[lvl - 1], lvl),
                 )
@@ -652,7 +645,7 @@ def call(
 
     WORST-CASE НА ВЫЗОВ: 4 реальных запроса к Google (1 + 3 повтора по эталону) +
     ≤MAX_WAIT_TOTAL(30мин) сна в ожидании СЛОТА КЛЮЧА + ≤85с пауз между повторами (5+20+60).
-    Очередь пула (такт выдачи GRANT_STEP) ждётся ОТДЕЛЬНО и бюджет не тратит — из
+    Очередь пула (такт выдачи) ждётся ОТДЕЛЬНО и бюджет не тратит — из
     очереди не уходят; полёт (HTTP) пул не держит — блокировки как класса нет.
     None: бюджет выбран / 5 провалов / 30мин без слота ключа.
     """
