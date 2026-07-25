@@ -194,11 +194,25 @@ _TRACE = os.path.join(os.path.dirname(DB) or ".", "grant_trace.tsv")
 _TRACE_CTX = (
     {}
 )  # контекст последнего гранта (acquire кладёт, call пишет строку с исходом)
+_CALL_SEQ = [0]  # сквозной номер логического вызова в этом процессе
 
 
-def _trace_row(status):
-    """ТУПЕЙШАЯ ТРАССА (по строке на запрос): сек | №ключа | 429 | alive | step | rpd_ключа.
-    Контекст (всё кроме 429) кладёт acquire на гранте; исход 429 знает call после HTTP.
+def _trace_row(status, call_no=0, attempt=0, chars=0, toks=0, ms=0):
+    """ТРАССА (строка на запрос). Колонки 2026-07-25:
+      сек | №ключа | статус | alive | step | rpd_ключа | вызов# | попытка | симв | токены | мс | грантов_за_60с
+
+    Зачем расширена. Все три лимита КЛЮЧА закрыты замером и ни один не выбран (RPD 2/440,
+    RPM 3.9/15, TPM ~8К/250К при мухах ≤898 символов), а 429 есть. Значит различать надо то,
+    что этими колонками не видно:
+      вызов#/попытка — ОДНА муха валится на четырёх разных ключах или четыре разные?
+                       Первое = виноват ЗАПРОС, второе = виноват пул. Сейчас `сдались 4/4`
+                       эти два случая не различает вовсе.
+      симв/токены    — размер запроса; токены берём из usageMetadata самого Google (на 429
+                       он их не отдаёт, поэтому симв нужны отдельно — иначе отказавшие
+                       запросы останутся без размера).
+      мс             — отказ за 20мс (отбит на входе) ≠ отказ за 800мс (дошёл до модели).
+      грантов_за_60с — суммарный темп пула читается в строке, а не восстанавливается потом.
+    ⚠️ Старые строки — 6 колонок, новые 12; различать по их числу.
     """
     try:
         d = _TRACE_CTX
@@ -207,10 +221,16 @@ def _trace_row(status):
         row = [
             round(d.get("t", 0.0), 1),
             d.get("keyno", "?"),
-            1 if status == 429 else 0,
+            status,
             d.get("alive", "?"),
             d.get("step", 0.0),
             d.get("rpd", "?"),
+            call_no,
+            attempt,
+            chars,
+            toks,
+            ms,
+            d.get("rate60", "?"),
         ]
         with open(_TRACE, "a", encoding="utf-8") as f:
             f.write("\t".join(str(x) for x in row) + "\n")
@@ -458,6 +478,12 @@ def acquire(consumer, role, model, keys):
                 "alive": alive,
                 "step": step,
                 "rpd": used.get(kh, (0, 0))[0],
+                # суммарный темп ПУЛА за минуту — прямо в строке трассы, чтобы не
+                # восстанавливать его потом вручную (индекс ix_log_ts, дёшево)
+                "rate60": c.execute(
+                    "SELECT COUNT(*) FROM request_log WHERE event='grant' AND ts>?",
+                    (now - 60,),
+                ).fetchone()[0],
             }
         )
         c.execute(
@@ -656,6 +682,12 @@ def call(
     }
     data = json.dumps(payload).encode()
     keys = get_keys()
+    # СКВОЗНОЙ НОМЕР ЛОГИЧЕСКОГО ВЫЗОВА + номер попытки внутри него. Без них `сдались 4/4`
+    # не отличает «одна муха провалилась на 4 РАЗНЫХ ключах» (виноват запрос) от «4 разные
+    # мухи по разу» (виноват пул) — а это два совершенно разных диагноза.
+    _CALL_SEQ[0] += 1
+    call_no, attempt = _CALL_SEQ[0], 0
+    chars = len(user) + len(sysprompt)
     fails, waited = 0, 0.0
     while fails < MAX_FAILS and waited < MAX_WAIT_TOTAL:
         key, wait = acquire(consumer, role, model, keys)
@@ -678,6 +710,8 @@ def call(
             url, data=data, headers={"Content-Type": "application/json"}
         )
         body, status, err, hdrs = None, 0, "", None
+        attempt += 1
+        t_send = time.time()
         try:
             r = urllib.request.urlopen(req, timeout=timeout)
             body = r.read()
@@ -698,8 +732,17 @@ def call(
             status = -1  # сеть/таймаут — ключ не виноват
             err = str(e)[:120]
         finally:
+            ms = int((time.time() - t_send) * 1000)
             report(consumer, key, model, status)  # ← выйти без учёта НЕГДЕ
-        _trace_row(status)  # ТРАССА: строка на запрос (контекст гранта + исход 429)
+        toks = 0
+        if body:  # токены СЧИТАЕТ САМ GOOGLE — берём его число, не свою оценку
+            try:
+                toks = (json.loads(body).get("usageMetadata") or {}).get(
+                    "totalTokenCount", 0
+                )
+            except Exception:
+                pass
+        _trace_row(status, call_no, attempt, chars, toks, ms)
         if hdrs is not None:  # шлёт ли Google остаток RPD в заголовках — узнаём фактом
             _log_hdrs(consumer, model, status, hdrs)
 
