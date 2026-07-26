@@ -391,6 +391,10 @@ def init():
     for col, typ in (
         ("busy_consumer", "TEXT"),
         ("busy_ts", "REAL DEFAULT 0"),
+        # ⭐ КУРСОР КРУГА: индекс последнего выданного ключа в списке. ОДНО число, ни с чем
+        # не сопряжённое — рассинхрон, из-за которого снесли пару round_no+served_round,
+        # тут невозможен по построению.
+        ("cursor", "INTEGER DEFAULT -1"),
     ):
         try:
             c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
@@ -431,28 +435,30 @@ def acquire(consumer, role, model, keys):
                 (model, day),
             )
         }
-        # ⭐ ОЧЕРЕДЬ БЕЗ СКВОЗНОЙ НУМЕРАЦИИ (2026-07-25). Круг не ВЕДУТ счётчиком — круг
-        # ВЫТЕКАЕТ из порядка: всегда берём того, кем дольше всех не пользовались. После N
-        # выдач каждый из N ключей отработал ровно один ход — нумеровать нечего.
-        # ⛔ Прежняя пара round_no (broker_global) + served_round (key_clock) — ДВА числа в
-        # РАЗНЫХ таблицах, обязанные совпадать. Обрыв прогона посреди оборота замораживал
-        # рассинхрон в базе, и следующий прогон пропускал ключи, «отработавшие» в позапрошлой
-        # жизни (факт 07-24: round_no=749, ключи с 749/748/745 — первый оборот шёл огрызком).
-        # ⛔ И это НЕ возврат к снятому 07-21 `elig.sort()`: тот сортировал по cooldown_until
-        # («когда ОСВОБОДИТСЯ») и поднимал наверх того, кто быстрее всех отказал — пул из 12
-        # вырождался в 5. Здесь ключ last_grant_ts («когда ПОЛЬЗОВАЛИСЬ»): только что выданный
-        # уходит в конец очереди всегда, больной очередь не перепрыгивает.
+        # ⭐ КРУГ ПОЗИЦИОННЫЙ — база, требование юзера 2026-07-26 дословно: «правка должна
+        # делать только одно — правильно отсчитывать ключ в круге, но НЕ менять его позицию
+        # в стартовом порядке. 11 ключ всегда 11. И всегда идёт после 1-10 ключей, даже если
+        # там кто-то выпадает». Выпавший теряет свой ход и возвращается НА СВОЁ МЕСТО, а не
+        # в голову очереди. Это генератор экстрактора (`for api_key, kh in hashed`), развёрнутый
+        # в цикл: порядок списка и есть порядок круга, пересортировки нет никакой.
+        # ⛔ Чинилось ТОЛЬКО счетоводство: пара round_no (broker_global) + served_round
+        # (key_clock) — два числа в разных таблицах, обязанные совпадать. Обрыв прогона
+        # посреди оборота замораживал рассинхрон, и следующий прогон шёл огрызком круга
+        # (факт 07-24: round_no=749 при ключах с 749/748/745). Заменено ОДНИМ курсором.
+        # ⛔ Промежуточный вариант с сортировкой по last_grant_ts (25.07) СНЯТ: у ключа,
+        # вышедшего из кулдауна, штамп самый старый, и он влезал в голову очереди — то есть
+        # менял позицию, чего делать нельзя. Ловится `pseo/builder/test_order.py`.
         elig, min_cd = [], None
         for idx, k in enumerate(keys):
             kh = _kh(k)
-            last_ts, cd = clocks.get(kh, (0.0, 0.0))
+            _last, cd = clocks.get(kh, (0.0, 0.0))
             cnt, ban = used.get(kh, (0, 0))
             if ban or cnt >= cap:
                 continue  # RPD/бан — до конца PT-суток мёртв, ждать его бессмысленно
             if cd > now:  # в 429-кулдауне: это ВРЕМЕННО, помним когда вернётся
                 min_cd = cd if min_cd is None else min(min_cd, cd)
                 continue
-            elig.append((last_ts or 0.0, idx, k, kh))
+            elig.append((idx, k, kh))  # ПОРЯДОК СПИСКА, без пересортировки
         alive = len(elig)  # годные И ЕСТЬ живые: отсеивать «по обороту» больше нечего
         if not elig:
             c.execute("ROLLBACK")
@@ -464,12 +470,16 @@ def acquire(consumer, role, model, keys):
             return (None, -1.0)  # бан/кап у ВСЕХ — сегодня работать правда нечем
         step = _dyn_grant_step(alive)
         # ОЧЕРЕДЬ ПУЛА: такт на выдачу (ДИНАМИЧЕСКИЙ) — с последней выдачи < step → ждать.
-        brow = c.execute("SELECT busy_ts FROM broker_global WHERE id=1").fetchone()
+        brow = c.execute(
+            "SELECT busy_ts, cursor FROM broker_global WHERE id=1"
+        ).fetchone()
         if brow and now - (brow[0] or 0) < step:
             c.execute("ROLLBACK")
             return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
-        elig.sort()  # дольше всех не трогали — первым; idx = устойчивый тайбрейк
-        _, keyno, key, kh = elig[0]
+        # Первый годный ПОСЛЕ курсора; никого дальше — замыкаем круг на первого годного
+        # вообще. Позиции при этом не двигаются: пропущенный просто не встретился.
+        cur = brow[1] if brow and brow[1] is not None else -1
+        keyno, key, kh = next((e for e in elig if e[0] > cur), elig[0])
         _TRACE_CTX.clear()  # ТРАССА: контекст гранта (429 допишет call после HTTP)
         _TRACE_CTX.update(
             {
@@ -503,9 +513,9 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
         )
-        c.execute(  # метка выдачи: следующий рот подойдёт через такт
-            "UPDATE broker_global SET busy_consumer=?, busy_ts=? WHERE id=1",
-            (consumer, now),
+        c.execute(  # метка выдачи (такт) + курсор круга: докуда дошли по списку
+            "UPDATE broker_global SET busy_consumer=?, busy_ts=?, cursor=? WHERE id=1",
+            (consumer, now, keyno),
         )
         c.execute("COMMIT")
         return (key, None)
