@@ -86,6 +86,109 @@ FACET_SYS = (
 )
 
 
+# ── БАТЧ РАЗМЕТКИ (2026-07-26, решение юзера: пачка 25).
+# Зачем: facet шлёт ПО ОДНОЙ мухе и потому разгоняется до 43 запросов/мин — по замерам это
+# втрое выше границы, за которой источник начинает отдавать 429 (translate на 11/мин: 2372
+# запроса, 14 отказов; facet на 43/мин: 2949 запросов, 861 отказ). Пачка режет число
+# запросов, а не темп каждого — единственный рычаг, который не требует растягивать прогон.
+#
+# ПОЧЕМУ 25, А НЕ 50 КАК У translate: у facet выход ≈ входу (перевод по длине равен мухе)
+# ПЛЮС теги, а у translate возвращается только перевод. При 25 мухах по ~150 токенов выход
+# ~5К — с запасом под потолок генерации. Число выбрал юзер.
+#
+# ФОРМА ОТВЕТА — ТАБЛИЦА, не объекты на каждую муху:
+#   строка = [индекс, перевод, задачи, сущности, место, условие]
+# Имена пяти полей, повторённые 25 раз, — чистый расход выходных токенов; а число колонок
+# и совпадение индекса с позицией ПРОВЕРЯЕМЫ, в отличие от имён, которые модель переименует.
+# Ключ входа — ПОРЯДКОВЫЙ номер, не id: на 24-символьном хэше модель врала при копировании
+# (факт 07-22, см. facet_lang.translate_texts). Настоящий id живёт снаружи.
+FACET_BATCH = 25
+
+FACET_BATCH_SYS = (
+    "Ты РАЗМЕТЧИК готовых советов (мух) по фасетам, НЕ автор. Мух НЕ переписывай, НЕ дополняй, "
+    "НЕ сокращай, НЕ обобщай.\n"
+    'На вход JSON {"0": "<муха>", "1": "<муха>", ...}. Разметь КАЖДУЮ.\n'
+    'Верни СТРОГО JSON: {"rows": [[индекс, perevod, zadachi, sushnosti, mesto, uslovie], ...]}\n'
+    "Ровно 6 элементов в строке, ровно по одной строке на каждую муху входа, индекс — та же "
+    "строка-ключ, что на входе. Порядок строк любой, но индекс обязателен и уникален.\n"
+    '  индекс     — строка, ключ мухи из входа (пример: "7").\n'
+    "  perevod    — дословный перевод мухи на русский: ВСЕ факты/числа/названия/условия/оговорки "
+    "как есть, ничего не добавить и не выкинуть, естественный русский (не калька).\n"
+    "  zadachi    — СПИСОК задач/тем, которых касается совет (МОЖЕТ БЫТЬ НЕСКОЛЬКО, это ключ). "
+    'Коротко, из текста мухи. Пример: ["получение CPF"]. Не выдумывай задач, которых в мухе нет.\n'
+    '  sushnosti  — СПИСОК ПАР [["имя","роль"], ...]: конкретные сущности (CPF, ВНЖ, Vivo, '
+    "Correios, Рио…) и роль каждой. Роль ∈ {цель, требование, обход, обстоятельство}: цель — за "
+    "ней пришли; требование — без неё не сделать задачу; обход — способ без неё; обстоятельство "
+    '— просто упомянута. Пример: [["CPF","требование"],["Busbud","обход"]]. Нет сущностей — [].\n'
+    '  mesto      — город/страна, если совет привязан к месту, иначе null (пример: "Рио").\n'
+    "  uslovie    — для кого совет, если сказано (турист/резидент/…), иначе null.\n"
+    "Только JSON, без пояснений."
+)
+
+
+def _row_to_rec(fid, row):
+    """Строка таблицы → запись мухи. None, если строка не годится (муха идёт в дед-леттер).
+
+    Проверяем СТРОГО: длину строки и наличие обязательных полей. Мягкая склейка «как есть»
+    тут запрещена — именно она в carve давала откат, который снаружи выглядел успехом.
+    """
+    if not isinstance(row, (list, tuple)) or len(row) != 6:
+        return None
+    _, perevod, zadachi, sushnosti, mesto, uslovie = row
+    if not isinstance(perevod, str) or not perevod.strip():
+        return None
+    zad = [z.strip() for z in (zadachi or []) if isinstance(z, str) and z.strip()]
+    if not zad:
+        return None  # без задачи муху не к чему привязать как вид
+    ent = []
+    for pair in sushnosti or []:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and str(pair[0]).strip():
+            rol = pair[1] if pair[1] in ROLES else "обстоятельство"
+            ent.append({"imya": str(pair[0]).strip(), "rol": rol})
+    return {
+        "id": fid,
+        "perevod": perevod.strip(),
+        "zadachi": zad,
+        "sushnosti": ent,
+        "mesto": (mesto or None),
+        "uslovie": (uslovie or None),
+    }
+
+
+def facet_many(chunk):
+    """Пачка [(fid, lesson), ...] → (recs, bad_fids, reason).
+
+    recs      — разобранные записи (status "ok" поштучно);
+    bad_fids  — мухи, чью строку модель вернула негодной → дед-леттер, как "bad" у facet_one;
+    reason    — не None, если ВСЯ пачка не получилась (инфра): мух не винить, отложить.
+
+    Ретрай пачки до 3 раз, как в translate: разовый флаки-парс на повторе обычно проходит,
+    а если пул реально не отдаёт — call вернёт None быстро, без похода в Google.
+    """
+    idx = {str(j): lesson for j, (_fid, lesson) in enumerate(chunk)}
+    out = None
+    for _ in range(3):
+        out = call(
+            json.dumps(idx, ensure_ascii=False), FACET_BATCH_SYS, consumer="facet"
+        )
+        if out is not None:
+            break
+    if out is None:
+        return [], [], "пул не отдал (после 3 попыток пачки)"
+    rows = out.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return [], [], "модель не вернула rows"
+    by_i = {}
+    for row in rows:
+        if isinstance(row, (list, tuple)) and row:
+            by_i[str(row[0]).strip()] = row  # сшивка ПО ИНДЕКСУ, не по порядку строк
+    recs, bad = [], []
+    for j, (fid, _lesson) in enumerate(chunk):
+        rec = _row_to_rec(fid, by_i.get(str(j)))
+        (recs if rec else bad).append(rec or fid)
+    return recs, bad, None
+
+
 def _atomic_json(path, obj):
     """Запись через temp+rename: kill в любой момент не оставит недописанный/битый файл."""
     tmp = path + ".tmp"
@@ -378,22 +481,27 @@ def run(geo, limit=None):
     new_n = 0
     stopped = False
     tentative = []  # провалившиеся В ЭТОМ проходе (bad ИЛИ infra) — засчитаем в конце
-    for fid, lesson in flies:
-        if os.path.exists(
-            "RUNNER_STOP"
-        ):  # чистый стоп МЕЖДУ мухами — сохраним что успели
+    # ПАЧКАМИ по FACET_BATCH: один запрос на 25 мух вместо 25 запросов (см. FACET_BATCH_SYS).
+    # Стоп-флаг читаем МЕЖДУ пачками — сделанное сохраняем, как и раньше между мухами.
+    for s in range(0, len(flies), FACET_BATCH):
+        if os.path.exists("RUNNER_STOP"):
             stopped = True
             break
-        status, r = facet_one(fid, lesson)
-        if status == "ok":
+        chunk = flies[s : s + FACET_BATCH]
+        recs, bad_fids, reason = facet_many(chunk)
+        for r in recs:
             tagged.append(r)
             new_n += 1
             print(
                 f"  + {', '.join(r['zadachi'])[:48]:50} :: {r['perevod'][:52]}",
                 flush=True,
             )
-        else:  # bad или infra
+        if reason:  # ВСЯ пачка не получилась — инфра, мух не виним поштучно
+            print(f"  пачка {s // FACET_BATCH + 1}: {reason}", flush=True)
+        for fid in bad_fids:  # негодная строка = та же «bad», что была у facet_one
             tentative.append(fid)
+        if reason:
+            tentative.extend(fid for fid, _ in chunk)
             # СИСТЕМАТИКА: 0 тегнуто + >=3 провала = бюджет/инфра сдохли, НЕ вина мух →
             # откат (tentative не применяем), стоп прохода. Иначе битую муху виним честно.
             if new_n == 0 and len(tentative) >= 3:
