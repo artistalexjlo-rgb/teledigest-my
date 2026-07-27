@@ -1001,16 +1001,25 @@ def build_geo(geo, lang="ru"):
         )
     if shelves:
         s_ok = True
+
+        def _sk(sv):
+            """Ключ полки для URL. Приоритет — ключ, НЕСОМЫЙ файлом (`key`): в переводах
+            имя полки локализовано, а `SHELF_KEY` смотрит по РУССКОМУ имени и от перевода
+            промахнётся, слепив слаг из локализованного текста — разный в каждом языке, а
+            на нелатинских и вовсе нечитаемый. Адрес полки обязан совпадать во всех
+            языках, иначе hreflang связывает не те страницы."""
+            return sv.get("key") or SHELF_KEY.get(sv["shelf"]) or slug(sv["shelf"])
+
         sh_sibs = [
             {
                 "tema": sv["shelf"],
-                "slug": SHELF_KEY.get(sv["shelf"], slug(sv["shelf"])),
-                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+                "slug": _sk(sv),
+                "url": f"/{lang}/{geo}/s/{_sk(sv)}/",
             }
             for sv in shelves
         ]
         for sv in shelves:
-            sk = SHELF_KEY.get(sv["shelf"], slug(sv["shelf"]))
+            sk = _sk(sv)
             page = {
                 "lang": lang,
                 "path": f"/{lang}/{geo}/s/{sk}/",
@@ -1120,7 +1129,7 @@ def build_geo(geo, lang="ru"):
                 "icon": icon(sv["shelf"]),
                 "title": sv["shelf"],
                 "blurb": blurb(C, "shelf", len(sv["items"])),
-                "url": f"/{lang}/{geo}/s/{SHELF_KEY.get(sv['shelf'], slug(sv['shelf']))}/",
+                "url": f"/{lang}/{geo}/s/{_sk(sv)}/",
             }
             for sv in shelves
         ]
