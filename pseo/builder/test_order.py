@@ -16,7 +16,11 @@
 инвариант выполняется и той и другой схемой, поэтому подмену базы он пропустил.
 
 ⚠️ Требует KB_DB на ОТДЕЛЬНУЮ базу: тест сносит файл.
-  KB_DB=/tmp/kb_order.db KB_GRANT_MAX=0.01 KB_GRANT_MIN=0.01 python test_order.py
+⚠️ И KB_GROUP_SIZE=0: тест про БАЗОВЫЙ круг по всему пулу. Со звеньями (по умолчанию 4)
+   пять ключей режутся на два звена, и ждать сквозной обход 0-4 бессмысленно — звенья
+   проверяет test_group.py. Без явного нуля тест откажется стартовать, а не соврёт.
+  KB_DB=/tmp/kb_order.db KB_GRANT_MAX=0.01 KB_GRANT_MIN=0.01 KB_GROUP_SIZE=0 \
+  python test_order.py
 """
 
 import os
@@ -71,6 +75,11 @@ def expect(got, want, what):
 if __name__ == "__main__":
     if not os.environ.get("KB_DB"):
         sys.exit("ОТКАЗ: задай KB_DB на тестовую базу — тест сносит файл")
+    if k.GROUP_SIZE:
+        sys.exit(
+            "ОТКАЗ: тест про БАЗОВЫЙ круг по всему пулу, а стоит KB_GROUP_SIZE=%d. "
+            "Запускай с KB_GROUP_SIZE=0; звенья проверяет test_group.py" % k.GROUP_SIZE
+        )
     try:
         os.remove(k.DB)
     except OSError:

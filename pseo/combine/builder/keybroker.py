@@ -116,6 +116,31 @@ COOLDOWN_LADDER = (60.0, 300.0, 1800.0, 6000.0)
 GRANT_MAX = float(os.environ.get("KB_GRANT_MAX", "5"))  # верх такта
 GRANT_MIN = float(os.environ.get("KB_GRANT_MIN", "3"))  # низ = потолок пула 20/мин
 
+# ⭐⭐ ЗВЕНЬЯ (юзер, 2026-07-27): работаем не всем пулом, а звеном по 4 ключа — звено
+# работает какое-то время, потом пауза, потом следующее; за три звена обходим все 12.
+#
+# ЗАЧЕМ. Замер 27.07 закрыл вопрос, от чего стена 429, и ответ не тот, что мы крутили
+# сутки. Два прогона с ОДИНАКОВЫМ темпом пула 13 запросов/мин:
+#   4 ключа  (такт 4.0с) → каждый ключ по 7-8 запросов, отказов НОЛЬ
+#   12 ключей (такт 4.6с) → ТЕ ЖЕ САМЫЕ ключи сыплются со 2-3-го обращения
+# На четырёх ключ дёргали раз в 16с, на двенадцати — раз в 55с: давили ВТРОЕ РЕЖЕ, и легло.
+# Значит решает не темп и не нагрузка на ключ, а СКОЛЬКО РАЗНЫХ КЛЮЧЕЙ засветилось с адреса.
+# Это же объясняет то, чего не объясняла ни одна прошлая версия: почему свежий, ни разу не
+# использованный ключ падает на первом запросе — он не исчерпан, он просто седьмой подряд.
+# И тот же механизм в кроссовере 26.07: первые 5-6 ключей проходят, дальше отсекает всех
+# независимо от того, какие это ключи. Разбор — memory/fact_429_source_limit.md.
+#
+# ⛔ Такт (GRANT_*) это НЕ лечит и лечить не может: он про скорость, а упираемся в состав.
+# Проверено боем — 1.0с, 3.0с и 4.6с дали стену одинаково.
+#
+# ЧИСЛА. Размер звена 4 — юзер. Работа 180с взята с ЧИСТОГО прогона (06:55-06:58: четыре
+# ключа, 3.5 минуты, 31 запрос, ноль отказов) — измерена, но только СНИЗУ: сколько звено
+# выдержит сверх этого, неизвестно. Пауза 60с — ГАДАНИЕ, ничем не подтверждена; её и надо
+# крутить первой по факту прогона. KB_GROUP_SIZE=0 выключает звенья целиком.
+GROUP_SIZE = int(os.environ.get("KB_GROUP_SIZE", "4"))  # ключей в звене; 0 = выключено
+GROUP_WORK = float(os.environ.get("KB_GROUP_WORK", "180"))  # звено работает, сек
+GROUP_PAUSE = float(os.environ.get("KB_GROUP_PAUSE", "60"))  # пауза между звеньями, сек
+
 
 def _dyn_grant_step(alive):
     alive = max(1, alive)
@@ -408,6 +433,10 @@ def init():
         # не сопряжённое — рассинхрон, из-за которого снесли пару round_no+served_round,
         # тут невозможен по построению.
         ("cursor", "INTEGER DEFAULT -1"),
+        # ⭐ ЗВЕНО: какой срез списка дежурит и когда заступил. Тоже без пары-двойника —
+        # фаза (работа/пауза/смена) вычисляется из одного grp_since, хранить её негде.
+        ("grp", "INTEGER DEFAULT 0"),
+        ("grp_since", "REAL DEFAULT 0"),
     ):
         try:
             c.execute(f"ALTER TABLE broker_global ADD COLUMN {col} {typ}")
@@ -461,7 +490,7 @@ def acquire(consumer, role, model, keys):
         # ⛔ Промежуточный вариант с сортировкой по last_grant_ts (25.07) СНЯТ: у ключа,
         # вышедшего из кулдауна, штамп самый старый, и он влезал в голову очереди — то есть
         # менял позицию, чего делать нельзя. Ловится `pseo/builder/test_order.py`.
-        elig, min_cd = [], None
+        elig, min_cd, cds = [], None, {}
         for idx, k in enumerate(keys):
             kh = _kh(k)
             _last, cd = clocks.get(kh, (0.0, 0.0))
@@ -470,9 +499,9 @@ def acquire(consumer, role, model, keys):
                 continue  # RPD/бан — до конца PT-суток мёртв, ждать его бессмысленно
             if cd > now:  # в 429-кулдауне: это ВРЕМЕННО, помним когда вернётся
                 min_cd = cd if min_cd is None else min(min_cd, cd)
+                cds[idx] = cd  # поимённо: звену нужен СВОЙ минимум, не общий
                 continue
             elig.append((idx, k, kh))  # ПОРЯДОК СПИСКА, без пересортировки
-        alive = len(elig)  # годные И ЕСТЬ живые: отсеивать «по обороту» больше нечего
         if not elig:
             c.execute("ROLLBACK")
             # ЧЕСТНАЯ РАЗВИЛКА (2026-07-25): «все отдыхают» ≠ «бюджет выбран». Раньше оба
@@ -481,11 +510,56 @@ def acquire(consumer, role, model, keys):
             if min_cd is not None:
                 return (None, max(0.1, min_cd - now))  # подождать и спросить снова
             return (None, -1.0)  # бан/кап у ВСЕХ — сегодня работать правда нечем
+        brow = c.execute(
+            "SELECT busy_ts, cursor, grp, grp_since FROM broker_global WHERE id=1"
+        ).fetchone()
+        grp = brow[2] if brow and brow[2] is not None else 0
+        grp_since = (brow[3] if brow and brow[3] is not None else 0.0) or 0.0
+        # ⭐ ЗВЕНО (замер и обоснование — у GROUP_SIZE): дежурит СРЕЗ списка, не весь пул.
+        # Срезы последовательные, поэтому позиционная база цела: 11-й ключ остаётся 11-м,
+        # он просто в третьем звене.
+        if GROUP_SIZE > 0 and len(keys) > GROUP_SIZE:
+            ngroups = (len(keys) + GROUP_SIZE - 1) // GROUP_SIZE
+            grp %= ngroups  # пул ужали руками — не вылетать за край списка
+            if grp_since <= 0:
+                grp_since = now  # первый запуск: звено заступает прямо сейчас
+            cycle = GROUP_WORK + GROUP_PAUSE
+            phase = now - grp_since
+            if phase >= cycle:  # отработало и отдохнуло → смена звена
+                grp, grp_since = (grp + 1) % ngroups, now
+            elif phase >= GROUP_WORK:  # ПАУЗА: ключей не трогаем вообще, ждём
+                c.execute(
+                    "UPDATE broker_global SET grp=?, grp_since=? WHERE id=1",
+                    (grp, grp_since),
+                )
+                c.execute("COMMIT")
+                return (None, max(0.1, grp_since + cycle - now))
+            lo, hi = grp * GROUP_SIZE, min(len(keys), (grp + 1) * GROUP_SIZE)
+            g_elig = [e for e in elig if lo <= e[0] < hi]
+            if not g_elig:
+                g_cd = [cd for i, cd in cds.items() if lo <= i < hi]
+                if g_cd:
+                    # ЖДЁМ СВОЁ ЗВЕНО, а не убегаем в следующее: убежать = засветить лишние
+                    # ключи, то есть сделать ровно то, от чего звенья и заведены.
+                    c.execute(
+                        "UPDATE broker_global SET grp=?, grp_since=? WHERE id=1",
+                        (grp, grp_since),
+                    )
+                    c.execute("COMMIT")
+                    return (None, max(0.1, min(g_cd) - now))
+                # Звено мертво НАСОВСЕМ (бан/дневной кап) — ждать его бессмысленно, ход
+                # уходит следующему сразу. ⛔ Не возвращать -1.0: у него живые соседи, а
+                # -1.0 для рта значит «сдавайся до завтра» (так 24.07 вылетела 31 муха).
+                c.execute(
+                    "UPDATE broker_global SET grp=?, grp_since=? WHERE id=1",
+                    ((grp + 1) % ngroups, now),
+                )
+                c.execute("COMMIT")
+                return (None, 0.0)  # спросить снова сразу, бюджет вызова не тратим
+            elig = g_elig
+        alive = len(elig)  # годные И ЕСТЬ живые: отсеивать «по обороту» больше нечего
         step = _dyn_grant_step(alive)
         # ОЧЕРЕДЬ ПУЛА: такт на выдачу (ДИНАМИЧЕСКИЙ) — с последней выдачи < step → ждать.
-        brow = c.execute(
-            "SELECT busy_ts, cursor FROM broker_global WHERE id=1"
-        ).fetchone()
         if brow and now - (brow[0] or 0) < step:
             c.execute("ROLLBACK")
             return (None, 0.0)  # очередь: стоим у кассы, бюджет вызова не тратим
@@ -526,9 +600,10 @@ def acquire(consumer, role, model, keys):
             "INSERT INTO request_log(ts,consumer,key_hash,model,event,status) VALUES(?,?,?,?,'grant',0)",
             (now, consumer, kh, model),
         )
-        c.execute(  # метка выдачи (такт) + курсор круга: докуда дошли по списку
-            "UPDATE broker_global SET busy_consumer=?, busy_ts=?, cursor=? WHERE id=1",
-            (consumer, now, keyno),
+        c.execute(  # метка выдачи (такт) + курсор круга + чьё звено и когда заступило
+            "UPDATE broker_global SET busy_consumer=?, busy_ts=?, cursor=?, "
+            "grp=?, grp_since=? WHERE id=1",
+            (consumer, now, keyno, grp, grp_since),
         )
         c.execute("COMMIT")
         return (key, None)
