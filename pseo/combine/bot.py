@@ -457,22 +457,15 @@ def state_card():
         todo.append("translate")
     else:
         lines.append("3) переводы: ✅ все языки свежие")
+    # ⛔ «СЕЙЧАС НАДО» берём из pipeline_steps, а не из своего todo: раньше это была
+    # ТРЕТЬЯ независимая копия порядка (карточка / меню / цикл), и расходились они молча.
+    nxt = next((st for st in pipeline_steps(s) if st["jobs"]), None)
     lines.append(
         "\n➡️ СЕЙЧАС НАДО: "
-        + (
-            {
-                "facet": f"разметить новые мухи: {', '.join(x['geo'] for x in s['pending_facet'][:5])}",
-                "failed": f"перепрогнать сломанные гео: {', '.join(x['geo'] for x in s['failed'][:5])}",
-                "assign": "разложить хвост (assign)",
-                "kratko": "дожать kratko",
-                "translate": "гнать переводы",
-            }[todo[0]]
-            if todo
-            else "ничего — можно шипить (ship с десктопа)"
-        )
+        + (nxt["label"] if nxt else "ничего — можно шипить (ship с десктопа)")
     )
     lines.append(
-        "порядок жёсткий: assign → kratko → translate → ship.\n"
+        "порядок жёсткий: разметка → хвост→полки → kratko → переводы → ship.\n"
         "переводы ПОСЛЕ kratko, иначе языки останутся без коротких ответов."
     )
     return "\n".join(lines), todo
@@ -659,24 +652,22 @@ class Job:
             return
         # ⭐ ОДИНОЧНАЯ ЗАДАЧА ЗАВЕРШЕНА → показать НОВОЕ состояние тракта + что дальше,
         # с кнопками. Иначе после «готово» юзер не знает, что делать (его прямая жалоба).
-        card, todo = state_card()
-        if todo:
-            nxt = todo[0]
-            # 'failed' — не рот из MENU, а брак прошлых прогонов: следующий шаг это
-            # «починить ВСЕ сломанные» (та же кнопка, что в меню), НЕ MENU['failed'].
-            if nxt == "failed":
-                s = pipeline_state()
-                geos = [x["geo"] for x in s["failed"]]
-                nxt_row = {
-                    "text": f"➡️ дальше: 🔧 починить сломанные ({len(geos)})",
-                    "callback_data": "run:facet:all",
-                }
-            else:
-                nxt_row = {
-                    "text": f"➡️ дальше: {MENU[nxt][0]}",
-                    "callback_data": f"run:{nxt}",
-                }
-            rows = [[nxt_row]]
+        card, _ = state_card()
+        # «Что дальше» берём из ТОЙ ЖЕ вертикали, что и меню, — иначе после задачи пульт
+        # звал бы один шаг, а меню показывало другой (в прежней версии 'failed' вообще
+        # не был ротом из MENU и требовал отдельной ветки).
+        nxt_step = next(
+            (st for st in pipeline_steps(pipeline_state()) if st["jobs"]), None
+        )
+        if nxt_step:
+            rows = [
+                [
+                    {
+                        "text": f"➡️ дальше: {nxt_step['label']}",
+                        "callback_data": f"run:{nxt_step['kind']}",
+                    }
+                ]
+            ]
             rows.append([{"text": "☰ меню", "callback_data": "menu"}])
             tg(
                 "sendMessage",
@@ -778,101 +769,164 @@ class Job:
                 )
 
 
+def facet_queue(s):
+    """Гео шага 0 В ПОРЯДКЕ ИСПОЛНЕНИЯ: сперва БРАК прошлых прогонов, потом новые мухи.
+
+    ⛔ Брак — НЕ отдельная ступень тракта. Это тот же рот facet по другому списку гео:
+    он не после разметки и не перед хвостом, он И ЕСТЬ разметка. Поэтому один шаг.
+    Доделываем сломанное прежде, чем брать новое — если порядок надо обратный, меняются
+    местами два цикла ниже, больше ничего.
+    """
+    out, seen = [], set()
+    for x in s["failed"]:
+        out.append({"geo": x["geo"], "n": x["flies"], "broken": True})
+        seen.add(x["geo"])
+    for x in s["pending_facet"]:
+        if (
+            x["geo"] not in seen
+        ):  # гео и сломано, и с новыми мухами — один заход чинит оба
+            out.append({"geo": x["geo"], "n": x["n"], "broken": False})
+    return out
+
+
+def pipeline_steps(s):
+    """⭐ ЕДИНЫЙ ПОРЯДОК ТРАКТА — источник правды И для меню, И для полного цикла.
+
+    ⛔ Раньше это были ДВА независимых списка, и они разъехались: меню рисовало шаг 0
+    (разметку) и ставило на него стрелку, а `start_cycle` собирал цепочку только из
+    assign/kratko/translate. То есть кнопка «ПОЛНЫЙ ЦИКЛ по порядку» молча пропускала
+    разметку и гнала kratko с переводами поверх непротегованных мух — ровно против
+    правила «facet первым», записанного в state_card тремя экранами выше. Пока список
+    один, разъехаться нечему.
+
+    Возвращает шаги В ПОРЯДКЕ ИСПОЛНЕНИЯ: [{kind, jobs, label, geos}], где jobs —
+    плоский список (рот, гео) для цепочки. Пустой jobs = шагу делать нечего.
+    """
+    fq = facet_queue(s)
+    n_broken = sum(1 for x in fq if x["broken"])
+    n_flies = sum(x["n"] for x in fq)
+    return [
+        {
+            "kind": "facet",
+            "jobs": [("facet", x["geo"]) for x in fq],
+            "geos": fq,
+            "label": (
+                f"0. Разметка — {len(fq)} гео, {n_flies} мух" if fq else "0. Разметка"
+            ),
+            "note": f"сперва брак: {n_broken} гео" if n_broken else "",
+        },
+        {
+            "kind": "assign",
+            "jobs": [("assign", g) for g in s["no_shelf"]],
+            "geos": [],
+            "label": (
+                f"1. Хвост → полки — {len(s['no_shelf'])} гео"
+                if s["no_shelf"]
+                else "1. Хвост → полки"
+            ),
+            "note": "",
+        },
+        {
+            "kind": "kratko",
+            "jobs": [("kratko", None)] if s["no_kratko"] else [],
+            "geos": [],
+            "label": (
+                f"2. Kratko — {s['no_kratko']} видов" if s["no_kratko"] else "2. Kratko"
+            ),
+            "note": "",
+        },
+        {
+            "kind": "translate",
+            "jobs": [("translate", None)] if s["langs"] else [],
+            "geos": [],
+            "label": (
+                f"3. Переводы — {len(s['langs'])} языков"
+                if s["langs"]
+                else "3. Переводы"
+            ),
+            "note": "",
+        },
+    ]
+
+
 def send_menu(job):
-    """Меню = карточка состояния + кнопки С ЧИСЛАМИ + полный цикл. Юзер не должен
-    держать состояние тракта в голове — пульт считает его сам."""
-    card, todo = state_card()
+    """Меню = карточка состояния + ВЕРТИКАЛЬ ТРАКТА. Юзер не должен держать порядок в
+    голове — пульт считает его сам.
+
+    ПРАВИЛА (юзер 2026-07-27), из них меню однозначно:
+      1. вертикаль = порядок исполнения: что выше, то делается раньше;
+      2. верхняя кнопка делает ровно всё, что под ней — без исключений;
+      3. одна кнопка = один смысл (прежние 🆕/🔧 дублировали шаг 0 и висели НАД ним,
+         из-за чего вертикаль расходилась с нумерацией);
+      4. шаг, где делать нечего, не исчезает, а стоит на своём месте с ✅ — позиции
+         не скачут, и меню не надо перечитывать заново каждый раз.
+    """
+    card, _ = state_card()
     s = pipeline_state()
-    labels = {
-        "assign": f"1. Хвост→полки ({len(s['no_shelf'])} гео)",
-        "kratko": f"2. Kratko ({s['no_kratko']} видов)",
-        "translate": f"3. Переводы ({len(s['langs'])} языков)",
-        "facet": (
-            f"0. Facet: {len(s['pending_facet'])} гео, "
-            f"{sum(x['n'] for x in s['pending_facet'])} новых мух"
-            if s["pending_facet"]
-            else "0. Facet+carve <гео> (новых мух нет)"
-        ),
-    }
+    steps = pipeline_steps(s)
+    total = sum(len(st["jobs"]) for st in steps)
     rows = []
-    if todo:
-        rows.append(
-            [{"text": "▶️ ПОЛНЫЙ ЦИКЛ по порядку", "callback_data": "run:cycle"}]
-        )
-    # ПЕРЕПРОГОН сломанных гео. Это тот же facet — новую кнопку-тип не плодим (юзер:
-    # «зачем плодить»), пульт сам знает список и жмёт за тебя. Одна кнопка «починить всё»
-    # гонит цепочкой (как assign по гео без полок), плюс по гео — для точечного.
-    if s["failed"]:
-        geos = [x["geo"] for x in s["failed"]]
+    if total:
         rows.append(
             [
                 {
-                    "text": f"🔧 починить ВСЕ сломанные ({len(geos)}): {', '.join(geos[:6])}"
-                    + ("…" if len(geos) > 6 else ""),
-                    "callback_data": "run:facet:all",
+                    "text": f"▶️ ВСЁ ПО ПОРЯДКУ — {total} шагов",
+                    "callback_data": "run:cycle",
                 }
             ]
         )
-        for x in s["failed"][:8]:
+    first = next((st["kind"] for st in steps if st["jobs"]), None)
+    for st in steps:
+        if not st["jobs"]:  # сделано — место держим, стрелку не ставим
+            rows.append([{"text": st["label"] + " ✅", "callback_data": "menu"}])
+            continue
+        mark = "➡️ " if st["kind"] == first else "　　"  # ровно ОДНА стрелка на меню
+        rows.append(
+            [{"text": mark + st["label"], "callback_data": f"run:{st['kind']}"}]
+        )
+        if st["note"]:
+            rows.append([{"text": f"　　　└ {st['note']}", "callback_data": "menu"}])
+        for x in st["geos"][:8]:  # точечно по гео — ПОД своим шагом, а не над ним
             rows.append(
                 [
                     {
-                        "text": f"   └ {x['geo']} ({x['flies']} мух)",
+                        "text": "　　　└ %s — %d мух%s"
+                        % (x["geo"], x["n"], " 🔧 брак" if x["broken"] else ""),
                         "callback_data": f"run:facet:{x['geo']}",
                     }
                 ]
             )
-    # НОВЫЕ МУХИ → facet по гео. Тот же паттерн, что «починить сломанные»: одна кнопка
-    # «разметить ВСЕ новые» цепочкой + по гео для точечного. Пульт сам знает список.
-    if s["pending_facet"]:
-        pg = [x["geo"] for x in s["pending_facet"]]
-        rows.append(
-            [
-                {
-                    "text": f"🆕 разметить ВСЕ новые ({len(pg)}): {', '.join(pg[:6])}"
-                    + ("…" if len(pg) > 6 else ""),
-                    "callback_data": "run:facet:new",
-                }
-            ]
-        )
-        for x in s["pending_facet"][:8]:
-            rows.append(
-                [
-                    {
-                        "text": f"   └ {x['geo']} ({x['n']} новых мух)",
-                        "callback_data": f"run:facet:{x['geo']}",
-                    }
-                ]
-            )
-    for kind in ("facet", "assign", "kratko", "translate"):
-        mark = "➡️ " if todo and kind == todo[0] else ""
-        rows.append([{"text": mark + labels[kind], "callback_data": f"run:{kind}"}])
     tg("sendMessage", chat_id=CHAT, text=card, reply_markup={"inline_keyboard": rows})
-    log("меню отправлено | надо:", todo)
+    log("меню отправлено | шагов:", total, "| первый:", first)
 
 
 def start_cycle(job):
-    """Полный цикл = очередь шагов в жёстком порядке. Worst-case пишем ДО запуска."""
+    """Полный цикл = ВСЯ вертикаль тракта подряд. Worst-case пишем ДО запуска.
+
+    ⛔ Цепочка берётся из `pipeline_steps` — из ТОГО ЖЕ списка, по которому рисуется меню.
+    Прежде она собиралась здесь отдельно и БЕЗ шага 0: кнопка обещала «по порядку», а
+    разметку пропускала, и страницы собирались по непротегованным мухам.
+    """
     s = pipeline_state()
-    chain = []
-    for geo in s["no_shelf"]:
-        chain.append(("assign", geo))
-    if s["no_kratko"]:
-        chain.append(("kratko", None))
-    if s["langs"]:
-        chain.append(("translate", None))
+    steps = pipeline_steps(s)
+    chain = [j for st in steps for j in st["jobs"]]
     if not chain:
         say("цикл не нужен: всё готово, можно шипить.")
         return
-    # ИСПОЛНЕНИЕ ВСЛУХ (worst-case, не «выглядит ок»):
+    # ИСПОЛНЕНИЕ ВСЛУХ (worst-case, не «выглядит ок»): считаем ДО запуска и вслух.
+    fq = facet_queue(s)
     est = (
-        len(s["no_shelf"]) * 70
+        sum(x["n"] for x in fq)  # разметка: батч 25, но worst-case — запрос на муху
+        + len(s["no_shelf"]) * 70
         + s["no_kratko"]
         + sum((m + st_) * 3 for _, m, st_ in s["langs"])
     )
+    plan = " → ".join(
+        f"{st['label'].split(' — ')[0]}×{len(st['jobs'])}" for st in steps if st["jobs"]
+    )
     say(
-        f"⛓ полный цикл: {len(chain)} шагов\n"
-        f"порядок: {', '.join(k for k, _ in chain[:3])}…\n"
+        f"⛓ весь тракт: {len(chain)} шагов\n"
+        f"порядок: {plan}\n"
         f"ГРУБАЯ оценка расхода: ~{est} запросов (при 12 ключах × 440 = 5280/день)\n"
         f"остановить можно в любой момент — ⛔ СТОП рвёт цепочку."
     )
@@ -929,26 +983,17 @@ def main():
                     start_cycle(job)
                 elif data.startswith("run:"):
                     _, kind, geo = (data + ":").split(":")[:3]
-                    if (
-                        kind == "facet" and geo == "all"
-                    ):  # починить ВСЕ сломанные цепочкой
-                        s = pipeline_state()
-                        geos = [x["geo"] for x in s["failed"]]
-                        if not geos:
-                            say("сломанных гео нет — чинить нечего.")
+                    # ШАГ 0 ЦЕЛИКОМ: брак + новые мухи одной цепочкой, порядок берём из
+                    # facet_queue — того же списка, что рисует меню. `all`/`new` остались
+                    # как псевдонимы: их шлют кнопки СТАРЫХ сообщений в чате, которые
+                    # Telegram хранит вечно, и молча ронять их нельзя.
+                    if kind == "facet" and geo in ("", "all", "new"):
+                        q = facet_queue(pipeline_state())
+                        if not q:
+                            say("размечать нечего: брака нет, новых мух нет.")
                         else:
-                            job.chain = [("facet", g) for g in geos[1:]]
-                            job.start("facet", geos[0], _chain=True)
-                    elif kind == "facet" and geo == "new":  # разметить ВСЕ новые мухи
-                        s = pipeline_state()
-                        geos = [x["geo"] for x in s["pending_facet"]]
-                        if not geos:
-                            say("новых мух нет — размечать нечего.")
-                        else:
-                            job.chain = [("facet", g) for g in geos[1:]]
-                            job.start("facet", geos[0], _chain=True)
-                    elif kind == "facet" and not geo:
-                        say("facet нужен гео: пришли текстом `facet br`")
+                            job.chain = [("facet", x["geo"]) for x in q[1:]]
+                            job.start("facet", q[0]["geo"], _chain=True)
                     elif kind == "assign" and not geo:
                         s = pipeline_state()  # без гео — разложить все, где полок нет
                         if not s["no_shelf"]:
