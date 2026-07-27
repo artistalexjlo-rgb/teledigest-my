@@ -13,10 +13,14 @@ import re
 import sqlite3
 import sys
 
+import tail_taxonomy as _tax
 from keybroker import call
 
 DB = "/home/teledigest/data/messages_fts.db"
 HERE = "/root/pseo_builder"
+# русское имя полки → латинский ключ. Тот же источник, что у pages.py (SHELF_KEY):
+# ключ должен совпадать во всех языках, иначе адреса полок разъедутся и hreflang соврёт.
+SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
 # Ни квоты (мозг), ни окна (коэкзистенцию держит резерв мозга) — рот просто зовёт call,
 # тот отдаёт None на капе → гео откладывается сам.
 
@@ -108,11 +112,21 @@ def carry_groups(src_view, kept_ids, by_id_text):
 
 
 def is_fresh(path):
-    """Файл в НОВОМ формате (несёт groups)? Старый формат = пересобрать (укладка 0.10)."""
+    """Файл в НОВОМ формате? Старый = пересобрать (укладка 0.10).
+
+    Два признака: `groups` в видах и КЛЮЧ `shelves` на верхнем уровне.
+
+    ⛔ Про полки — грабля, на которой это молча не сработало бы: до 2026-07-27 перевод
+    полки не нёс вообще, а проверка смотрела только на `groups`. Значит все 13 языков
+    уже лежат «готовыми» и были бы скипнуты — полок в них не появилось бы никогда, а
+    прогон отрапортовал бы «готово», не сделав ничего.
+    ⛔ Требуем именно КЛЮЧ, а не непустой список: у тонкого гео полок честно нет, и
+    проверка «полки непусты» гоняла бы его на перевод вечно.
+    """
     try:
         old = json.load(open(path, encoding="utf-8"))
         vs = old.get("views_by_task", [])
-        return (not vs) or any("groups" in v for v in vs)
+        return ((not vs) or any("groups" in v for v in vs)) and "shelves" in old
     except Exception:
         return False
 
@@ -206,8 +220,15 @@ def run(geo, lang):
     views = [
         v for v in src["views_by_task"] if len(v["items"]) >= 4
     ]  # только страничные
+    # ⭐ ПОЛКИ ТОЖЕ ПЕРЕВОДИМ (2026-07-27). Раньше набор собирался ТОЛЬКО из страничных
+    # видов, поэтому текстов хвоста в переводе не было и собрать полку было не из чего:
+    # 392 полки существовали лишь по-русски. Раскладка (какая муха в какой полке) от
+    # языка НЕ зависит — она посчитана в ru-файле и просто переносится; платим только за
+    # тексты хвоста.
+    shelves = src.get("shelves") or []
 
     ids = {it["id"] for v in views for it in v["items"]}
+    ids |= {it["id"] for sh in shelves for it in sh["items"]}
     con = sqlite3.connect(DB)
     q = ",".join("?" * len(ids))
     rows = con.execute(
@@ -232,7 +253,10 @@ def run(geo, lang):
             )
             return False
 
-    label_map = translate_labels([v["zadacha"] for v in views], lang)
+    # Имена полок — в ТУ ЖЕ пачку меток: их ≤9 на гео (глобальная таксономия), отдельный
+    # вызов ради них был бы лишним запросом на каждое гео×язык.
+    shelf_names = sorted({sh["shelf"] for sh in shelves})
+    label_map = translate_labels([v["zadacha"] for v in views] + shelf_names, lang)
     rol = ROL.get(lang, ROL["en"])  # прочие языки — англ. роли (не блокируем)
 
     out_views = []
@@ -266,6 +290,47 @@ def run(geo, lang):
                 tv["groups"] = carry_groups(v, kept, by_text)
             out_views.append(tv)
 
+    # ПОЛКИ: раскладка уже посчитана в ru-файле и от языка не зависит — переносим её,
+    # подставляя переведённые тексты. Ключ полки несём ОТДЕЛЬНО от имени: URL строится
+    # в pages.py через SHELF_KEY, а он смотрит по РУССКОМУ имени — от переведённого он
+    # промахнётся и слепит слаг из перевода, разный в каждом языке (а на нелатинских —
+    # и вовсе мусорный). Ключ латинский и общий, поэтому hreflang сойдётся 1:1.
+    out_shelves = []
+    for sh in shelves:
+        s_items = []
+        for it in sh["items"]:
+            t = text.get(it["id"])
+            if not t:
+                continue  # текста нет/не перевёлся → выкинуть муху (как в видах)
+            s_items.append(
+                {
+                    "id": it["id"],
+                    "text": t,
+                    "sushnosti": [
+                        {"imya": e["imya"], "rol": rol.get(e["rol"], e["rol"])}
+                        for e in it.get("sushnosti") or []
+                    ],
+                    "mesto": it.get("mesto"),
+                    "uslovie": it.get("uslovie"),
+                    # тип НЕ переводим: pages.py мапит его в css-ключ по русскому имени
+                    # (TYPE_KEY), а локализация чипов — отдельная, пока не сделанная тема
+                    "type": it.get("type"),
+                }
+            )
+        if not s_items:
+            continue
+        tsh = {
+            "shelf": label_map.get(sh["shelf"], sh["shelf"]),
+            "key": SHELF_KEY.get(sh["shelf"], ""),
+            "items": s_items,
+        }
+        if sh.get("groups"):
+            kept = {i["id"] for i in s_items}
+            tsh["groups"] = carry_groups(
+                sh, kept, {i["id"]: i["text"] for i in s_items}
+            )
+        out_shelves.append(tsh)
+
     # КОРЕНЬ бага «пустой файл»: RU-гео ИМЕЕТ ≥4-виды, а перевод дал 0 → это ПРОВАЛ (429/сдох),
     # НЕ писать пустышку (иначе done-по-факту-файла → пропущен навсегда). На ретрай.
     if views and not out_views:
@@ -275,7 +340,12 @@ def run(geo, lang):
         )
         return False
     # views пусто (гео реально тонкий) → пустой файл легитимен (нечего переводить), пишем.
-    page = {"geo": geo, "views_by_task": out_views, "entity_index": {}}
+    page = {
+        "geo": geo,
+        "views_by_task": out_views,
+        "shelves": out_shelves,  # ключ пишем ВСЕГДА, даже пустым — по нему is_fresh
+        "entity_index": {},
+    }
     d = f"{HERE}/out_facet_{lang}"
     os.makedirs(d, exist_ok=True)
     _atomic(f"{d}/{geo}.json", page)
