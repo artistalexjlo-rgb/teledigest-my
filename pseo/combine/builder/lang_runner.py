@@ -18,6 +18,10 @@ import subprocess
 import sys
 import time
 
+# ЕДИНСТВЕННЫЙ источник правила «файл перевода готов» — см. done() ниже. Берётся из
+# СВОЕГО каталога дублей (sys.path[0] = каталог скрипта), не с хоста.
+import facet_lang as _facet_lang
+
 # ДУБЛЬ ДЛЯ КОМБАЙНА: питон СВОЙ (в контейнере хостового venv нет), а рот facet_lang —
 # из своего же каталога дублей, не из /root/pseo_builder.
 PY = sys.executable
@@ -56,23 +60,27 @@ def geos():
     )
 
 
-_fresh = {}  # (path, mtime) → bool; файл не менялся — не перечитываем (их 36×13)
+_fresh = {}  # (path, mtime) → bool; файл не менялся — не перечитываем (их сотни)
 
 
 def done(geo, lang):
-    """Готово = файл ЕСТЬ и в НОВОМ формате (несёт groups — укладка 0.10).
-    Старый формат (до-карвовый перевод стен) = не готово → пересборка facet_lang."""
+    """Готово = файл ЕСТЬ и в НОВОМ формате. Что считать новым — решает ОДИН
+    `facet_lang.is_fresh`, здесь только кэш по (путь, mtime).
+
+    ⛔ ЗДЕСЬ БЫЛА ВТОРАЯ КОПИЯ ПРАВИЛА, и она молча разошлась с первой (2026-07-28).
+    Правило «новый формат» научили требовать полки — но только в `facet_lang`, а решает
+    ДО него вот этот `done()`: он видел лишь `groups`, считал старые файлы готовыми и
+    переводчик для них не звал вовсе. Итог: 36 гео × 13 языков (468 файлов, и это самые
+    крупные гео) остались без полок, а прогон отрапортовал успех. Фикстура на `is_fresh`
+    была зелёной — она проверяла то, до чего исполнение не доходило.
+    Поэтому копию не «чинят», а убирают: правило живёт в одном месте.
+    """
     p = f"{DATA}/out_facet_{lang}/{geo}.json"
     if not os.path.exists(p):
         return False
     key = (p, os.path.getmtime(p))
     if key not in _fresh:
-        try:
-            d = json.load(open(p, encoding="utf-8"))
-            vs = d.get("views_by_task", [])
-            _fresh[key] = (not vs) or any("groups" in v for v in vs)
-        except Exception:
-            _fresh[key] = False
+        _fresh[key] = _facet_lang.is_fresh(p)
     return _fresh[key]
 
 
