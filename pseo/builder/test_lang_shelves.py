@@ -150,5 +150,23 @@ if __name__ == "__main__":
     )
     good &= ok(fl.is_fresh(p_new), "   свежий файл с полками = готов")
 
+    # 4. ⛔ ВТОРАЯ КОПИЯ ПРАВИЛА. Решение «переводить или скипнуть» принимает НЕ facet_lang,
+    #    а lang_runner.done() ДО него. Пока у него была своя проверка, знавшая только про
+    #    groups, 36 гео × 13 языков (468 файлов, самые крупные гео) остались без полок —
+    #    переводчик для них не звался вовсе, а прогон отрапортовал успех. Проверка №3 была
+    #    при этом зелёной: она проверяла то, до чего исполнение не доходило.
+    import lang_runner as lr
+
+    lr.HERE = tmp
+    lr._fresh.clear()
+    os.makedirs(f"{tmp}/out_facet_old", exist_ok=True)
+    json.dump(old, open(f"{tmp}/out_facet_old/xx.json", "w", encoding="utf-8"))
+    good &= ok(
+        not lr.done("xx", "old"),
+        "4. РАННЕР тоже не считает готовым файл без полок",
+        "done=%r" % lr.done("xx", "old"),
+    )
+    good &= ok(lr.done("xx", "de"), "   и считает готовым файл с полками")
+
     print("\nVERDICT:", "OK — полки доезжают до переводов" if good else "FAIL")
     sys.exit(0 if good else 1)
