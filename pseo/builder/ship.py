@@ -34,15 +34,45 @@ def sh(cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
+def _buildable_langs():
+    """Языки, которые сборщик РЕАЛЬНО умеет собрать: нужны и тексты портала (pages.COPY),
+    и словарь рендера (i18n/<lang>.json). Один источник правды для того, что тянуть.
+
+    ⛔ НЕ тянем всё подряд по маске `out_facet_*`: комбайн переводит в 13 языков, а собрать
+    можно 4 — на остальные нет ни COPY, ни i18n, и `pages.langs_for` их молча пропустит.
+    Разница в объёме: 291 МБ против 53 МБ, и 238 из них — данные, которые нечем отрендерить.
+    """
+    import sys as _sys
+
+    if BUILT not in _sys.path:
+        _sys.path.insert(0, BUILT)
+    import pages as _pages
+
+    have_i18n = {f[:-5] for f in os.listdir(f"{BASE}/i18n") if f.endswith(".json")}
+    return sorted(set(_pages.COPY) & have_i18n)
+
+
 def step_pull(only=None):
-    """Забрать built-данные + runner_stamps (метка «гео дозрел») с VPS одним tar."""
+    """Забрать built-данные + runner_stamps (метка «гео дозрел») с VPS одним tar.
+
+    ⭐ ТЯНЕМ И ПЕРЕВОДЫ (2026-08-07). Раньше в таре были только `out_facet` (ru) и
+    `out_questions` — каталоги `out_facet_<lang>` не приезжали ВООБЩЕ. Итог: на десктопе
+    лежали копии en/es/pt от 10-12 июля (34 гео вместо 90, без полок), а свежие переводы
+    всех 90 гео с полками стояли на VPS и до сайта не доходили. Трёхдневный прогон
+    переводов физически не мог попасть в публикацию.
+    """
+    langs = [x for x in _buildable_langs() if x != "ru"]  # ru лежит в out_facet
+    dirs = " ".join(
+        ["out_facet"] + [f"out_facet_{x}" for x in langs] + ["out_questions"]
+    )
+    # -z обязателен: без сжатия это 291 МБ, и base64 в память лёг бы четырьмястами.
     r = sh(
         [
             "ssh",
             "-o",
             "ConnectTimeout=25",
             VPS,
-            f"cd {VPS_DIR} && tar cf - out_facet out_questions runner_stamps.json 2>/dev/null | base64 -w0",
+            f"cd {VPS_DIR} && tar czf - {dirs} runner_stamps.json 2>/dev/null | base64 -w0",
         ]
     )
     if r.returncode != 0 or not r.stdout.strip():
@@ -53,11 +83,22 @@ def step_pull(only=None):
     import tarfile
 
     buf = io.BytesIO(base64.b64decode(r.stdout.strip()))
-    with tarfile.open(fileobj=buf) as tf:
+    with tarfile.open(fileobj=buf, mode="r:gz") as tf:
         tf.extractall(BUILT, filter="data")
     n_f = len([f for f in os.listdir(f"{BUILT}/out_facet") if f.endswith(".json")])
     n_q = len([f for f in os.listdir(f"{BUILT}/out_questions") if f.endswith(".json")])
-    print(f"pull: факт-гео {n_f}, вопрос-гео {n_q}")
+    per_lang = ", ".join(
+        "%s %d"
+        % (
+            x,
+            len(
+                [f for f in os.listdir(f"{BUILT}/out_facet_{x}") if f.endswith(".json")]
+            ),
+        )
+        for x in langs
+        if os.path.isdir(f"{BUILT}/out_facet_{x}")
+    )
+    print(f"pull: факт-гео {n_f}, вопрос-гео {n_q}, переводы: {per_lang}")
     return True
 
 
