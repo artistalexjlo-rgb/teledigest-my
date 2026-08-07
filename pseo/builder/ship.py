@@ -195,6 +195,50 @@ def bad_geos():
     return bad
 
 
+def _repo_path_for(loc):
+    """URL из sitemap → путь файла в pages-репо. '/ru/ar/' → 'ru/ar/index.html'."""
+    rel = re.sub(r"^https?://[^/]+", "", loc).strip("/")
+    return os.path.join(PAGES_REPO, *(rel.split("/") if rel else []), "index.html")
+
+
+def _write_filtered_sitemap():
+    """Sitemap = только то, что РЕАЛЬНО лежит в pages-репо, а не всё, что собралось.
+
+    ⭐ ЗАЧЕМ (2026-08-07). Карта копировалась из `out/` целиком, а гейт отсекал часть гео
+    ПОЗЖЕ. Итог: 188 русских адресов задержанных гео стояли в sitemap, а страниц по ним на
+    сайте не было. Мы своей же картой звали Google на несуществующее — и теперь, когда
+    появился настоящий 404, он бы честно их получил.
+
+    ⛔ Фильтруем ПО ФАЙЛАМ, а не по списку уехавших гео: гейт русский, языковые деревья
+    едут целиком, и правило «что уехало» у них разное. Проверка наличия файла верна для
+    любого языка — плюс десять языков тут ничего не меняют.
+    Даты (`lastmod`) сохраняются как есть: их ставит pages.py постранично.
+    """
+    src = f"{OUT}/sitemap.xml"
+    if not os.path.exists(src):
+        print("sitemap: нет out/sitemap.xml — пропускаю")
+        return
+    xml = open(src, encoding="utf-8").read()
+    blocks = re.findall(r"  <url>.*?</url>\n", xml, re.S)
+    kept, dropped = [], []
+    for b in blocks:
+        m = re.search(r"<loc>([^<]+)</loc>", b)
+        if m and os.path.exists(_repo_path_for(m.group(1))):
+            kept.append(b)
+        elif m:
+            dropped.append(m.group(1))
+    out = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(kept)
+        + "</urlset>\n"
+    )
+    open(f"{PAGES_REPO}/sitemap.xml", "w", encoding="utf-8").write(out)
+    print(f"sitemap: {len(kept)} адресов; выкинуто без файла {len(dropped)}")
+    if dropped:
+        print("         примеры:", ", ".join(dropped[:3]))
+
+
 def step_push(dry, only=None):
     bad = bad_geos()
     # completeness-гейт: НОВАЯ модель гео едет только когда блок ДОЗРЕЛ (runner stamps —
@@ -258,9 +302,9 @@ def step_push(dry, only=None):
         if os.path.isdir(dst):
             shutil.rmtree(dst)
         shutil.copytree(f"{OUT}/{lang}", dst)
-    for f in ("sitemap.xml", "robots.txt"):
-        if os.path.exists(f"{OUT}/{f}"):
-            shutil.copy2(f"{OUT}/{f}", f"{PAGES_REPO}/{f}")
+    if os.path.exists(f"{OUT}/robots.txt"):
+        shutil.copy2(f"{OUT}/robots.txt", f"{PAGES_REPO}/robots.txt")
+    _write_filtered_sitemap()
     sh(["git", "add", "-A"], cwd=PAGES_REPO)
     msg = f"pSEO ship: {len(go)} geo blocks ({', '.join(go)})\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
     sh(["git", "commit", "-m", msg], cwd=PAGES_REPO)
