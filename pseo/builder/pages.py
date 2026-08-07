@@ -18,6 +18,7 @@ import re
 import sys
 
 import tail_taxonomy as _tax
+from slugs import slug  # ЕДИНСТВЕННОЕ определение хвоста адреса
 
 # полка → стабильный латинский ключ для URL (/ru/<geo>/s/finance/), не транслит-slug
 SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
@@ -767,47 +768,26 @@ def groups_to_faqs(v, lang):
     return faqs
 
 
-# RU→latin транслит для слагов: URL латиницей (money-качество), не кириллический %-суп
-_TR = {
-    "а": "a",
-    "б": "b",
-    "в": "v",
-    "г": "g",
-    "д": "d",
-    "е": "e",
-    "ё": "e",
-    "ж": "zh",
-    "з": "z",
-    "и": "i",
-    "й": "y",
-    "к": "k",
-    "л": "l",
-    "м": "m",
-    "н": "n",
-    "о": "o",
-    "п": "p",
-    "р": "r",
-    "с": "s",
-    "т": "t",
-    "у": "u",
-    "ф": "f",
-    "х": "h",
-    "ц": "ts",
-    "ч": "ch",
-    "ш": "sh",
-    "щ": "sch",
-    "ъ": "",
-    "ы": "y",
-    "ь": "",
-    "э": "e",
-    "ю": "yu",
-    "я": "ya",
-}
+def addr(obj, label_field):
+    """Слаг узла = ЛАТИНСКИЙ `key`, несомый данными. Один на все языки.
 
+    ⭐ ПРАВИЛО (канон §0.11, слова юзера): адрес = /<язык>/<страна>/ + ОДИНАКОВЫЙ
+    английский хвост. `/ru/br/money/` и `/zh/br/money/` — один и тот же хвост.
 
-def slug(t):
-    t = "".join(_TR.get(ch, ch) for ch in t.lower())
-    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:40] or "tema"
+    ⛔ Почему нельзя слаг от метки (так было с 11.07 по 08.08, коммит d825245):
+    метка локализована, значит адрес получался свой в каждом языке. Три следствия,
+    все живые: свитчер языка падал в 404 и его увели на хаб страны (ce103c9) вместо
+    лечения причины; hreflang по сей день объявляет Google адреса, которых нет
+    (проверено: `/ru/ar/bank-i-dengi/` шлёт на `/en/ar/bank-i-dengi/` = 404); а на
+    нелатинице (zh ja ko ar hi th) `slug()` вычищает ВСЕ символы и отдаёт "tema" —
+    уникализации слагов нигде нет, поэтому страницы молча перезаписывали бы друг
+    друга и в гео осталась бы ОДНА вместо двадцати.
+
+    Фолбэк на слаг метки оставлен только как переходный: пока `key` в данных не
+    проштампован (`facet_lang.py --stamp-keys`), страница честно объявляет
+    `shared_tail=False`, и свитчер с hreflang на неё не рассчитывают.
+    """
+    return obj.get("key") or slug(obj[label_field])
 
 
 def pick(pool, seed):
@@ -875,11 +855,11 @@ def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
     geo, name, namep = ctx["geo"], ctx["name"], ctx["namep"]
     by_rep = {g["rep"]: g for g in sv["groups"]}
     sub_sibs = [
-        {"name": sub["name"], "slug": slug(sub["name"])} for sub in sv["subshelves"]
+        {"name": sub["name"], "slug": addr(sub, "name")} for sub in sv["subshelves"]
     ]
     subtiles = []
     for sub in sv["subshelves"]:
-        ss = slug(sub["name"])
+        ss = addr(sub, "name")
         sub_groups = [by_rep[r] for r in sub["reps"] if r in by_rep]
         sub_view = {"items": sv["items"], "groups": sub_groups}
         tl_ = ctx["tl"]
@@ -887,6 +867,7 @@ def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
             "lang": lang,
             "template": "page.html.j2",
             "path": f"{url_pref}{ss}/",
+            "shared_tail": bool(sub.get("key")),
             "geo": geo,
             "geo_name": name,
             "intent_name": sub["name"],
@@ -965,17 +946,19 @@ def build_geo(geo, lang="ru"):
     ):  # страховка: непереведённая (кириллическая) метка → не плодим кириллический URL
         fviews = [v for v in fviews if not re.search("[а-яёА-ЯЁ]", v["zadacha"])]
     for v in fviews:
-        s = slug(v["zadacha"])
+        s = addr(v, "zadacha")
         fact_sibs.append(
             {"tema": v["zadacha"], "slug": s, "url": f"/{lang}/{geo}/{s}/"}
         )
     for v in fviews:
         tema = v["zadacha"]
-        s = slug(tema)
+        s = addr(v, "zadacha")
         items = [it["text"] for it in v["items"]]
         page = {
             "lang": lang,
             "path": f"/{lang}/{geo}/{s}/",
+            # хвост адреса общий для всех языков? от этого зависят свитчер и hreflang
+            "shared_tail": bool(v.get("key")),
             "geo": geo,
             "geo_name": name,
             "intent_name": tema,
@@ -1044,17 +1027,18 @@ def build_geo(geo, lang="ru"):
         q_sibs = [
             {
                 "tema": g["tema"],
-                "slug": slug(g["tema"]),
-                "url": f"/{lang}/{geo}/q/{slug(g['tema'])}/",
+                "slug": addr(g, "tema"),
+                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
             }
             for g in qgroups
         ]
         for g in qgroups:
-            s = slug(g["tema"])
+            s = addr(g, "tema")
             page = {
                 "lang": lang,
                 "template": "qlist.html.j2",
                 "path": f"/{lang}/{geo}/q/{s}/",
+                "shared_tail": bool(g.get("key")),
                 "geo": geo,
                 "geo_name": name,
                 "intent_name": g["tema"],
@@ -1082,7 +1066,7 @@ def build_geo(geo, lang="ru"):
                 "icon": icon(g["tema"]),
                 "title": g["tema"],
                 "blurb": blurb(C, "q", len(g["questions"])),
-                "url": f"/{lang}/{geo}/q/{slug(g['tema'])}/",
+                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
             }
             for g in qgroups
         ]
@@ -1269,6 +1253,7 @@ def build_geo(geo, lang="ru"):
             "lang": lang,
             "template": "index.html.j2",
             "path": f"/{lang}/{geo}/",
+            "shared_tail": True,  # хаб страны: хвост = код гео, одинаков везде
             "geo": geo,
             "geo_name": name,
             "title": C["hub_title"].format(name=name),
@@ -1308,6 +1293,7 @@ def build_home(lang, geos, counts=None):
             "lang": lang,
             "template": "home.html.j2",
             "path": f"/{lang}/",
+            "shared_tail": True,  # адрес главной языко-независим по построению
             "crumb_label": None,
             "title": HA["home_title"],
             "meta_desc": HA["home_desc"],
@@ -1328,6 +1314,7 @@ def build_about(lang):
             "lang": lang,
             "template": "index.html.j2",
             "path": f"/{lang}/about/",
+            "shared_tail": True,
             "crumb_label": HA["about_crumb"],
             "title": HA["about_title"],
             "meta_desc": HA["about_desc"],

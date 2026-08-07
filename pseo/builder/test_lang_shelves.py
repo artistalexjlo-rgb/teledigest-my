@@ -44,28 +44,32 @@ def ru_geo():
     def grp(i):  # дедуп-группа: реальные файлы их несут, и is_fresh на них смотрит
         return {"rep": i, "ids": [i], "n": 1}
 
+    # ⚠️ У каждой ветви ≥ dedup.BRANCH_ITEM_MIN пунктов. Первая версия этой фикстуры давала
+    # по два и была зелёной, потому что `carry_subs` тогда держала СВОЮ, более слабую копию
+    # правила («выбрасываем только пустую ветвь»). Порог теперь один — из dedup, — и данные
+    # обязаны его уважать, иначе ветвление законно снимается.
     return {
         "geo": "xx",
         "views_by_task": [
             {
                 "zadacha": "Обмен валюты",
                 "subshelves": [
-                    {"name": "ветка-один", "reps": ["v0", "v1"]},
-                    {"name": "ветка-два", "reps": ["v2", "v3"]},
+                    {"name": "ветка-один", "reps": ["v0", "v1", "v2", "v3"]},
+                    {"name": "ветка-два", "reps": ["v4", "v5", "v6", "v7"]},
                 ],
-                "items": [it("v%d" % i) for i in range(4)],
-                "groups": [grp("v%d" % i) for i in range(4)],
+                "items": [it("v%d" % i) for i in range(8)],
+                "groups": [grp("v%d" % i) for i in range(8)],
             }
         ],
         "shelves": [
             {
                 "shelf": SHELF_RU,
                 "subshelves": [
-                    {"name": "полка-ветка-а", "reps": ["s0", "s1"]},
-                    {"name": "полка-ветка-б", "reps": ["s2", "s3"]},
+                    {"name": "полка-ветка-а", "reps": ["s0", "s1", "s2", "s3"]},
+                    {"name": "полка-ветка-б", "reps": ["s4", "s5", "s6", "s7"]},
                 ],
-                "items": [dict(it("s%d" % i), type="лайфхак") for i in range(3)],
-                "groups": [grp("s%d" % i) for i in range(3)],
+                "items": [dict(it("s%d" % i), type="лайфхак") for i in range(8)],
+                "groups": [grp("s%d" % i) for i in range(8)],
             }
         ],
         "prochee": [],
@@ -119,7 +123,7 @@ if __name__ == "__main__":
 
     # 1. Мухи ПОЛКИ попали в набор на перевод — раньше их там не было вовсе.
     good &= ok(
-        {"s0", "s1", "s2"} <= set(seen_ids),
+        {"s0", "s3", "s7"} <= set(seen_ids),
         "1. мухи хвоста ушли на перевод",
         "переведено id: %d" % len(seen_ids),
     )
@@ -127,9 +131,9 @@ if __name__ == "__main__":
     # 2. Полки в файле, имя переведено, ключ адреса — латинский из таксономии.
     sh = out.get("shelves") or []
     good &= ok(
-        len(sh) == 1 and len(sh[0]["items"]) == 3,
+        len(sh) == 1 and len(sh[0]["items"]) == 8,
         "2. полка в выходном файле",
-        "полок %d" % len(sh),
+        "полок %d, абзацев %d" % (len(sh), len(sh[0]["items"]) if sh else 0),
     )
     if sh:
         good &= ok(
