@@ -7,6 +7,7 @@
 Запуск: facet_lang.py br es   → out_facet_es/br.json
 """
 
+import glob
 import json
 import os
 import re
@@ -14,7 +15,9 @@ import sqlite3
 import sys
 
 import tail_taxonomy as _tax
+from dedup import BRANCH_ITEM_MIN  # порог пунктов в ветви — ОДНО место, не копия
 from keybroker import call
+from slugs import slug  # тот же слаг, что строит адреса при сборке
 
 DB = "/home/teledigest/data/messages_fts.db"
 HERE = "/root/pseo_builder"
@@ -92,6 +95,39 @@ def text_sys(lang):
     )
 
 
+def carry_subs(src, kept_ids, label_map):
+    """Перенести ВЕТВЛЕНИЕ (`subshelves`) в перевод: состав ветви — id, они языко-независимы,
+    переводится только имя ветви.
+
+    ⭐ ЗАЧЕМ (2026-08-07): перевод ветвление не нёс ВООБЩЕ, а `pages.py` строит хаб с ветками
+    именно по `subshelves`. То есть языки собирались бы простынями — при том что русский уже
+    разрезан. И хуже: `is_fresh` про ветви не знал, файл считался готовым навсегда, и
+    исправить это было бы нечем, кроме ручного сноса файлов.
+
+    Муха без перевода выпадает; ветвь, в которой осталось меньше `BRANCH_ITEM_MIN` пунктов,
+    выпадает целиком. Меньше двух ветвей — ветвление теряет смысл, отдаём None: страница
+    соберётся обычной, а не хабом с одной плиткой.
+
+    ⛔ Порог берётся ИЗ `dedup`, а не литералом. Первая версия этой функции (929afae)
+    выбрасывала ветвь только когда она ПУСТА — то есть завела вторую, более слабую копию
+    правила «ветка-страница от 4 пунктов», и ветвь, потерявшая пункты при переводе,
+    становилась в языке тощей страницей при соблюдённом правиле в русском.
+    """
+    out = []
+    for sub in src.get("subshelves") or []:
+        reps = [r for r in sub.get("reps") or [] if r in kept_ids]
+        if len(reps) < BRANCH_ITEM_MIN:
+            continue
+        name = label_map.get(sub["name"], sub["name"])
+        if _has_cyr(name):
+            continue  # имя не перевелось → кириллический URL ветви, не плодим
+        t = {"name": name, "reps": reps}
+        if sub.get("key"):
+            t["key"] = sub["key"]  # адрес ветви ОДИН на все языки (канон §0.11)
+        out.append(t)
+    return out if len(out) >= 2 else None
+
+
 def carry_groups(src_view, kept_ids, by_id_text):
     """Перенести дедуп-группы в перевод: id-состав языконезависим. Муха без перевода
     выпадает из группы; репрезентант без перевода → самый богатый переведённый в группе;
@@ -126,7 +162,11 @@ def is_fresh(path):
     try:
         old = json.load(open(path, encoding="utf-8"))
         vs = old.get("views_by_task", [])
-        return ((not vs) or any("groups" in v for v in vs)) and "shelves" in old
+        return (
+            ((not vs) or any("groups" in v for v in vs))
+            and "shelves" in old
+            and old.get("branches_carried") is True
+        )
     except Exception:
         return False
 
@@ -205,6 +245,56 @@ def add_kratko(geo, lang):
         return 0
 
 
+def stamp_keys(geo):
+    """Проштамповать АДРЕСА в РУССКИЙ файл гео: `key` каждому страничному виду и каждой ветви.
+
+    ⭐ ПРАВИЛО (канон §0.11, слова юзера): `/<язык>/<страна>/` + ОДИНАКОВЫЙ английский хвост.
+    Ключ = слаг АНГЛИЙСКОЙ метки, поэтому `/ru/br/money/` и `/zh/br/money/` — один хвост.
+
+    Почему в русский файл: адрес принадлежит СОДЕРЖИМОМУ, а не переводу. Пока слаг считался
+    в `pages.py` от локализованной метки, у каждого языка выходил свой адрес — отсюда и
+    свитчер в 404, и врущий hreflang, и вырождение всех нелатинских адресов в один «tema».
+    Почему здесь: перевод меток RU→EN умеет только этот модуль.
+
+    ⛔ Файл ДОПИСЫВАЕТСЯ, а не пересобирается: в нём лежат `groups`, `kratko` и `subshelves`,
+    стоившие прогонов. ⛔ Уникальность ключей внутри гео обеспечивается ЗДЕСЬ: `slug()`
+    схлопывает разные метки в один хвост, а уникализации адресов в `pages.py` нет нигде —
+    совпавшие адреса молча перезаписывали бы страницы друг друга.
+
+    Идемпотентна: уже проштампованные узлы в перевод не идут. Возвращает число новых ключей.
+    """
+    fn = f"{HERE}/out_facet/{geo}.json"
+    d = json.load(open(fn, encoding="utf-8"))
+    views = [v for v in d.get("views_by_task") or [] if len(v.get("items") or []) >= 4]
+    # (узел, поле-с-меткой): у вида метка в `zadacha`, у ветви — в `name`
+    nodes = [(v, "zadacha") for v in views]
+    for src in list(views) + list(d.get("shelves") or []):
+        nodes += [(sub, "name") for sub in (src.get("subshelves") or [])]
+    todo = [(x, f) for x, f in nodes if not x.get("key")]
+    if not todo:
+        print(f"{geo}: адреса на месте, скип", flush=True)
+        return 0
+    labels = sorted({x[f] for x, f in todo})
+    en = translate_labels(labels, "en")
+    used = {x["key"] for x, _ in nodes if x.get("key")}  # уже занятые — не трогаем
+    n = 0
+    for x, f in todo:
+        base = slug(en.get(x[f], ""))
+        k, i = base, 1
+        while k in used:  # хвост уже занят другой меткой → -2, -3, …
+            i += 1
+            k = f"{base}-{i}"
+        used.add(k)
+        x["key"] = k
+        n += 1
+    _atomic(fn, d)
+    print(
+        f"{geo}: адресов проштамповано {n} из {len(nodes)} узлов (видов {len(views)})",
+        flush=True,
+    )
+    return n
+
+
 def run(geo, lang):
     out_path = f"{HERE}/out_facet_{lang}/{geo}.json"
     if os.path.exists(out_path):
@@ -256,7 +346,17 @@ def run(geo, lang):
     # Имена полок — в ТУ ЖЕ пачку меток: их ≤9 на гео (глобальная таксономия), отдельный
     # вызов ради них был бы лишним запросом на каждое гео×язык.
     shelf_names = sorted({sh["shelf"] for sh in shelves})
-    label_map = translate_labels([v["zadacha"] for v in views] + shelf_names, lang)
+    # Имена ВЕТВЕЙ — туда же: отдельный вызов на каждое гео×язык был бы лишним запросом.
+    sub_names = sorted(
+        {
+            sub["name"]
+            for src in list(views) + list(shelves)
+            for sub in (src.get("subshelves") or [])
+        }
+    )
+    label_map = translate_labels(
+        [v["zadacha"] for v in views] + shelf_names + sub_names, lang
+    )
     rol = ROL.get(lang, ROL["en"])  # прочие языки — англ. роли (не блокируем)
 
     out_views = []
@@ -283,11 +383,22 @@ def run(geo, lang):
             )
         if len(items) >= 4:  # после отсева мог упасть ниже порога
             tv = {"zadacha": lbl, "items": items}
+            if v.get("key"):
+                # АДРЕС страницы. Английский и ОДИН на все языки (канон §0.11): хвост
+                # `/ru/br/money/` = `/zh/br/money/`. Без него слаг считался бы от
+                # локализованной метки — и адреса разъезжались бы по языкам, а на
+                # нелатинице вырождались в один «tema» на всё гео.
+                tv["key"] = v["key"]
             kept = {it["id"] for it in items}
             by_text = {it["id"]: it["text"] for it in items}
             # укладка 0.10: группы дедупа языконезависимы (id-состав) — несём сквозь перевод
             if v.get("groups"):
                 tv["groups"] = carry_groups(v, kept, by_text)
+            subs = carry_subs(v, kept, label_map)
+            if subs:
+                tv["subshelves"] = subs
+            elif v.get("branch_tried"):
+                tv["branch_tried"] = True  # цельная и по-русски — незачем звать снова
             out_views.append(tv)
 
     # ПОЛКИ: раскладка уже посчитана в ru-файле и от языка не зависит — переносим её,
@@ -324,11 +435,16 @@ def run(geo, lang):
             "key": SHELF_KEY.get(sh["shelf"], ""),
             "items": s_items,
         }
+        kept = {i["id"] for i in s_items}
         if sh.get("groups"):
-            kept = {i["id"] for i in s_items}
             tsh["groups"] = carry_groups(
                 sh, kept, {i["id"]: i["text"] for i in s_items}
             )
+        subs = carry_subs(sh, kept, label_map)
+        if subs:
+            tsh["subshelves"] = subs
+        elif sh.get("branch_tried"):
+            tsh["branch_tried"] = True
         out_shelves.append(tsh)
 
     # КОРЕНЬ бага «пустой файл»: RU-гео ИМЕЕТ ≥4-виды, а перевод дал 0 → это ПРОВАЛ (429/сдох),
@@ -344,6 +460,9 @@ def run(geo, lang):
         "geo": geo,
         "views_by_task": out_views,
         "shelves": out_shelves,  # ключ пишем ВСЕГДА, даже пустым — по нему is_fresh
+        # Признак формата: файл несёт ветвление. Требуется is_fresh — иначе уже лежащие
+        # файлы (собранные до 07.08) считались бы готовыми навсегда и ветвей не получили.
+        "branches_carried": True,
         "entity_index": {},
     }
     d = f"{HERE}/out_facet_{lang}"
@@ -361,8 +480,21 @@ def run(geo, lang):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--stamp-keys":
+        # адреса штампуются ОДИН раз на гео и служат всем языкам
+        gs = (
+            [
+                os.path.basename(p)[:-5]
+                for p in sorted(glob.glob(f"{HERE}/out_facet/*.json"))
+            ]
+            if sys.argv[2] == "--all"
+            else sys.argv[2:]
+        )
+        total = sum(stamp_keys(g) for g in gs)
+        print(f"ИТОГО адресов проштамповано: {total}", flush=True)
+        sys.exit(0)
     if len(sys.argv) < 3:
-        sys.exit("usage: facet_lang.py <geo> <lang>")
+        sys.exit("usage: facet_lang.py <geo> <lang> | --stamp-keys <geo|--all>")
     ok = run(sys.argv[1], sys.argv[2])
     sys.exit(
         0 if ok else 3

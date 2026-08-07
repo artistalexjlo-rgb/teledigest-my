@@ -10,11 +10,18 @@
 <meta name="description" content="{{ page.meta_desc }}">
 <link rel="canonical" href="{{ site.domain }}{{ page.path }}">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+{#- hreflang ТОЛЬКО когда хвост адреса общий для всех языков (page.shared_tail).
+    ⛔ Иначе он врал: слаг строился от ЛОКАЛИЗОВАННОЙ метки, и подмена префикса давала
+    несуществующий адрес. Проверено 08.08 на живом сайте — /ru/ar/bank-i-dengi/ объявляла
+    Google /en/ar/bank-i-dengi/, которого нет. Объявлять 404 хуже, чем не объявлять
+    ничего: Google выкидывает кластер целиком. Ключ адреса кладёт facet_lang --stamp-keys. #}
+{%- if page.shared_tail %}
 {%- set tail = page.path.split('/')[2:] | join('/') %}
 {%- for l in site.languages %}
 <link rel="alternate" hreflang="{{ l }}" href="{{ site.domain }}/{{ l }}/{{ tail }}">
 {%- endfor %}
 <link rel="alternate" hreflang="x-default" href="{{ site.domain }}/{{ site.languages[0] }}/{{ tail }}">
+{%- endif %}
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -206,9 +213,14 @@ footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--border);color
       <span class="brand-sub">{{ t.brand_sub | safe }}</span>
     </div>
     <div class="ctrls">
-      {#- слаги контента между языками РАЗНЫЕ (ru≠en≠…) → tail-swap дал бы 404.
-          Свитчер ведёт на гарантированно существующее: гео-хаб /<lang>/<geo>/ или /<lang>/. #}
+      {#- Свитчер ведёт на ТУ ЖЕ страницу в другом языке, когда хвост адреса общий.
+          Пока ключ адреса не проштампован (shared_tail=False), хвосты разные и подмена
+          префикса дала бы 404 (так и было, ce103c9) — тогда падаем на гео-хаб. #}
+      {%- if page.shared_tail %}
+      {%- set lbase = page.path.split('/')[2:] | join('/') %}
+      {%- else %}
       {%- set lbase = (page.geo ~ '/') if page.geo else '' %}
+      {%- endif %}
       <div class="langs">
         {%- for l in site.languages %}
         <a class="{{ 'on' if l == t.html_lang else '' }}" href="/{{ l }}/{{ lbase }}">{{ oct(OCT_TOGGLE, 5, 2) }}{{ l | upper }}</a>

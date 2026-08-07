@@ -344,14 +344,26 @@ def pipeline_state():
                 for v in d.get("views_by_task", [])
                 if len(v.get("groups") or v.get("items") or []) > _BRANCH_MIN
                 and not v.get("subshelves")
+                and not v.get("branch_tried")  # пробовали → вышло цельно → сделано
             ) + sum(
                 1
                 for sh in d.get("shelves", [])
                 if len(sh.get("groups") or sh.get("items") or []) > _BRANCH_MIN
                 and not sh.get("subshelves")
+                and not sh.get("branch_tried")
             )
+            # ⭐ ШАГ 1: гео недоделано, только если ЕСТЬ ЧТО раскладывать. Раньше условием
+            # было «полок нет» — и гео `nl` (ОДНА муха всего, 0 видов, 0 полок, муха ушла в
+            # `прочее`) висело вечно: полке сложиться не из чего и не станет.
+            # Хвост = `прочее` + виды мельче страничного гейта.
             if not (d.get("shelves") or []):
-                st["no_shelf"].append(geo)
+                tail = len(d.get("prochee") or []) + sum(
+                    1
+                    for v in d.get("views_by_task", [])
+                    if len(v.get("items") or []) < 4
+                )
+                if tail:
+                    st["no_shelf"].append(geo)
             # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
             # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
             # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
@@ -418,7 +430,12 @@ def pipeline_state():
                 try:
                     with open(f"{BRAIN}/tags/{geo}_fails.json", encoding="utf-8") as fh:
                         fl = json.load(fh)
-                    dead = {int(k) for k, c in fl.items() if c >= 3}
+                    # ⛔ БЫЛО `int(k)` — id мухи это HEX-строка («9497936e4990e9f9…»),
+                    # int() на ней падает, исключение съедалось общим except, и множество
+                    # мёртвых оставалось ПУСТЫМ ВСЕГДА. Замер 27.07: висело 26 мух, все 26
+                    # мёртвые, живых ноль — пульт звал на них по кругу, facet честно ничего
+                    # не делал. Порог из facet.DEAD_AT, а не литералом 3.
+                    dead = {k for k, c in fl.items() if c >= _facet.DEAD_AT}
                 except Exception:
                     pass
                 n = sum(1 for fid in fids if fid not in done and fid not in dead)

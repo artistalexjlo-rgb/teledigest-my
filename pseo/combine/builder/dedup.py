@@ -190,6 +190,15 @@ BRANCH_MIN = int(
 # 53 полки из 31-90 законно оставались простынями (факт: 66 простыней = 6% страниц).
 # ⚠️ Механизм просит у модели 4-9 под-тем: у полки на ~15-20 ветки выйдут по 2-4 пункта.
 # Юзер выбрал дробление вместо простыней осознанно.
+#
+# Сколько пунктов нужно САМОЙ ветке, чтобы стать страницей. Зеркало PAGE_MIN: ветка —
+# такая же страница, тоньше четырёх пунктов она не страница.
+# ⛔ ЕДИНСТВЕННОЕ место числа. Раньше он стоял литералом в build_subshelves, а
+# `facet_lang.carry_subs` завёл СВОЮ, более слабую копию правила (08.08, коммит 929afae):
+# выбрасывал ветвь только когда она ПУСТА — то есть ветвь, потерявшая при переводе пункты,
+# становилась в языке тощей страницей, пока русский правило соблюдал. Импортировать
+# отсюда, не переписывать.
+BRANCH_ITEM_MIN = 4
 BRANCH_BATCH = 90  # реп-текстов в запрос (окно соска)
 
 BRANCH_SYS = (
@@ -278,7 +287,9 @@ def branch_page(shelf, fails=None, kind="полка"):
     for name, ids in sorted(merged.items(), key=lambda x: -len(x[1])):
         uniq = [i for i in ids if i not in seen]
         seen.update(uniq)
-        if len(uniq) >= 4:  # ветка-страница от 4 пунктов (гейт как у страниц)
+        if (
+            len(uniq) >= BRANCH_ITEM_MIN
+        ):  # ветка-страница от 4 пунктов (гейт как у страниц)
             subs.append({"name": name, "reps": uniq})
     return subs if len(subs) >= 2 else None
 
@@ -308,11 +319,23 @@ def run(geo, kratko=False):
         # ⛔ БЕЗ привязки к kratko: у полок ветвление стояло под `if kratko`, и полка,
         # до которой проход kratko не дошёл, простынёй и оставалась (69 таких). Ветвление
         # — свойство СТРАНИЦЫ, а не побочный эффект чужого шага.
-        if len(v["groups"]) > BRANCH_MIN and not v.get("subshelves"):
+        if (
+            len(v["groups"]) > BRANCH_MIN
+            and not v.get("subshelves")
+            and not v.get("branch_tried")
+        ):
             subs = branch_page(v, run_fails, kind="тема")
             if subs:
                 v["subshelves"] = subs
                 n_b += 1
+            else:
+                # ⭐ МЕТКА ПОПЫТКИ. Модель нашла <2 под-темы → страница ЦЕЛЬНАЯ, резать
+                # нечего, и это НЕ сбой (в fails такое не пишем). Но без метки пульт зовёт
+                # на неё вечно — ровно как звал на 26 мёртвых мух. Работа считается той,
+                # которую МОЖНО сделать: попробовали и вышло цельно = сделано.
+                # Сбой ветвления метку НЕ ставит (он в run_fails) — там перепрогон нужен.
+                if not run_fails or run_fails[-1].get("shelf") != v.get("zadacha"):
+                    v["branch_tried"] = True
         if kratko and len(v["items"]) >= PAGE_MIN and not v.get("kratko"):
             if _stopped():
                 _atomic_json(fn, d)  # сохранить ДО выхода: вызовы не в трубу
@@ -336,11 +359,18 @@ def run(geo, kratko=False):
         sv["groups"] = group_view(sv, vv)
         n_sdups += len(sv["items"]) - len(sv["groups"])
         # ветвление полки-гиганта — штатный шаг комбайна (идемпотентно: не пере-жжём)
-        if len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
+        if (
+            len(sv["groups"]) > BRANCH_MIN
+            and not sv.get("subshelves")
+            and not sv.get("branch_tried")
+        ):
             subs = branch_page(sv, run_fails, kind="полка")
             if subs:
                 sv["subshelves"] = subs
                 n_b += 1
+            else:  # цельная полка — метка попытки, см. тот же случай у видов выше
+                if not run_fails or run_fails[-1].get("shelf") != sv.get("shelf"):
+                    sv["branch_tried"] = True
     if run_fails:  # неудачи рядом с данными — их читают отчёт и пульт
         d["fails"] = (d.get("fails") or []) + run_fails
     _atomic_json(fn, d)

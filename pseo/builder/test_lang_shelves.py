@@ -17,6 +17,7 @@
 
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -43,20 +44,32 @@ def ru_geo():
     def grp(i):  # дедуп-группа: реальные файлы их несут, и is_fresh на них смотрит
         return {"rep": i, "ids": [i], "n": 1}
 
+    # ⚠️ У каждой ветви ≥ dedup.BRANCH_ITEM_MIN пунктов. Первая версия этой фикстуры давала
+    # по два и была зелёной, потому что `carry_subs` тогда держала СВОЮ, более слабую копию
+    # правила («выбрасываем только пустую ветвь»). Порог теперь один — из dedup, — и данные
+    # обязаны его уважать, иначе ветвление законно снимается.
     return {
         "geo": "xx",
         "views_by_task": [
             {
                 "zadacha": "Обмен валюты",
-                "items": [it("v%d" % i) for i in range(4)],
-                "groups": [grp("v%d" % i) for i in range(4)],
+                "subshelves": [
+                    {"name": "ветка-один", "reps": ["v0", "v1", "v2", "v3"]},
+                    {"name": "ветка-два", "reps": ["v4", "v5", "v6", "v7"]},
+                ],
+                "items": [it("v%d" % i) for i in range(8)],
+                "groups": [grp("v%d" % i) for i in range(8)],
             }
         ],
         "shelves": [
             {
                 "shelf": SHELF_RU,
-                "items": [dict(it("s%d" % i), type="лайфхак") for i in range(3)],
-                "groups": [grp("s%d" % i) for i in range(3)],
+                "subshelves": [
+                    {"name": "полка-ветка-а", "reps": ["s0", "s1", "s2", "s3"]},
+                    {"name": "полка-ветка-б", "reps": ["s4", "s5", "s6", "s7"]},
+                ],
+                "items": [dict(it("s%d" % i), type="лайфхак") for i in range(8)],
+                "groups": [grp("s%d" % i) for i in range(8)],
             }
         ],
         "prochee": [],
@@ -110,7 +123,7 @@ if __name__ == "__main__":
 
     # 1. Мухи ПОЛКИ попали в набор на перевод — раньше их там не было вовсе.
     good &= ok(
-        {"s0", "s1", "s2"} <= set(seen_ids),
+        {"s0", "s3", "s7"} <= set(seen_ids),
         "1. мухи хвоста ушли на перевод",
         "переведено id: %d" % len(seen_ids),
     )
@@ -118,9 +131,9 @@ if __name__ == "__main__":
     # 2. Полки в файле, имя переведено, ключ адреса — латинский из таксономии.
     sh = out.get("shelves") or []
     good &= ok(
-        len(sh) == 1 and len(sh[0]["items"]) == 3,
+        len(sh) == 1 and len(sh[0]["items"]) == 8,
         "2. полка в выходном файле",
-        "полок %d" % len(sh),
+        "полок %d, абзацев %d" % (len(sh), len(sh[0]["items"]) if sh else 0),
     )
     if sh:
         good &= ok(
@@ -167,6 +180,32 @@ if __name__ == "__main__":
         "done=%r" % lr.done("xx", "old"),
     )
     good &= ok(lr.done("xx", "de"), "   и считает готовым файл с полками")
+
+    # 5. ⭐ ВЕТВЛЕНИЕ ДОЕЗЖАЕТ ДО ЯЗЫКА. Перевод его не нёс ВООБЩЕ, а `pages.py` строит хаб
+    #    с ветками именно по `subshelves` — значит языки собирались бы простынями при уже
+    #    разрезанном русском. И `is_fresh` про ветви не знал: файл считался готовым НАВСЕГДА,
+    #    и исправить это было бы нечем, кроме ручного сноса файлов.
+    tv = out["views_by_task"][0]
+    tsh = (out.get("shelves") or [{}])[0]
+    good &= ok(
+        len(tv.get("subshelves") or []) == 2,
+        "5. ветвление вида доехало до перевода",
+        "ветвей %d" % len(tv.get("subshelves") or []),
+    )
+    good &= ok(
+        len(tsh.get("subshelves") or []) == 2,
+        "   и ветвление полки тоже",
+        "ветвей %d" % len(tsh.get("subshelves") or []),
+    )
+    good &= ok(
+        all(not re.search("[а-яё]", x["name"], re.I) for x in tv["subshelves"]),
+        "   имена ветвей переведены (иначе кириллический URL)",
+        str([x["name"] for x in tv["subshelves"]]),
+    )
+    good &= ok(
+        out.get("branches_carried") is True,
+        "   признак формата branches_carried стоит",
+    )
 
     print("\nVERDICT:", "OK — полки доезжают до переводов" if good else "FAIL")
     sys.exit(0 if good else 1)
