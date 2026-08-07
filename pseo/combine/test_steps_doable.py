@@ -14,7 +14,8 @@
          исключение съедалось, множество мёртвых было ПУСТЫМ всегда: 26 мух звали вечно.
   шаг 1  гео, где раскладывать нечего — `nl`: одна муха, 0 видов, 0 полок.
   шаг 2  страницы, где ветвление ПРОБОВАЛИ и вышло цельно (<2 под-тем) — не сбой, а «сделано».
-  шаг 3  переводы — проверены аудитом, здоровы; сторожим, что не завелось нового.
+  шаг 3  адреса — узел без `key`; без него нелатинские языки страниц не собирают.
+  шаг 4  переводы — проверены аудитом, здоровы; сторожим, что не завелось нового.
 
 Запуск:  BRAIN_DIR=<пусто> COMBINE_BOT_TOKEN=x ADMIN_ID=1 python test_steps_doable.py
 """
@@ -119,7 +120,43 @@ if __name__ == "__main__":
         "   и int(hex) в КОДЕ пульта больше нет",
     )
 
-    # ── ШАГ 3: переводы. Русские данные есть, переводов нет → работа ЕСТЬ (это верно).
+    # ── ШАГ 3: АДРЕСА. Узел без `key` — выполнимая работа: штамповка переведёт русскую
+    #    метку в английскую и сделает из неё хвост. Узел с ключом работой не считается.
+    #    Врезано 08.08: до этого штамповку не звал НИКТО — ни шаг, ни кнопка, ни цикл,
+    #    хотя без адреса нелатинские языки (zh ja ko ar hi th) страниц не собирают вовсе.
+    for f in os.listdir(f"{BRAIN}/out_facet"):
+        os.remove(f"{BRAIN}/out_facet/{f}")
+    geo_file("dd", views=[big("zadacha", "без адреса", 6)])
+    s = bot.pipeline_state()
+    steps = {x["kind"]: len(x["jobs"]) for x in bot.pipeline_steps(s)}
+    good &= ok(
+        steps.get("stamp") == 1 and s["no_addr_n"] == 1,
+        "шаг 3: вид без адреса → работа есть",
+        "работ=%s, узлов=%s" % (steps.get("stamp"), s["no_addr_n"]),
+    )
+    v = big("zadacha", "с адресом", 6)
+    v["key"] = "money"
+    v["subshelves"] = [{"name": "ветка", "reps": ["i0"], "key": "branch"}]
+    geo_file("dd", views=[v])
+    s = bot.pipeline_state()
+    steps = {x["kind"]: len(x["jobs"]) for x in bot.pipeline_steps(s)}
+    good &= ok(
+        steps.get("stamp") == 0,
+        "   адреса на месте (и у вида, и у ветви) → работы нет",
+        "работ=%s" % steps.get("stamp"),
+    )
+    v2 = big("zadacha", "ветвь без адреса", 6)
+    v2["key"] = "money"
+    v2["subshelves"] = [{"name": "ветка", "reps": ["i0"]}]  # у ВЕТВИ ключа нет
+    geo_file("dd", views=[v2])
+    s = bot.pipeline_state()
+    good &= ok(
+        s["no_addr_n"] == 1,
+        "   ветвь без адреса тоже считается (у неё свой под-адрес)",
+        "узлов=%s" % s["no_addr_n"],
+    )
+
+    # ── ШАГ 4: переводы. Русские данные есть, переводов нет → работа ЕСТЬ (это верно).
     for f in os.listdir(f"{BRAIN}/out_facet"):
         os.remove(f"{BRAIN}/out_facet/{f}")
     geo_file("aa", views=[big("zadacha", "t", 8)])
@@ -127,7 +164,7 @@ if __name__ == "__main__":
     steps = {x["kind"]: len(x["jobs"]) for x in bot.pipeline_steps(s)}
     good &= ok(
         steps.get("translate") == 1,
-        "шаг 3: переводов нет → работа есть",
+        "шаг 4: переводов нет → работа есть",
         "работ=%s" % steps.get("translate"),
     )
 
