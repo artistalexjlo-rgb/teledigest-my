@@ -28,21 +28,54 @@ OUT = f"{BASE}/out"
 PAGES_REPO = os.path.abspath(f"{BASE}/../../multyspeak-pages")
 VPS = "root@199.195.252.114"
 VPS_DIR = "/root/pseo_builder"
+# Контейнер комбайна: в нём живут АКТУАЛЬНЫЕ рты (/app/builder), а на хосте .py протухли
+# 20.07. Имя ищем префиксом — Dokploy добавляет свой хеш задачи и меняет его при редеплое.
+PULT_NAME = "bots-luky-rodzkl"
 
 
 def sh(cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
+def _buildable_langs():
+    """Языки, которые сборщик РЕАЛЬНО умеет собрать: нужны и тексты портала (pages.COPY),
+    и словарь рендера (i18n/<lang>.json). Один источник правды для того, что тянуть.
+
+    ⛔ НЕ тянем всё подряд по маске `out_facet_*`: комбайн переводит в 13 языков, а собрать
+    можно 4 — на остальные нет ни COPY, ни i18n, и `pages.langs_for` их молча пропустит.
+    Разница в объёме: 291 МБ против 53 МБ, и 238 из них — данные, которые нечем отрендерить.
+    """
+    import sys as _sys
+
+    if BUILT not in _sys.path:
+        _sys.path.insert(0, BUILT)
+    import pages as _pages
+
+    have_i18n = {f[:-5] for f in os.listdir(f"{BASE}/i18n") if f.endswith(".json")}
+    return sorted(set(_pages.COPY) & have_i18n)
+
+
 def step_pull(only=None):
-    """Забрать built-данные + runner_stamps (метка «гео дозрел») с VPS одним tar."""
+    """Забрать built-данные + runner_stamps (метка «гео дозрел») с VPS одним tar.
+
+    ⭐ ТЯНЕМ И ПЕРЕВОДЫ (2026-08-07). Раньше в таре были только `out_facet` (ru) и
+    `out_questions` — каталоги `out_facet_<lang>` не приезжали ВООБЩЕ. Итог: на десктопе
+    лежали копии en/es/pt от 10-12 июля (34 гео вместо 90, без полок), а свежие переводы
+    всех 90 гео с полками стояли на VPS и до сайта не доходили. Трёхдневный прогон
+    переводов физически не мог попасть в публикацию.
+    """
+    langs = [x for x in _buildable_langs() if x != "ru"]  # ru лежит в out_facet
+    dirs = " ".join(
+        ["out_facet"] + [f"out_facet_{x}" for x in langs] + ["out_questions"]
+    )
+    # -z обязателен: без сжатия это 291 МБ, и base64 в память лёг бы четырьмястами.
     r = sh(
         [
             "ssh",
             "-o",
             "ConnectTimeout=25",
             VPS,
-            f"cd {VPS_DIR} && tar cf - out_facet out_questions runner_stamps.json 2>/dev/null | base64 -w0",
+            f"cd {VPS_DIR} && tar czf - {dirs} runner_stamps.json 2>/dev/null | base64 -w0",
         ]
     )
     if r.returncode != 0 or not r.stdout.strip():
@@ -53,12 +86,61 @@ def step_pull(only=None):
     import tarfile
 
     buf = io.BytesIO(base64.b64decode(r.stdout.strip()))
-    with tarfile.open(fileobj=buf) as tf:
+    with tarfile.open(fileobj=buf, mode="r:gz") as tf:
         tf.extractall(BUILT, filter="data")
     n_f = len([f for f in os.listdir(f"{BUILT}/out_facet") if f.endswith(".json")])
     n_q = len([f for f in os.listdir(f"{BUILT}/out_questions") if f.endswith(".json")])
-    print(f"pull: факт-гео {n_f}, вопрос-гео {n_q}")
+    per_lang = ", ".join(
+        "%s %d"
+        % (
+            x,
+            len(
+                [f for f in os.listdir(f"{BUILT}/out_facet_{x}") if f.endswith(".json")]
+            ),
+        )
+        for x in langs
+        if os.path.isdir(f"{BUILT}/out_facet_{x}")
+    )
+    print(f"pull: факт-гео {n_f}, вопрос-гео {n_q}, переводы: {per_lang}")
+    _pull_mature()
     return True
+
+
+def _pull_mature():
+    """Забрать ВЫЧИСЛЕННУЮ зрелость гео из комбайна (facet.py --mature).
+
+    ⭐ ЗАМЕНА МЁРТВЫМ ШТАМПАМ (2026-08-07). Гейт ниже пускал гео только по
+    `runner_stamps.json`, а писал его `pseo-runner` — снесённый 20.07. Файл замёрз на
+    36 гео из 90, и всё собранное позже не поехало бы никогда. Считать зрелость на
+    десктопе нельзя: база мух и tags/ живут на VPS. Поэтому спрашиваем у того, кто по
+    этому правилу берёт работу, — у facet в контейнере комбайна.
+    ⛔ Не дублировать правило здесь: ровно на таких копиях мы горели трижды за сутки.
+    Не ответил — молчим и падаем на старые штампы (гейт станет строже, не слабее).
+    """
+    r = sh(
+        [
+            "ssh",
+            "-o",
+            "ConnectTimeout=25",
+            VPS,
+            f"id=$(docker ps -q -f name={PULT_NAME} | head -1); "
+            f"docker exec -w {VPS_DIR} $id python /app/builder/facet.py --mature",
+        ]
+    )
+    txt = (r.stdout or "").strip().splitlines()
+    try:
+        data = json.loads(txt[-1]) if txt else None
+        assert isinstance(data, dict) and data
+    except Exception:
+        print("pull: зрелость не получена — гейт пойдёт по старым штампам")
+        return
+    json.dump(
+        data,
+        open(f"{BUILT}/mature_geos.json", "w", encoding="utf-8"),
+        ensure_ascii=False,
+    )
+    n = sum(1 for v in data.values() if v)
+    print(f"pull: зрелость посчитана комбайном — зрелых {n} из {len(data)}")
 
 
 def step_pages(only=None):
@@ -113,19 +195,75 @@ def bad_geos():
     return bad
 
 
+def _repo_path_for(loc):
+    """URL из sitemap → путь файла в pages-репо. '/ru/ar/' → 'ru/ar/index.html'."""
+    rel = re.sub(r"^https?://[^/]+", "", loc).strip("/")
+    return os.path.join(PAGES_REPO, *(rel.split("/") if rel else []), "index.html")
+
+
+def _write_filtered_sitemap():
+    """Sitemap = только то, что РЕАЛЬНО лежит в pages-репо, а не всё, что собралось.
+
+    ⭐ ЗАЧЕМ (2026-08-07). Карта копировалась из `out/` целиком, а гейт отсекал часть гео
+    ПОЗЖЕ. Итог: 188 русских адресов задержанных гео стояли в sitemap, а страниц по ним на
+    сайте не было. Мы своей же картой звали Google на несуществующее — и теперь, когда
+    появился настоящий 404, он бы честно их получил.
+
+    ⛔ Фильтруем ПО ФАЙЛАМ, а не по списку уехавших гео: гейт русский, языковые деревья
+    едут целиком, и правило «что уехало» у них разное. Проверка наличия файла верна для
+    любого языка — плюс десять языков тут ничего не меняют.
+    Даты (`lastmod`) сохраняются как есть: их ставит pages.py постранично.
+    """
+    src = f"{OUT}/sitemap.xml"
+    if not os.path.exists(src):
+        print("sitemap: нет out/sitemap.xml — пропускаю")
+        return
+    xml = open(src, encoding="utf-8").read()
+    blocks = re.findall(r"  <url>.*?</url>\n", xml, re.S)
+    kept, dropped = [], []
+    for b in blocks:
+        m = re.search(r"<loc>([^<]+)</loc>", b)
+        if m and os.path.exists(_repo_path_for(m.group(1))):
+            kept.append(b)
+        elif m:
+            dropped.append(m.group(1))
+    out = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(kept)
+        + "</urlset>\n"
+    )
+    open(f"{PAGES_REPO}/sitemap.xml", "w", encoding="utf-8").write(out)
+    print(f"sitemap: {len(kept)} адресов; выкинуто без файла {len(dropped)}")
+    if dropped:
+        print("         примеры:", ", ".join(dropped[:3]))
+
+
 def step_push(dry, only=None):
     bad = bad_geos()
     # completeness-гейт: НОВАЯ модель гео едет только когда блок ДОЗРЕЛ (runner stamps —
     # гео исчерпан при текущих данных). Частично-тегнутое гео = тонкая замена богатого старого
     # → держим. Гео БЕЗ built-данных (старые страницы, не тронуты pages.py) — едут как были.
-    try:
-        stamps = set(json.load(open(f"{BUILT}/runner_stamps.json", encoding="utf-8")))
-    except Exception:
-        stamps = set()
     built_geos = {
         f[:-5] for f in os.listdir(f"{BUILT}/out_facet") if f.endswith(".json")
     }
-    immature = built_geos - stamps  # начали тегать, но не дозрели
+    # ЗРЕЛОСТЬ: считает комбайн (facet.py --mature), привозит _pull_mature. Старые штампы —
+    # только запасной путь: их писал pseo-runner, снесённый 20.07, и файл замёрз на 36 гео
+    # из 90. Пока он был единственным источником, всё собранное после 19.07 не ехало вовсе.
+    try:
+        mature = json.load(open(f"{BUILT}/mature_geos.json", encoding="utf-8"))
+        immature = {g for g in built_geos if not mature.get(g)}
+        src = "вычислено комбайном"
+    except Exception:
+        try:
+            stamps = set(
+                json.load(open(f"{BUILT}/runner_stamps.json", encoding="utf-8"))
+            )
+        except Exception:
+            stamps = set()
+        immature = built_geos - stamps
+        src = "СТАРЫЕ ШТАМПЫ (замёрзли 19.07) — зрелость не приехала"
+    print(f"gate: зрелость — {src}")
     geos = sorted(
         {
             d
@@ -164,9 +302,9 @@ def step_push(dry, only=None):
         if os.path.isdir(dst):
             shutil.rmtree(dst)
         shutil.copytree(f"{OUT}/{lang}", dst)
-    for f in ("sitemap.xml", "robots.txt"):
-        if os.path.exists(f"{OUT}/{f}"):
-            shutil.copy2(f"{OUT}/{f}", f"{PAGES_REPO}/{f}")
+    if os.path.exists(f"{OUT}/robots.txt"):
+        shutil.copy2(f"{OUT}/robots.txt", f"{PAGES_REPO}/robots.txt")
+    _write_filtered_sitemap()
     sh(["git", "add", "-A"], cwd=PAGES_REPO)
     msg = f"pSEO ship: {len(go)} geo blocks ({', '.join(go)})\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
     sh(["git", "commit", "-m", msg], cwd=PAGES_REPO)
