@@ -299,11 +299,26 @@ def pipeline_state():
         "geos": 0,
         "views": 0,
         "no_kratko": 0,
+        "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
         "no_shelf": [],
         "langs": [],
         "failed": [],
         "pending_facet": [],  # гео с новыми (непротегованными) мухами → ждут facet
     }
+    # Порог ветвления — из dedup, единственного владельца правила. Литералом нельзя:
+    # ровно так DEAD_AT разъехался тройками по трём файлам.
+    try:
+        import sys as _sys
+
+        if BUILDER not in _sys.path:
+            _sys.path.insert(0, BUILDER)
+        import dedup as _dedup
+
+        _BRANCH_MIN = _dedup.BRANCH_MIN
+    except Exception:
+        _BRANCH_MIN = (
+            10**9
+        )  # не смогли прочитать порог → НЕ выдумываем, работы просто нет
     try:
         files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
         st["geos"] = len(files)
@@ -317,6 +332,24 @@ def pipeline_state():
             ]
             st["views"] += len(vs)
             st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
+            # ⭐ ВЕТВЛЕНИЕ — ТОЖЕ РАБОТА ШАГА 2 (2026-08-07). `dedup.py` делает две вещи:
+            # короткие ответы И ветвление страниц-гигантов, а метрика смотрела только на
+            # первую. Итог: шаг показывал ✅ при 95 недоделанных страницах, кнопка не
+            # срабатывала (у шага ноль работ), «ВСЁ ПО ПОРЯДКУ» его пропускало. Третий за
+            # сутки случай одной болезни: шаг считает не ту работу.
+            # Порог берём из dedup, а не литералом — иначе разъедется, как разъезжался
+            # DEAD_AT тройками по коду.
+            st["no_branch"] += sum(
+                1
+                for v in d.get("views_by_task", [])
+                if len(v.get("groups") or v.get("items") or []) > _BRANCH_MIN
+                and not v.get("subshelves")
+            ) + sum(
+                1
+                for sh in d.get("shelves", [])
+                if len(sh.get("groups") or sh.get("items") or []) > _BRANCH_MIN
+                and not sh.get("subshelves")
+            )
             if not (d.get("shelves") or []):
                 st["no_shelf"].append(geo)
             # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
@@ -444,11 +477,29 @@ def state_card():
         todo.append("assign")
     else:
         lines.append("1) хвост→полки: ✅ все гео")
-    if s["no_kratko"]:
-        lines.append(f"2) без короткого ответа: {s['no_kratko']} видов")
+    if s["no_kratko"] or s["no_branch"]:
+        lines.append(
+            "2) шаг dedup: "
+            + ", ".join(
+                x
+                for x in (
+                    (
+                        f"{s['no_kratko']} видов без короткого ответа"
+                        if s["no_kratko"]
+                        else ""
+                    ),
+                    (
+                        f"{s['no_branch']} страниц-гигантов без ветвления"
+                        if s["no_branch"]
+                        else ""
+                    ),
+                )
+                if x
+            )
+        )
         todo.append("kratko")
     else:
-        lines.append("2) короткие ответы: ✅ все виды")
+        lines.append("2) короткие ответы и ветвление: ✅")
     if s["langs"]:
         worst = ", ".join(
             f"{lang}(нет {m}, устар {st_})" for lang, m, st_ in s["langs"][:5]
@@ -828,10 +879,22 @@ def pipeline_steps(s):
         },
         {
             "kind": "kratko",
-            "jobs": [("kratko", None)] if s["no_kratko"] else [],
+            # РАБОТА ШАГА 2 = что делает dedup: короткие ответы И ветвление гигантов.
+            # Считать только kratko значило показывать ✅ при 95 нетронутых страницах.
+            "jobs": ([("kratko", None)] if (s["no_kratko"] or s["no_branch"]) else []),
             "geos": [],
             "label": (
-                f"2. Kratko — {s['no_kratko']} видов" if s["no_kratko"] else "2. Kratko"
+                "2. Kratko — "
+                + ", ".join(
+                    x
+                    for x in (
+                        f"{s['no_kratko']} видов без ответа" if s["no_kratko"] else "",
+                        f"{s['no_branch']} на ветвление" if s["no_branch"] else "",
+                    )
+                    if x
+                )
+                if (s["no_kratko"] or s["no_branch"])
+                else "2. Kratko"
             ),
             "note": "",
         },
@@ -919,6 +982,7 @@ def start_cycle(job):
         sum(x["n"] for x in fq)  # разметка: батч 25, но worst-case — запрос на муху
         + len(s["no_shelf"]) * 70
         + s["no_kratko"]
+        + s["no_branch"]  # ветвление: ~1 запрос на страницу-гиганта
         + sum((m + st_) * 3 for _, m, st_ in s["langs"])
     )
     plan = " → ".join(

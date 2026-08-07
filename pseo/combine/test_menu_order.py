@@ -29,6 +29,7 @@ def state(**kw):
         "geos": 0,
         "views": 0,
         "no_kratko": 0,
+        "no_branch": 0,
         "no_shelf": [],
         "langs": [],
         "failed": [],
@@ -111,6 +112,24 @@ if __name__ == "__main__":
     only_tr = state(langs=[("en", 1, 0)])
     first = next((x["kind"] for x in bot.pipeline_steps(only_tr) if x["jobs"]), None)
     good &= ok(first == "translate", "7. стрелка на первом шаге с работой", str(first))
+
+    # 8. ⭐ ШАГ 2 = РАБОТА dedup, а не только kratko. `dedup.py` делает две вещи: короткие
+    #    ответы И ветвление страниц-гигантов. Метрика смотрела лишь на первую, и шаг
+    #    показывал ✅ при 95 нетронутых страницах — кнопка не срабатывала, а «ВСЁ ПО
+    #    ПОРЯДКУ» шаг пропускало. Третий за сутки случай одной болезни: шаг считает не ту
+    #    работу. Проверяем случай, где kratko готов, а ветвить есть что.
+    only_branch = state(no_branch=7)
+    st_k = [x for x in bot.pipeline_steps(only_branch) if x["kind"] == "kratko"][0]
+    good &= ok(
+        len(st_k["jobs"]) == 1 and "ветвлен" in st_k["label"],
+        "8. шаг 2 видит ветвление как работу (не только kratko)",
+        st_k["label"],
+    )
+    good &= ok(
+        next((x["kind"] for x in bot.pipeline_steps(only_branch) if x["jobs"]), None)
+        == "kratko",
+        "   и стрелка встаёт на него",
+    )
 
     print("\nVERDICT:", "OK — меню и цикл идут по одному списку" if good else "FAIL")
     sys.exit(0 if good else 1)
