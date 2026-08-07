@@ -8,6 +8,7 @@
 """
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -305,6 +306,89 @@ def add_kratko(geo, lang):
         return 0
 
 
+def _src_hash(t):
+    """Короткий отпечаток ИСХОДНОГО текста мухи. По нему видно, что источник переписали и
+    перевод устарел, — иначе устаревший перевод жил бы под тем же id вечно и незаметно.
+    """
+    return hashlib.sha1((t or "").encode("utf-8")).hexdigest()[:8]
+
+
+def harvest(path, en_text):
+    """Достать из УЖЕ ЛЕЖАЩЕГО языкового файла то, что не надо покупать заново.
+
+    ⛔ ЗАЧЕМ (2026-08-08). `run()` собирал файл с нуля: переводил ВСЕ тексты, хотя они уже
+    лежали под теми же языко-независимыми id, и терял короткие ответы, потому что писал
+    словарь без них, а `dedup.kratko_lang` наполняет только пустые. Значит цена смены
+    формата равнялась цене КОРПУСА, а не размеру изменения. Замер: полный пере-перевод
+    90 гео × 13 языков = ~3900 запросов текста + ~1500 меток + 23 506 коротких ответов
+    ≈ 29 000, шесть дневных пулов, ~110 часов. И это уже случалось однажды — полки 27.07.
+
+    Возвращает (text, nodes):
+      text  — {id: перевод} для мух, чей ИСТОЧНИК не изменился;
+      nodes — [{"ids", "label", "kratko", "src"}] — для переноса метки и короткого ответа.
+
+    ⚠️ Отпечаток. Муха с переписанным `ai_lesson` под тем же id обязана перевестись заново,
+    иначе перевод устареет навсегда. У файлов, собранных до этой правки, отпечатка нет — их
+    переводы принимаем как есть и штампуем отпечаток на будущее. Осознанный разовый риск
+    (перевод мог быть снят с уже изменённого текста) против прогона на 29 000 запросов.
+    """
+    try:
+        old = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return {}, []
+    text, nodes, stale = {}, [], 0
+    for key, lab in (("views_by_task", "zadacha"), ("shelves", "shelf")):
+        for n in old.get(key) or []:
+            ids = []
+            for it in n.get("items") or []:
+                if not it.get("text"):
+                    continue
+                h = it.get("h")
+                if h and h != _src_hash(en_text.get(it["id"])):
+                    stale += 1  # источник переписан → перевод не годится
+                    continue
+                text[it["id"]] = it["text"]
+                ids.append(it["id"])
+            if ids:
+                nodes.append(
+                    {
+                        "ids": frozenset(ids),
+                        "label": n.get(lab),
+                        "kratko": n.get("kratko"),
+                        "src": n.get("src"),
+                    }
+                )
+    if stale:
+        print(f"  источник переписан у {stale} мух — переведём заново", flush=True)
+    return text, nodes
+
+
+def bind_nodes(ru_nodes, label_field, old_nodes):
+    """Сопоставить русский узел с узлом лежащего перевода → что у него можно забрать.
+
+    ⛔ Соединять по СОСТАВУ id, а не по метке: метка локализована. Но состав языкового узла
+    это ПОДМНОЖЕСТВО русского (мухи, чей перевод не дошёл, выпали), поэтому ищем узел,
+    целиком вложенный в русский. И требуем ОДНОЗНАЧНОСТИ: одна муха может попасть в
+    несколько видов, значит вложенность бывает не уникальной — тогда НЕ переносим ничего.
+    Перенести чужой короткий ответ хуже, чем заплатить за новый.
+
+    Точное соединение по `src` (русская метка, которую мы теперь пишем в файл) имеет
+    приоритет: файлам следующего поколения эвристика не понадобится вовсе.
+    """
+    by_src = {o["src"]: o for o in old_nodes if o.get("src")}
+    taken, out = set(), {}
+    for ru in ru_nodes:
+        o = by_src.get(ru[label_field])
+        if o is None:
+            rids = frozenset(i["id"] for i in ru.get("items") or [])
+            hits = [x for x in old_nodes if x["ids"] <= rids and id(x) not in taken]
+            o = hits[0] if len(hits) == 1 else None
+        if o is not None:
+            taken.add(id(o))
+            out[id(ru)] = o
+    return out
+
+
 def stamp_keys(geo):
     """Проштамповать АДРЕСА в РУССКИЙ файл гео: `key` каждому страничному виду и каждой ветви.
 
@@ -387,12 +471,19 @@ def run(geo, lang):
     con.close()
     en_text = {r[0]: (r[1] or "").strip() for r in rows}
 
+    # Что уже переведено и лежит — не покупаем заново (см. harvest).
+    have_text, old_nodes = harvest(out_path, en_text)
     if lang == "en":
         text = en_text
     else:
-        text, reason = translate_texts(
-            en_text, lang
-        )  # ПЛАТНАЯ часть, квоту держит мозг
+        need = {i: t for i, t in en_text.items() if i not in have_text}
+        got, reason = translate_texts(need, lang) if need else ({}, None)
+        text = {**have_text, **got}
+        if have_text:
+            print(
+                f"{geo}/{lang}: переводов перенесено {len(have_text)}, куплено {len(got)}",
+                flush=True,
+            )
         if reason:  # пул не отдал (после ретраев внутри translate_texts) → гео НЕ пишем
             # маркер НЕУДАЧ → цикл перепройдёт фазу (транзиент пула), 3 раза не вышло →
             # стоп-машина. В fails писать НЕКУДА: языкового файла не создаём (иначе
@@ -414,9 +505,29 @@ def run(geo, lang):
             for sub in (src.get("subshelves") or [])
         }
     )
-    label_map = translate_labels(
-        [v["zadacha"] for v in views] + shelf_names + sub_names, lang
-    )
+    # МЕТКИ тоже переносим — перевод метки не меняется от того, что мы её однажды купили.
+    # Имена ВЕТВЕЙ переносить нечего: их в старых файлах не было по построению.
+    bound_v = bind_nodes(views, "zadacha", old_nodes)
+    bound_s = bind_nodes(shelves, "shelf", old_nodes)
+    carried = {}
+    for group, field, bound in (
+        (views, "zadacha", bound_v),
+        (shelves, "shelf", bound_s),
+    ):
+        for x in group:
+            o = bound.get(id(x))
+            if o and o.get("label") and not _has_cyr(o["label"]):
+                carried[x[field]] = o["label"]
+    want = [v["zadacha"] for v in views] + shelf_names + sub_names
+    need_lab = sorted({x for x in want if x not in carried})
+    label_map = dict(carried)
+    if need_lab:
+        label_map.update(translate_labels(need_lab, lang))
+    if carried:
+        print(
+            f"{geo}/{lang}: меток перенесено {len(carried)}, куплено {len(need_lab)}",
+            flush=True,
+        )
     rol = ROL.get(lang, ROL["en"])  # прочие языки — англ. роли (не блокируем)
 
     out_views = []
@@ -433,6 +544,9 @@ def run(geo, lang):
                 {
                     "id": it["id"],
                     "text": t,
+                    # отпечаток ИСХОДНИКА: по нему следующий прогон увидит, что русский
+                    # текст переписали, и переведёт эту муху заново вместо старого
+                    "h": _src_hash(en_text.get(it["id"])),
                     "sushnosti": [
                         {"imya": e["imya"], "rol": rol.get(e["rol"], e["rol"])}
                         for e in it.get("sushnosti") or []
@@ -442,7 +556,16 @@ def run(geo, lang):
                 }
             )
         if len(items) >= 4:  # после отсева мог упасть ниже порога
-            tv = {"zadacha": lbl, "items": items}
+            # `src` — РУССКАЯ метка. Пишем, чтобы следующий прогон соединял узлы точно, а не
+            # вложенностью составов: эвристика нужна лишь файлам прошлого поколения.
+            tv = {"zadacha": lbl, "items": items, "src": v["zadacha"]}
+            o = bound_v.get(id(v))
+            # КОРОТКИЙ ОТВЕТ переносим только при НЕИЗМЕННОМ составе: он выжимка ровно из
+            # этих абзацев, и по изменившемуся содержимому стал бы неправдой. Сравнение
+            # точное, без порога «на глаз»: теперь, когда переводы переносятся, состав
+            # повторяется в точности, если русский вид не оброс новыми мухами.
+            if o and o.get("kratko") and o["ids"] == {it["id"] for it in items}:
+                tv["kratko"] = o["kratko"]
             if v.get("key"):
                 # АДРЕС страницы. Английский и ОДИН на все языки (канон §0.11): хвост
                 # `/ru/br/money/` = `/zh/br/money/`. Без него слаг считался бы от
@@ -477,6 +600,7 @@ def run(geo, lang):
                 {
                     "id": it["id"],
                     "text": t,
+                    "h": _src_hash(en_text.get(it["id"])),
                     "sushnosti": [
                         {"imya": e["imya"], "rol": rol.get(e["rol"], e["rol"])}
                         for e in it.get("sushnosti") or []
@@ -494,6 +618,9 @@ def run(geo, lang):
             "shelf": label_map.get(sh["shelf"], sh["shelf"]),
             "key": SHELF_KEY.get(sh["shelf"], ""),
             "items": s_items,
+            "src": sh[
+                "shelf"
+            ],  # русское имя — для точного соединения на следующем прогоне
         }
         kept = {i["id"] for i in s_items}
         if sh.get("groups"):
