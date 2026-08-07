@@ -9,6 +9,7 @@
 есть built-данные). Дальше — render.py --all + валидация (readycheck).
 """
 
+import datetime
 import glob
 import hashlib
 import json
@@ -825,10 +826,37 @@ def load(p):
         return None
 
 
+_TODAY_ISO = datetime.date.today().isoformat()
+UPDATED = datetime.date.today().strftime("%m.%Y")  # подпись в подвале, формат MM.YYYY
+
+
 def write(name, obj):
-    json.dump(
-        obj, open(f"{DATA}/{name}", "w", encoding="utf-8"), ensure_ascii=False, indent=1
-    )
+    """Записать страницу, проставив дату. ЕДИНСТВЕННОЕ место, где она ставится.
+
+    ⭐ ЗАЧЕМ (2026-08-07). `<lastmod>` в sitemap — подсказка Google «стоит ли перечитывать».
+    Раньше дата была РУЧНЫМ аргументом `render.py --all <дата>`: кто-то вписал `2026-07-06`,
+    и она месяц ехала во все 2185 адресов. То есть мы говорили «здесь ничего не менялось» —
+    при том что 19-20.07 сайт пересобрали целиком. Обход это подавляет.
+
+    ⛔ И НЕ штампуем сегодняшнюю дату всем подряд: если содержимое не изменилось, дата
+    остаётся прежней. Свежий `lastmod` на неизменной странице — ложь поисковику, и он от
+    таких сигналов быстро отучается им верить. Поэтому сравниваем с тем, что уже лежит,
+    игнорируя сами поля даты, и переставляем дату ТОЛЬКО при реальном отличии.
+    """
+    p = f"{DATA}/{name}"
+    keep = None
+    try:
+        prev = json.load(open(p, encoding="utf-8"))
+        strip = {"updated", "updated_iso"}
+        if {k: v for k, v in prev.items() if k not in strip} == {
+            k: v for k, v in obj.items() if k not in strip
+        }:
+            keep = prev.get("updated_iso")  # содержимое то же → дату не трогаем
+    except Exception:
+        pass  # файла нет или битый — считаем изменением, ставим сегодня
+    obj["updated"] = UPDATED
+    obj["updated_iso"] = keep or _TODAY_ISO
+    json.dump(obj, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
 def chips_for(cur_slug, siblings):
@@ -884,7 +912,6 @@ def build_geo(geo, lang="ru"):
             "geo": geo,
             "geo_name": name,
             "intent_name": tema,
-            "updated": "07.2026",
             "title": C["fact_title"].format(name=name, tl=tl(tema)),
             "meta_desc": C["fact_desc"].format(name=name, namep=namep, tl=tl(tema)),
             "h1": pick(C["FHEAD"], geo + s).format(t=cap(tema), g=name, gp=namep),
@@ -935,7 +962,6 @@ def build_geo(geo, lang="ru"):
                 "geo": geo,
                 "geo_name": name,
                 "intent_name": g["tema"],
-                "updated": "07.2026",
                 "title": C["q_title"].format(name=name, tl=tl(g["tema"])),
                 "meta_desc": C["q_desc"].format(name=name, tl=tl(g["tema"])),
                 "h1": pick(C["QHEAD"], geo + s + "q").format(t=g["tema"]),
@@ -972,7 +998,6 @@ def build_geo(geo, lang="ru"):
                 "path": f"/{lang}/{geo}/q/",
                 "geo": geo,
                 "geo_name": name,
-                "updated": "07.2026",
                 "title": C["qhub_title"].format(name=name),
                 "meta_desc": C["qhub_desc"].format(name=name),
                 "h1": C["qhub_h1"],
@@ -1026,7 +1051,6 @@ def build_geo(geo, lang="ru"):
                 "geo": geo,
                 "geo_name": name,
                 "intent_name": sv["shelf"],
-                "updated": "07.2026",
                 "title": C["shelf_title"].format(name=name, tl=tl(sv["shelf"])),
                 "meta_desc": C["shelf_desc"].format(
                     name=name, namep=namep, tl=tl(sv["shelf"])
@@ -1069,7 +1093,6 @@ def build_geo(geo, lang="ru"):
                         "geo": geo,
                         "geo_name": name,
                         "intent_name": sub["name"],
-                        "updated": "07.2026",
                         "title": C["shelf_title"].format(name=name, tl=tl(sub["name"])),
                         "meta_desc": C["shelf_desc"].format(
                             name=name, namep=namep, tl=tl(sub["name"])
@@ -1141,7 +1164,6 @@ def build_geo(geo, lang="ru"):
                 "path": f"/{lang}/{geo}/s/",
                 "geo": geo,
                 "geo_name": name,
-                "updated": "07.2026",
                 "title": C["shub_title"].format(name=name),
                 "meta_desc": C["shub_desc"].format(name=name),
                 "h1": C["shub_h1"],
@@ -1182,7 +1204,6 @@ def build_geo(geo, lang="ru"):
             "path": f"/{lang}/{geo}/",
             "geo": geo,
             "geo_name": name,
-            "updated": "07.2026",
             "title": C["hub_title"].format(name=name),
             "meta_desc": C["hub_desc"].format(name=name),
             "h1": name,
@@ -1220,7 +1241,6 @@ def build_home(lang, geos, counts=None):
             "lang": lang,
             "template": "home.html.j2",
             "path": f"/{lang}/",
-            "updated": "07.2026",
             "crumb_label": None,
             "title": HA["home_title"],
             "meta_desc": HA["home_desc"],
@@ -1241,7 +1261,6 @@ def build_about(lang):
             "lang": lang,
             "template": "index.html.j2",
             "path": f"/{lang}/about/",
-            "updated": "07.2026",
             "crumb_label": HA["about_crumb"],
             "title": HA["about_title"],
             "meta_desc": HA["about_desc"],

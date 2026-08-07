@@ -98,12 +98,25 @@ def build_all(lastmod: str = "") -> dict:
         build(str(jf))  # статьи (faqs) + хабы/главная/about (index-шаблон)
         n_rendered += 1
         if _indexable(page):
-            urls.append((SITE["domain"] + page["path"], page.get("updated", "")))
+            # ⚠️ Именно `updated_iso`, НЕ `updated`: второе — подпись в подвале в формате
+            # MM.YYYY («08.2026»), и sitemap такую дату не принимает. Фикстура
+            # test_lastmod.py на этом и поймала: в карту уезжало `<lastmod>07.2026</lastmod>`.
+            urls.append((SITE["domain"] + page["path"], page.get("updated_iso", "")))
         else:
             n_noindex += 1
 
-    lm = f"\n    <lastmod>{lastmod}</lastmod>" if lastmod else ""
-    body = "\n".join(f"  <url>\n    <loc>{u}</loc>{lm}\n  </url>" for u, _ in urls)
+    # ⭐ lastmod ПОСТРАНИЧНО (2026-08-07). Было: одна дата из аргумента командной строки на
+    # ВСЕ адреса — кто-то вписал `2026-07-06`, и она месяц ехала во все 2185, то есть месяц
+    # говорила Google «здесь ничего не менялось». Теперь дату несёт сама страница
+    # (`updated_iso`, ставит pages.py и только при РЕАЛЬНОМ изменении содержимого).
+    # Аргумент остался запасным: у старых data-файлов поля нет.
+    def _lm(iso):
+        d = iso or lastmod
+        return f"\n    <lastmod>{d}</lastmod>" if d else ""
+
+    body = "\n".join(
+        f"  <url>\n    <loc>{u}</loc>{_lm(iso)}\n  </url>" for u, iso in urls
+    )
     sm = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
