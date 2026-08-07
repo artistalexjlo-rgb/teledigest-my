@@ -25,13 +25,42 @@ SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
 # тип абзаца → латинский ключ (css-класс тега на карточке/аккордеоне)
 TYPE_KEY = {name: key for key, name, _ in _tax.TYPES}
 # короткий ярлык тега (полное имя типа громоздко для чипа в аккордеоне)
+# Ярлык типа абзаца ПО ЯЗЫКАМ. Был плоским русским словарём — и это была вторая причина,
+# по которой полочный контур держали под `if lang == "ru"`: на английской странице чип
+# напечатал бы «лайфхак». Нет языка — англ. фолбэк, не русский (русский виден как брак).
 TYPE_SHORT = {
-    "lifehack": "лайфхак",
-    "reglament": "регламент",
-    "howto": "инструкция",
-    "risk": "риск",
-    "case": "кейс",
-    "service": "сервис",
+    "ru": {
+        "lifehack": "лайфхак",
+        "reglament": "регламент",
+        "howto": "инструкция",
+        "risk": "риск",
+        "case": "кейс",
+        "service": "сервис",
+    },
+    "en": {
+        "lifehack": "tip",
+        "reglament": "rule",
+        "howto": "how-to",
+        "risk": "risk",
+        "case": "case",
+        "service": "service",
+    },
+    "es": {
+        "lifehack": "truco",
+        "reglament": "norma",
+        "howto": "guía",
+        "risk": "riesgo",
+        "case": "caso",
+        "service": "servicio",
+    },
+    "pt": {
+        "lifehack": "dica",
+        "reglament": "regra",
+        "howto": "guia",
+        "risk": "risco",
+        "case": "caso",
+        "service": "serviço",
+    },
 }
 SHELF_MIN = 3  # полка становится страницей от 3 абзацев (мельче — тонковато)
 
@@ -398,7 +427,18 @@ COPY = {
         "fact_desc": "Real experience from chats about {tl} in {name}: as it is, first-hand. For your case — ask Luky.",
         "fact_intro": "Real experience of people from chats on «{tl}» in {name} — as it is, no fluff. For your case — <a href='#luky'>ask Luky</a>.",
         "fact_list_label": "From real experience",
+        "shelf_title": "{name}: {tl} — real experience from chats · Luky",
+        "shelf_desc": "Real experience on «{tl}» in {name}: hands-on tips, cases and rules from chats. For your case — ask Luky.",
+        "shelf_intro": "Collected from real experience: «{tl}» in {name} — tips, cases and rules as they are. For your case — <a href='#luky'>ask Luky</a>.",
+        "shelf_list_label": "From real experience",
         "fact_blurb": "{n} tips from chats",
+        "shelf_blurb": "{n} notes from chats",
+        "bridge_shelf_blurb": "Real notes by topic — for your case ask Luky",
+        "bridge_shelf_title": "Sections of real experience",
+        "shub_title": "{name}: sections of real experience — all from chats · Luky",
+        "shub_desc": "Real experience in {name} by section: visas, money, transport, documents, safety and more. For your case — ask Luky.",
+        "shub_h1": "Sections of real experience",
+        "shub_intro": "Everything people went through themselves — by section. Pick yours, and for your specific case <a href='#luky'>ask Luky</a>.",
         "q_title": "{name}: {tl} — what people ask · Luky",
         "q_desc": "Real questions about {tl} in {name} from live chats. An answer for your case — ask Luky.",
         "q_intro": "Live questions from community chats — what people actually run into. Recognise yours? An answer for your case — <a href='#luky'>ask Luky</a>.",
@@ -431,7 +471,18 @@ COPY = {
         "fact_desc": "Experiencia real de los chats sobre {tl} en {name}: tal cual, de primera mano. Para tu caso — pregúntale a Luky.",
         "fact_intro": "Experiencia real de gente de los chats sobre «{tl}» en {name} — tal cual, sin relleno. Para tu caso — <a href='#luky'>pregúntale a Luky</a>.",
         "fact_list_label": "De la experiencia real",
+        "shelf_title": "{name}: {tl} — experiencia real de los chats · Luky",
+        "shelf_desc": "Experiencia real sobre «{tl}» en {name}: consejos, casos y normas de los chats. Para tu caso — pregúntale a Luky.",
+        "shelf_intro": "Recopilado de la experiencia real: «{tl}» en {name} — consejos, casos y normas tal cual. Para tu caso — <a href='#luky'>pregúntale a Luky</a>.",
+        "shelf_list_label": "De la experiencia real",
         "fact_blurb": "{n} consejos de los chats",
+        "shelf_blurb": "{n} notas de los chats",
+        "bridge_shelf_blurb": "Notas reales por tema — para tu caso pregúntale a Luky",
+        "bridge_shelf_title": "Secciones de experiencia real",
+        "shub_title": "{name}: secciones de experiencia real — todo de los chats · Luky",
+        "shub_desc": "Experiencia real en {name} por secciones: visados, dinero, transporte, documentos, seguridad y más. Para tu caso — pregúntale a Luky.",
+        "shub_h1": "Secciones de experiencia real",
+        "shub_intro": "Todo lo que la gente vivió en persona — por secciones. Elige la tuya, y para tu caso concreto <a href='#luky'>pregúntale a Luky</a>.",
         "q_title": "{name}: {tl} — qué preguntan · Luky",
         "q_desc": "Preguntas reales sobre {tl} en {name} de chats en vivo. Una respuesta para tu caso — pregúntale a Luky.",
         "q_intro": "Preguntas en vivo de chats de comunidades — con lo que la gente realmente se topa. ¿Reconoces la tuya? Una respuesta para tu caso — <a href='#luky'>pregúntale a Luky</a>.",
@@ -464,7 +515,18 @@ COPY = {
         "fact_desc": "Experiência real dos chats sobre {tl} em {name}: como é, em primeira mão. Para o seu caso — pergunte ao Luky.",
         "fact_intro": "Experiência real de pessoas dos chats sobre «{tl}» em {name} — como é, sem enrolação. Para o seu caso — <a href='#luky'>pergunte ao Luky</a>.",
         "fact_list_label": "Da experiência real",
+        "shelf_title": "{name}: {tl} — experiência real dos chats · Luky",
+        "shelf_desc": "Experiência real sobre «{tl}» em {name}: dicas, casos e regras dos chats. Para o seu caso — pergunte ao Luky.",
+        "shelf_intro": "Reunido da experiência real: «{tl}» em {name} — dicas, casos e regras como são. Para o seu caso — <a href='#luky'>pergunte ao Luky</a>.",
+        "shelf_list_label": "Da experiência real",
         "fact_blurb": "{n} dicas dos chats",
+        "shelf_blurb": "{n} notas dos chats",
+        "bridge_shelf_blurb": "Notas reais por tema — para o seu caso pergunte ao Luky",
+        "bridge_shelf_title": "Seções de experiência real",
+        "shub_title": "{name}: seções de experiência real — tudo dos chats · Luky",
+        "shub_desc": "Experiência real em {name} por seção: vistos, dinheiro, transporte, documentos, segurança e mais. Para o seu caso — pergunte ao Luky.",
+        "shub_h1": "Seções de experiência real",
+        "shub_intro": "Tudo o que as pessoas viveram por conta própria — por seção. Escolha a sua, e para o seu caso específico <a href='#luky'>pergunte ao Luky</a>.",
         "q_title": "{name}: {tl} — o que perguntam · Luky",
         "q_desc": "Perguntas reais sobre {tl} em {name} de chats ao vivo. Uma resposta para o seu caso — pergunte ao Luky.",
         "q_intro": "Perguntas ao vivo de chats de comunidades — com o que as pessoas realmente se deparam. Reconhece a sua? Uma resposta para o seu caso — <a href='#luky'>pergunte ao Luky</a>.",
@@ -762,7 +824,7 @@ def groups_to_faqs(v, lang):
         )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
         if typ and typ in TYPE_KEY:
             key = TYPE_KEY[typ]
-            f["type"] = TYPE_SHORT.get(key, typ)
+            f["type"] = TYPE_SHORT.get(lang, TYPE_SHORT["en"]).get(key, typ)
             f["type_key"] = key
         faqs.append(f)
     return faqs
@@ -1091,11 +1153,23 @@ def build_geo(geo, lang="ru"):
     # --- ШЕЛФ-КОНТУР (антологии хвоста: полки под /<lang>/<geo>/s/) ---
     # Хвост-курирование: синглы, что раньше терялись фильтром ≥4, живут на широких
     # полках-антологиях. Через ту же укладку, что факты: дедуп-группы → аккордеон
-    # page.html.j2 + тег типа (lifehack/reglament/…). Имена полок = русская
-    # таксономия → пока только lang=="ru" (i18n имён — отдельный шаг).
+    # page.html.j2 + тег типа (lifehack/reglament/…).
+    #
+    # ⛔ Здесь стояло `if lang == "ru"`. Условие было честным 11.07: имена полок брались
+    # из русской таксономии, а чип типа был русским словом. Обе причины сняты — 27.07
+    # (84b0a19) перевод понёс локализованное имя и латинский `key`, а чипы стали
+    # языковыми, — но САМО условие осталось и прожило причину на 12 дней. Тот же
+    # коммит 84b0a19 правил ЭТУ функцию: добавил `_sk()` с докстрингом про «адрес полки
+    # обязан совпадать во всех языках» — внутрь блока, который для не-ru не исполнялся.
+    # Цена: ~1100 запросов, потраченных на перевод текстов хвоста в 12 языков, не дали
+    # ни одной страницы; 375 полок × 3 сборных языка = 1125 страниц не выкладывались.
+    #
+    # Поэтому теперь условие привязано к ПРИЧИНЕ, а не к языку: контур строится там, где
+    # у языка есть полочный копирайт. Добавили язык без него — полки просто не выйдут,
+    # вместо KeyError; появился копирайт — контур включается сам, без правки этой строки.
     s_ok = False
     shelves = []
-    if lang == "ru":
+    if "shelf_title" in C:
         shelves = sorted(
             [
                 sv
