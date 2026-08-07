@@ -18,7 +18,7 @@ import re
 import sys
 
 import tail_taxonomy as _tax
-from slugs import slug  # ЕДИНСТВЕННОЕ определение хвоста адреса
+from slugs import slug, slug_or_none  # ЕДИНСТВЕННОЕ определение хвоста адреса
 
 # полка → стабильный латинский ключ для URL (/ru/<geo>/s/finance/), не транслит-slug
 SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
@@ -1260,8 +1260,14 @@ def addr(obj, label_field):
     Фолбэк на слаг метки оставлен только как переходный: пока `key` в данных не
     проштампован (`facet_lang.py --stamp-keys`), страница честно объявляет
     `shared_tail=False`, и свитчер с hreflang на неё не рассчитывают.
+
+    ⛔ Возвращает None, когда адреса НЕТ: ключа нет, а из метки не осталось ни одного
+    пригодного символа (zh ja ko ar hi th — `_TR` знает только кириллицу). Вызывающий
+    ОБЯЗАН пропустить такую страницу. Выдумать ей имя нельзя: адрес вышел бы один и тот
+    же у всех страниц гео, а уникализации адресов тут нет — страницы затёрли бы друг
+    друга молча, оставив ~90 на язык вместо ~1843.
     """
-    return obj.get("key") or slug(obj[label_field])
+    return obj.get("key") or slug_or_none(obj[label_field])
 
 
 def pick(pool, seed):
@@ -1328,11 +1334,10 @@ def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
     """
     geo, name, namep = ctx["geo"], ctx["name"], ctx["namep"]
     by_rep = {g["rep"]: g for g in sv["groups"]}
-    sub_sibs = [
-        {"name": sub["name"], "slug": addr(sub, "name")} for sub in sv["subshelves"]
-    ]
+    subs_ok = [x for x in sv["subshelves"] if addr(x, "name")]
+    sub_sibs = [{"name": sub["name"], "slug": addr(sub, "name")} for sub in subs_ok]
     subtiles = []
-    for sub in sv["subshelves"]:
+    for sub in subs_ok:
         ss = addr(sub, "name")
         sub_groups = [by_rep[r] for r in sub["reps"] if r in by_rep]
         sub_view = {"items": sv["items"], "groups": sub_groups}
@@ -1419,6 +1424,17 @@ def build_geo(geo, lang="ru"):
         lang != "ru"
     ):  # страховка: непереведённая (кириллическая) метка → не плодим кириллический URL
         fviews = [v for v in fviews if not re.search("[а-яёА-ЯЁ]", v["zadacha"])]
+    # ⛔ Безадресные виды выбрасываем ЗДЕСЬ, до сиблингов: иначе в «похожие темы» уехали
+    # бы ссылки на страницы, которых не будет. Молчаливое усечение запрещено — считаем и
+    # печатаем, см. `no_addr` ниже.
+    no_addr = [v for v in fviews if not addr(v, "zadacha")]
+    if no_addr:
+        print(
+            f"{geo}/{lang}: {len(no_addr)} видов БЕЗ АДРЕСА пропущено "
+            f"(нелатинская метка без ключа) — нужен facet_lang.py --stamp-keys",
+            flush=True,
+        )
+    fviews = [v for v in fviews if addr(v, "zadacha")]
     for v in fviews:
         s = addr(v, "zadacha")
         fact_sibs.append(
@@ -1498,6 +1514,7 @@ def build_geo(geo, lang="ru"):
     qgroups = [g for g in (ques or {}).get("groups", []) if len(g["questions"]) >= 4]
     if qgroups:
         q_ok = True
+        qgroups = [g for g in qgroups if addr(g, "tema")]  # безадресные — не страницы
         q_sibs = [
             {
                 "tema": g["tema"],
