@@ -207,14 +207,20 @@ BRANCH_MERGE_SYS = (
 )
 
 
-def branch_shelf(shelf, fails=None):
-    """Полка-гигант → subshelves: [{name, reps}]. Двухпроходно: батч-carve по текстам
+def branch_page(shelf, fails=None, kind="полка"):
+    """Страница-гигант → subshelves: [{name, reps}]. Двухпроходно: батч-carve по текстам
     репрезентантов → слияние имён батчей в канонические (1 вызов).
 
+    ⭐ РАБОТАЕТ НА ЛЮБОМ КОНТУРЕ (обобщено 2026-08-07). Механизм писался под полки, но
+    внутри ему нужны только `items` и `groups` — они одинаковы у полки и у фактового вида.
+    А применялся он ТОЛЬКО к полкам, поэтому 561 фактовая страница осталась простынёй
+    (максимум — 471 пункт на одном адресе). Правило одно: содержимого больше BRANCH_MIN →
+    хаб с ветками. Разное поведение у контуров было не решением, а недоделкой.
+
     СБОЙ ВИДЕН (07-23, как у carve): пачка не ответила даже с ретраями → пишем в fails,
-    полка остаётся простынёй, но об этом ЗНАЮТ (раньше молча возвращали None — так 12
+    страница остаётся простынёй, но об этом ЗНАЮТ (раньше молча возвращали None — так 12
     полок и висели простынями, никто не знал). ⚠️ «модель нашла <2 под-темы» — НЕ сбой:
-    значит полка цельная, ветвить нечего; это в fails не пишем."""
+    значит страница цельная, ветвить нечего; это в fails не пишем."""
     from keybroker import call
 
     by_id = {it["id"]: it for it in shelf["items"]}
@@ -234,11 +240,12 @@ def branch_shelf(shelf, fails=None):
             if fails is not None:
                 fails.append(
                     {
-                        "step": "branch_shelf",
-                        "shelf": shelf.get("shelf"),
+                        "step": "branch_page",
+                        "kind": kind,
+                        "shelf": shelf.get("shelf") or shelf.get("zadacha"),
                         "batch": f"{s // BRANCH_BATCH + 1}/{(len(reps) - 1) // BRANCH_BATCH + 1}",
                         "groups": len(chunk),
-                        "why": "ветвление не ответило (3 попытки) — полка осталась простынёй",
+                        "why": f"ветвление не ответило (3 попытки) — {kind} осталась простынёй",
                     }
                 )
             return None
@@ -283,7 +290,7 @@ def run(geo, kratko=False):
     shelves = d.get("shelves", [])  # хвост-антологии (полка×тип) — та же укладка
     all_ids = [it["id"] for c in (views, shelves) for v in c for it in v["items"]]
     vv = load_vecs(list(set(all_ids)))
-    n_groups = n_dups = n_k = 0
+    n_groups = n_dups = n_k = n_b = 0  # n_b — сколько страниц разветвили за прогон
     run_fails = []  # сбои ЭТОГО прогона (ветвление не ответило) → в файл гео, в отчёт
     n_need = sum(
         1
@@ -296,6 +303,16 @@ def run(geo, kratko=False):
         v["groups"] = group_view(v, vv)
         n_groups += len(v["groups"])
         n_dups += len(v["items"]) - len(v["groups"])
+        # ⭐ ВЕТВЛЕНИЕ ФАКТОВ — то же правило, что у полок (2026-08-07). Раньше ветвились
+        # ТОЛЬКО полки, и 561 фактовая страница оставалась простынёй (максимум 471 пункт).
+        # ⛔ БЕЗ привязки к kratko: у полок ветвление стояло под `if kratko`, и полка,
+        # до которой проход kratko не дошёл, простынёй и оставалась (69 таких). Ветвление
+        # — свойство СТРАНИЦЫ, а не побочный эффект чужого шага.
+        if len(v["groups"]) > BRANCH_MIN and not v.get("subshelves"):
+            subs = branch_page(v, run_fails, kind="тема")
+            if subs:
+                v["subshelves"] = subs
+                n_b += 1
         if kratko and len(v["items"]) >= PAGE_MIN and not v.get("kratko"):
             if _stopped():
                 _atomic_json(fn, d)  # сохранить ДО выхода: вызовы не в трубу
@@ -314,13 +331,13 @@ def run(geo, kratko=False):
                 f"  {geo}: kratko {n_k}/{n_need} ({v.get('zadacha', '')[:40]})",
                 flush=True,
             )
-    n_sdups = n_b = 0
+    n_sdups = 0
     for sv in shelves:  # полкам kratko не даём: антология разнородна, «ответа» нет
         sv["groups"] = group_view(sv, vv)
         n_sdups += len(sv["items"]) - len(sv["groups"])
         # ветвление полки-гиганта — штатный шаг комбайна (идемпотентно: не пере-жжём)
-        if kratko and len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
-            subs = branch_shelf(sv, run_fails)
+        if len(sv["groups"]) > BRANCH_MIN and not sv.get("subshelves"):
+            subs = branch_page(sv, run_fails, kind="полка")
             if subs:
                 sv["subshelves"] = subs
                 n_b += 1
@@ -330,7 +347,10 @@ def run(geo, kratko=False):
     print(
         f"{geo}: видов {len(views)}, групп {n_groups}, схлопнуто дублей {n_dups}"
         + (f", полок {len(shelves)} (дублей {n_sdups})" if shelves else "")
-        + (f", kratko +{n_k}" if kratko else ""),
+        + (f", kratko +{n_k}" if kratko else "")
+        # ветвление — главный итог прогона: без него простыни уходят молча
+        + (f", РАЗВЕТВЛЕНО страниц {n_b}" if n_b else "")
+        + (f", ⚠️ ветвление сорвалось {len(run_fails)}" if run_fails else ""),
         flush=True,
     )
 
