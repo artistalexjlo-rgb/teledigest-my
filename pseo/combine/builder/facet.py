@@ -104,6 +104,16 @@ FACET_SYS = (
 # (факт 07-22, см. facet_lang.translate_texts). Настоящий id живёт снаружи.
 FACET_BATCH = 25
 
+# dead-letter: мухи, которые facet_one провалил как "bad" >=DEAD_AT раз (непереваримый
+# контент). Иначе одна битая муха в хвосте держит зрелость гео вечно (remaining застревает
+# на 1). Инфра-сбои (бюджет/429) НЕ считаем — их отсеивает status="infra".
+#
+# ⛔ БЫЛА ЛОКАЛЬНОЙ ВНУТРИ ФУНКЦИИ (поднята 2026-08-07). Из-за этого `facet.DEAD_AT` не
+# существовал, а тройку переписывали руками: в `bot.py` (фильтр дед-леттера пульта) и в
+# гейте зрелости `ship`. Правило про порог мёртвой мухи обязано жить в ОДНОМ месте —
+# иначе пульт зовёт на мухи, которых facet не берёт (так и было: 26 мух вечно в меню).
+DEAD_AT = 3
+
 FACET_BATCH_SYS = (
     "Ты РАЗМЕТЧИК готовых советов (мух) по фасетам, НЕ автор. Мух НЕ переписывай, НЕ дополняй, "
     "НЕ сокращай, НЕ обобщай.\n"
@@ -195,6 +205,45 @@ def _atomic_json(path, obj):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False)
     os.replace(tmp, path)  # атомарно на том же fs
+
+
+def done_and_dead(geo):
+    """(протегованные, мёртвые) id для гео. Одно место, где читаются tags/<geo>*.json."""
+    done, fails = set(), {}
+    try:
+        with open(f"tags/{geo}.json", encoding="utf-8") as fh:
+            done = {r["id"] for r in json.load(fh)}
+    except Exception:
+        pass
+    try:
+        with open(f"tags/{geo}_fails.json", encoding="utf-8") as fh:
+            fails = json.load(fh)
+    except Exception:
+        pass
+    return done, {fid for fid, c in fails.items() if c >= DEAD_AT}
+
+
+def mature_geos():
+    """Гео, у которых НЕ ОСТАЛОСЬ живых мух в очереди → блок можно публиковать.
+
+    ⭐ ЗАМЕНА МЁРТВЫМ ШТАМПАМ (2026-08-07). Гейт `ship` пускал гео только по
+    `runner_stamps.json`, а писал его `pseo-runner`, снесённый 20.07 за то, что жил
+    невидимкой и жёг ключи. Файл замёрз на 36 гео из 90: всё, собранное позже, не поехало
+    бы НИКОГДА — не из-за сырости, а потому что штамповать стало некому.
+
+    Зрелость теперь ВЫЧИСЛЯЕТСЯ по тому же правилу, по которому facet берёт работу:
+    зрелое = `load_flies` не отдаёт ничего. Мёртвые мухи (>=DEAD_AT провалов) живыми не
+    считаются — иначе одна непереваримая муха держит гео вечно (ровно так 26 мух висели
+    в меню пульта, и все 26 были мёртвыми).
+    """
+    import glob as _glob
+
+    out = {}
+    for f in sorted(_glob.glob("out_facet/*.json")):
+        geo = os.path.basename(f)[:-5]
+        done, dead = done_and_dead(geo)
+        out[geo] = not load_flies(geo, limit=1, exclude=done | dead)
+    return out
 
 
 def load_flies(geo, limit=None, exclude=None):
@@ -467,10 +516,6 @@ def run(geo, limit=None):
         except Exception:
             tagged = []
     done_ids = {r["id"] for r in tagged}
-    # dead-letter: мухи, которые facet_one провалил как "bad" >=DEAD_AT раз (непереваримый
-    # контент). Иначе одна битая муха в хвосте держит зрелость гео вечно (remaining застревает
-    # на 1). Инфра-сбои (бюджет/429) НЕ считаем — их отсеивает status="infra".
-    DEAD_AT = 3
     fails_fn = f"tags/{geo}_fails.json"
     try:
         fails = json.load(open(fails_fn, encoding="utf-8"))
@@ -632,8 +677,13 @@ def run_assign_tail(geo):
 
 
 if __name__ == "__main__":
+    # --mature: список зрелых гео в JSON. Зовёт ship (гейт публикации) — тут, а не у себя,
+    # чтобы правило «что такое зрелое» жило рядом с тем, кто по нему берёт работу.
+    if "--mature" in sys.argv:
+        print(json.dumps(mature_geos(), ensure_ascii=False))
+        sys.exit(0)
     if len(sys.argv) < 2:
-        print("usage: facet.py <geo> [--limit N] [--assign-tail]")
+        print("usage: facet.py <geo> [--limit N] [--assign-tail] | facet.py --mature")
         sys.exit(1)
     geo = sys.argv[1]
     if "--assign-tail" in sys.argv:

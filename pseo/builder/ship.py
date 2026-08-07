@@ -28,6 +28,9 @@ OUT = f"{BASE}/out"
 PAGES_REPO = os.path.abspath(f"{BASE}/../../multyspeak-pages")
 VPS = "root@199.195.252.114"
 VPS_DIR = "/root/pseo_builder"
+# Контейнер комбайна: в нём живут АКТУАЛЬНЫЕ рты (/app/builder), а на хосте .py протухли
+# 20.07. Имя ищем префиксом — Dokploy добавляет свой хеш задачи и меняет его при редеплое.
+PULT_NAME = "bots-luky-rodzkl"
 
 
 def sh(cmd, cwd=None):
@@ -99,7 +102,45 @@ def step_pull(only=None):
         if os.path.isdir(f"{BUILT}/out_facet_{x}")
     )
     print(f"pull: факт-гео {n_f}, вопрос-гео {n_q}, переводы: {per_lang}")
+    _pull_mature()
     return True
+
+
+def _pull_mature():
+    """Забрать ВЫЧИСЛЕННУЮ зрелость гео из комбайна (facet.py --mature).
+
+    ⭐ ЗАМЕНА МЁРТВЫМ ШТАМПАМ (2026-08-07). Гейт ниже пускал гео только по
+    `runner_stamps.json`, а писал его `pseo-runner` — снесённый 20.07. Файл замёрз на
+    36 гео из 90, и всё собранное позже не поехало бы никогда. Считать зрелость на
+    десктопе нельзя: база мух и tags/ живут на VPS. Поэтому спрашиваем у того, кто по
+    этому правилу берёт работу, — у facet в контейнере комбайна.
+    ⛔ Не дублировать правило здесь: ровно на таких копиях мы горели трижды за сутки.
+    Не ответил — молчим и падаем на старые штампы (гейт станет строже, не слабее).
+    """
+    r = sh(
+        [
+            "ssh",
+            "-o",
+            "ConnectTimeout=25",
+            VPS,
+            f"id=$(docker ps -q -f name={PULT_NAME} | head -1); "
+            f"docker exec -w {VPS_DIR} $id python /app/builder/facet.py --mature",
+        ]
+    )
+    txt = (r.stdout or "").strip().splitlines()
+    try:
+        data = json.loads(txt[-1]) if txt else None
+        assert isinstance(data, dict) and data
+    except Exception:
+        print("pull: зрелость не получена — гейт пойдёт по старым штампам")
+        return
+    json.dump(
+        data,
+        open(f"{BUILT}/mature_geos.json", "w", encoding="utf-8"),
+        ensure_ascii=False,
+    )
+    n = sum(1 for v in data.values() if v)
+    print(f"pull: зрелость посчитана комбайном — зрелых {n} из {len(data)}")
 
 
 def step_pages(only=None):
@@ -159,14 +200,26 @@ def step_push(dry, only=None):
     # completeness-гейт: НОВАЯ модель гео едет только когда блок ДОЗРЕЛ (runner stamps —
     # гео исчерпан при текущих данных). Частично-тегнутое гео = тонкая замена богатого старого
     # → держим. Гео БЕЗ built-данных (старые страницы, не тронуты pages.py) — едут как были.
-    try:
-        stamps = set(json.load(open(f"{BUILT}/runner_stamps.json", encoding="utf-8")))
-    except Exception:
-        stamps = set()
     built_geos = {
         f[:-5] for f in os.listdir(f"{BUILT}/out_facet") if f.endswith(".json")
     }
-    immature = built_geos - stamps  # начали тегать, но не дозрели
+    # ЗРЕЛОСТЬ: считает комбайн (facet.py --mature), привозит _pull_mature. Старые штампы —
+    # только запасной путь: их писал pseo-runner, снесённый 20.07, и файл замёрз на 36 гео
+    # из 90. Пока он был единственным источником, всё собранное после 19.07 не ехало вовсе.
+    try:
+        mature = json.load(open(f"{BUILT}/mature_geos.json", encoding="utf-8"))
+        immature = {g for g in built_geos if not mature.get(g)}
+        src = "вычислено комбайном"
+    except Exception:
+        try:
+            stamps = set(
+                json.load(open(f"{BUILT}/runner_stamps.json", encoding="utf-8"))
+            )
+        except Exception:
+            stamps = set()
+        immature = built_geos - stamps
+        src = "СТАРЫЕ ШТАМПЫ (замёрзли 19.07) — зрелость не приехала"
+    print(f"gate: зрелость — {src}")
     geos = sorted(
         {
             d
