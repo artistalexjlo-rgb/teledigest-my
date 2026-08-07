@@ -859,6 +859,73 @@ def write(name, obj):
     json.dump(obj, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
+def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
+    """Страница-гигант → хаб с ветками. ОДНА реализация для полок И фактов.
+
+    ⭐ ЗАЧЕМ ОБЩАЯ (2026-08-07). Механизм писался под полки, и `pages.py` читал
+    `subshelves` ТОЛЬКО в полочной ветке. Поэтому 561 фактовая страница осталась простынёй
+    (максимум 471 пункт на одном адресе) при том что данные для ветвления уже считались.
+    ⛔ Копировать эти 60 строк в фактовую ветку НЕЛЬЗЯ: одно правило в двух копиях — та
+    самая болезнь, на которой 07.08 поймали четыре промаха подряд (правка не доехала, а
+    тест зелёный). Различаются только адрес, имя файла и ключи копирайта — они и параметры.
+
+    Возвращает (subtiles, rest_groups): плитки веток для хаба и группы, не попавшие ни в
+    одну ветку (их хаб покажет аккордеоном внизу — иначе пункты пропадут молча).
+    """
+    geo, name, namep = ctx["geo"], ctx["name"], ctx["namep"]
+    by_rep = {g["rep"]: g for g in sv["groups"]}
+    sub_sibs = [
+        {"name": sub["name"], "slug": slug(sub["name"])} for sub in sv["subshelves"]
+    ]
+    subtiles = []
+    for sub in sv["subshelves"]:
+        ss = slug(sub["name"])
+        sub_groups = [by_rep[r] for r in sub["reps"] if r in by_rep]
+        sub_view = {"items": sv["items"], "groups": sub_groups}
+        tl_ = ctx["tl"]
+        spage = {
+            "lang": lang,
+            "template": "page.html.j2",
+            "path": f"{url_pref}{ss}/",
+            "geo": geo,
+            "geo_name": name,
+            "intent_name": sub["name"],
+            "title": C[keys["title"]].format(name=name, tl=tl_(sub["name"])),
+            "meta_desc": C[keys["desc"]].format(
+                name=name, namep=namep, tl=tl_(sub["name"])
+            ),
+            "h1": pick(C["FHEAD"], geo + file_pref + ss).format(
+                t=cap(sub["name"]), g=name, gp=namep
+            ),
+            "intro": C[keys["intro"]].format(
+                name=name, namep=namep, tl=tl_(sub["name"])
+            ),
+            "list_label": C[keys["list_label"]],
+            "faqs": groups_to_faqs(sub_view, lang),
+            "chips": [
+                {
+                    "icon": icon(x["name"]),
+                    "label": x["name"],
+                    "url": f"{url_pref}{x['slug']}/",
+                    "soon": False,
+                }
+                for x in sub_sibs
+                if x["slug"] != ss
+            ][:6],
+        }
+        write_fn(f"{file_pref}{ss}.json", spage)
+        subtiles.append(
+            {
+                "icon": icon(sub["name"]),
+                "title": sub["name"],
+                "blurb": blurb(C, keys["blurb"], len(sub_groups)),
+                "url": f"{url_pref}{ss}/",
+            }
+        )
+    covered = {r for sub in sv["subshelves"] for r in sub["reps"]}
+    return subtiles, [g for g in sv["groups"] if g["rep"] not in covered]
+
+
 def chips_for(cur_slug, siblings):
     return [
         {"icon": icon(s["tema"]), "label": s["tema"], "url": s["url"], "soon": False}
@@ -918,7 +985,36 @@ def build_geo(geo, lang="ru"):
             "intro": C["fact_intro"].format(name=name, namep=namep, tl=tl(tema)),
             "chips": chips_for(s, fact_sibs),
         }
-        if v.get("groups"):  # дедуп прошёл (dedup.py) → компактная страница-аккордеон
+        if v.get("subshelves"):
+            # ⭐ ТЕМА-ГИГАНТ ВЕТВИТСЯ так же, как полка (2026-08-07). До этого `subshelves`
+            # читались ТОЛЬКО в полочной ветке, поэтому 561 фактовая страница оставалась
+            # простынёй (максимум 471 пункт) — при том что данные для ветвления считались.
+            subtiles, rest = build_branches(
+                v,
+                url_pref=f"/{lang}/{geo}/{s}/",
+                file_pref=f"{lang}_{geo}_{s}_",
+                C=C,
+                keys={
+                    "title": "fact_title",
+                    "desc": "fact_desc",
+                    "intro": "fact_intro",
+                    "list_label": "fact_list_label",
+                    "blurb": "fact",
+                },
+                ctx={"geo": geo, "name": name, "namep": namep, "tl": tl},
+                lang=lang,
+                write_fn=write,
+            )
+            n += len(subtiles)
+            page["template"] = "index.html.j2"
+            page["list_label"] = C["list_label_topics"]
+            page["tiles"] = subtiles
+            if rest:  # пункты вне ветвей — аккордеоном внизу, иначе пропали бы молча
+                page["faqs"] = groups_to_faqs(
+                    {"items": v["items"], "groups": rest}, lang
+                )
+                page["faqs_label"] = C["fact_list_label"]
+        elif v.get("groups"):  # дедуп прошёл (dedup.py) → компактная страница-аккордеон
             page["template"] = "page.html.j2"
             page["short_answer"] = v.get("kratko")  # None → блок скрыт шаблоном
             page["list_label"] = C[
@@ -1073,62 +1169,25 @@ def build_geo(geo, lang="ru"):
                 ][:6],
             }
             if sv.get("subshelves"):  # полка-гигант ВЕТВИТСЯ: хаб + под-страницы
-                by_rep = {g["rep"]: g for g in sv["groups"]}
-                sub_sibs = [
-                    {"name": sub["name"], "slug": slug(sub["name"])}
-                    for sub in sv["subshelves"]
-                ]
-                subtiles = []
-                for sub in sv["subshelves"]:
-                    ss = slug(sub["name"])
-                    sub_groups = [by_rep[r] for r in sub["reps"] if r in by_rep]
-                    sub_view = {
-                        "items": sv["items"],
-                        "groups": sub_groups,
-                    }  # для groups_to_faqs
-                    spage = {
-                        "lang": lang,
-                        "template": "page.html.j2",
-                        "path": f"/{lang}/{geo}/s/{sk}/{ss}/",
-                        "geo": geo,
-                        "geo_name": name,
-                        "intent_name": sub["name"],
-                        "title": C["shelf_title"].format(name=name, tl=tl(sub["name"])),
-                        "meta_desc": C["shelf_desc"].format(
-                            name=name, namep=namep, tl=tl(sub["name"])
-                        ),
-                        "h1": pick(C["FHEAD"], geo + sk + ss).format(
-                            t=cap(sub["name"]), g=name, gp=namep
-                        ),
-                        "intro": C["shelf_intro"].format(
-                            name=name, namep=namep, tl=tl(sub["name"])
-                        ),
-                        "list_label": C["shelf_list_label"],
-                        "faqs": groups_to_faqs(sub_view, lang),
-                        "chips": [
-                            {
-                                "icon": icon(x["name"]),
-                                "label": x["name"],
-                                "url": f"/{lang}/{geo}/s/{sk}/{x['slug']}/",
-                                "soon": False,
-                            }
-                            for x in sub_sibs
-                            if x["slug"] != ss
-                        ][:6],
-                    }
-                    write(f"{lang}_{geo}_s_{sk}_{ss}.json", spage)
-                    n += 1
-                    subtiles.append(
-                        {
-                            "icon": icon(sub["name"]),
-                            "title": sub["name"],
-                            "blurb": blurb(C, "shelf", len(sub_groups)),
-                            "url": f"/{lang}/{geo}/s/{sk}/{ss}/",
-                        }
-                    )
+                n_before = n
+                subtiles, rest = build_branches(
+                    sv,
+                    url_pref=f"/{lang}/{geo}/s/{sk}/",
+                    file_pref=f"{lang}_{geo}_s_{sk}_",
+                    C=C,
+                    keys={
+                        "title": "shelf_title",
+                        "desc": "shelf_desc",
+                        "intro": "shelf_intro",
+                        "list_label": "shelf_list_label",
+                        "blurb": "shelf",
+                    },
+                    ctx={"geo": geo, "name": name, "namep": namep, "tl": tl},
+                    lang=lang,
+                    write_fn=write,
+                )
+                n = n_before + len(subtiles)
                 # хаб полки: плитки веток + остаток (репы вне веток) аккордеоном внизу
-                covered = {r for sub in sv["subshelves"] for r in sub["reps"]}
-                rest = [g for g in sv["groups"] if g["rep"] not in covered]
                 page["template"] = "index.html.j2"
                 page["list_label"] = C["list_label_topics"]
                 page["tiles"] = subtiles
