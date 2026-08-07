@@ -95,9 +95,57 @@ if __name__ == "__main__":
         pg.addr(zh, "zadacha"),
     )
     good &= ok(
-        pg.addr({"zadacha": "银行和钱"}, "zadacha") == "tema",
-        "   без ключа — прежний фолбэк (переходный, не адрес)",
+        pg.addr({"zadacha": "银行和钱"}, "zadacha") is None,
+        "   ⭐ без ключа и без латиницы — адреса НЕТ (None), а не «tema»",
+        repr(pg.addr({"zadacha": "银行和钱"}, "zadacha")),
     )
+    good &= ok(
+        pg.addr({"zadacha": "Банк и деньги"}, "zadacha") == "bank-i-dengi",
+        "   а из кириллицы фолбэк-транслит ещё работает",
+        pg.addr({"zadacha": "Банк и деньги"}, "zadacha"),
+    )
+
+    # ── 2-БИС. ПРЕДОХРАНИТЕЛЬ. Безадресный вид не должен стать страницей: адрес вышел бы
+    #    один у всех, а уникализации в pages.py нет — страницы затёрли бы друг друга и в
+    #    гео осталась бы ОДНА вместо двадцати. Проверяем ИСПОЛНЕНИЕМ, а не свойством addr.
+    tmp0 = tempfile.mkdtemp()
+    os.makedirs(f"{tmp0}/out_facet_zh", exist_ok=True)
+    zh_items = [{"id": "z%d" % i, "text": "建议 %d。" % i} for i in range(6)]
+    json.dump(
+        {
+            "geo": "xx",
+            "views_by_task": [
+                {
+                    "zadacha": n,
+                    "items": zh_items,
+                    "groups": [
+                        {"rep": x["id"], "ids": [x["id"]], "n": 1} for x in zh_items
+                    ],
+                }
+                for n in ("银行和钱", "保险和医疗", "签证和文件")
+            ],
+            "shelves": [],
+        },
+        open(f"{tmp0}/out_facet_zh/xx.json", "w", encoding="utf-8"),
+        ensure_ascii=False,
+    )
+    if "zh" in pg.COPY:  # язык ещё может быть не заполнен — тогда проверка не про него
+        out0 = tempfile.mkdtemp()
+        pg.BUILT, pg.DATA = tmp0, out0
+        pg.build_geo("xx", "zh")
+        facts = [
+            f
+            for f in os.listdir(out0)
+            if f.startswith("zh_xx_")
+            and "hub" not in f
+            and "_q_" not in f
+            and "_s_" not in f
+        ]
+        good &= ok(
+            not facts,
+            "2-бис. три безадресных вида → НИ ОДНОЙ страницы (не одна затёртая)",
+            "собрано %d" % len(facts),
+        )
 
     # ── 3. ШТАМПОВКА АДРЕСОВ. Ключей не жжём: переводчик меток подменён.
     tmp = tempfile.mkdtemp()

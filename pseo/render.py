@@ -58,12 +58,24 @@ def build_cta(t: dict, page: dict) -> dict | None:
     }
 
 
+# Языки, которые пишутся справа налево. Свойство ПИСЬМЕННОСТИ, а не текста, поэтому
+# живёт в коде, а не в i18n: переводчику тут нечего решать. Без `dir="rtl"` арабская
+# страница верстается слева направо — пунктуация и цифры встают не на свои места.
+RTL_LANGS = {"ar", "he", "fa", "ur"}
+
+
+def text_dir(lang: str) -> str:
+    return "rtl" if lang in RTL_LANGS else "ltr"
+
+
 def render_page(page: dict, lang: str | None = None) -> str:
     lang = lang or page.get("lang", "ru")
     t = load_i18n(lang)
     cta = build_cta(t, page)
     tmpl = _env.get_template(page.get("template", "page.html.j2"))
-    html = tmpl.render(site=SITE, t=t, page=page, lang=lang, cta=cta)
+    html = tmpl.render(
+        site=SITE, t=t, page=page, lang=lang, cta=cta, text_dir=text_dir(lang)
+    )
     # Маркер #luky в текстах (интро/проза) → реальная дверь в продукт (единый источник — site.py).
     door = f'href="{SITE["cta_luky_url"]}" target="_blank" rel="noopener"'
     return html.replace("href='#luky'", door).replace('href="#luky"', door)
