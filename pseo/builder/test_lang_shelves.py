@@ -17,6 +17,7 @@
 
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -48,6 +49,10 @@ def ru_geo():
         "views_by_task": [
             {
                 "zadacha": "Обмен валюты",
+                "subshelves": [
+                    {"name": "ветка-один", "reps": ["v0", "v1"]},
+                    {"name": "ветка-два", "reps": ["v2", "v3"]},
+                ],
                 "items": [it("v%d" % i) for i in range(4)],
                 "groups": [grp("v%d" % i) for i in range(4)],
             }
@@ -55,6 +60,10 @@ def ru_geo():
         "shelves": [
             {
                 "shelf": SHELF_RU,
+                "subshelves": [
+                    {"name": "полка-ветка-а", "reps": ["s0", "s1"]},
+                    {"name": "полка-ветка-б", "reps": ["s2", "s3"]},
+                ],
                 "items": [dict(it("s%d" % i), type="лайфхак") for i in range(3)],
                 "groups": [grp("s%d" % i) for i in range(3)],
             }
@@ -167,6 +176,32 @@ if __name__ == "__main__":
         "done=%r" % lr.done("xx", "old"),
     )
     good &= ok(lr.done("xx", "de"), "   и считает готовым файл с полками")
+
+    # 5. ⭐ ВЕТВЛЕНИЕ ДОЕЗЖАЕТ ДО ЯЗЫКА. Перевод его не нёс ВООБЩЕ, а `pages.py` строит хаб
+    #    с ветками именно по `subshelves` — значит языки собирались бы простынями при уже
+    #    разрезанном русском. И `is_fresh` про ветви не знал: файл считался готовым НАВСЕГДА,
+    #    и исправить это было бы нечем, кроме ручного сноса файлов.
+    tv = out["views_by_task"][0]
+    tsh = (out.get("shelves") or [{}])[0]
+    good &= ok(
+        len(tv.get("subshelves") or []) == 2,
+        "5. ветвление вида доехало до перевода",
+        "ветвей %d" % len(tv.get("subshelves") or []),
+    )
+    good &= ok(
+        len(tsh.get("subshelves") or []) == 2,
+        "   и ветвление полки тоже",
+        "ветвей %d" % len(tsh.get("subshelves") or []),
+    )
+    good &= ok(
+        all(not re.search("[а-яё]", x["name"], re.I) for x in tv["subshelves"]),
+        "   имена ветвей переведены (иначе кириллический URL)",
+        str([x["name"] for x in tv["subshelves"]]),
+    )
+    good &= ok(
+        out.get("branches_carried") is True,
+        "   признак формата branches_carried стоит",
+    )
 
     print("\nVERDICT:", "OK — полки доезжают до переводов" if good else "FAIL")
     sys.exit(0 if good else 1)

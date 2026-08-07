@@ -92,6 +92,31 @@ def text_sys(lang):
     )
 
 
+def carry_subs(src, kept_ids, label_map):
+    """Перенести ВЕТВЛЕНИЕ (`subshelves`) в перевод: состав ветви — id, они языко-независимы,
+    переводится только имя ветви.
+
+    ⭐ ЗАЧЕМ (2026-08-07): перевод ветвление не нёс ВООБЩЕ, а `pages.py` строит хаб с ветками
+    именно по `subshelves`. То есть языки собирались бы простынями — при том что русский уже
+    разрезан. И хуже: `is_fresh` про ветви не знал, файл считался готовым навсегда, и
+    исправить это было бы нечем, кроме ручного сноса файлов.
+
+    Муха без перевода выпадает; ветвь, у которой не осталось ни одного пункта, выпадает
+    целиком (пустая ветвь = страница ни о чём). Меньше двух ветвей — ветвление теряет смысл,
+    отдаём None: страница соберётся обычной, а не хабом с одной плиткой.
+    """
+    out = []
+    for sub in src.get("subshelves") or []:
+        reps = [r for r in sub.get("reps") or [] if r in kept_ids]
+        if not reps:
+            continue
+        name = label_map.get(sub["name"], sub["name"])
+        if _has_cyr(name):
+            continue  # имя не перевелось → кириллический URL ветви, не плодим
+        out.append({"name": name, "reps": reps})
+    return out if len(out) >= 2 else None
+
+
 def carry_groups(src_view, kept_ids, by_id_text):
     """Перенести дедуп-группы в перевод: id-состав языконезависим. Муха без перевода
     выпадает из группы; репрезентант без перевода → самый богатый переведённый в группе;
@@ -126,7 +151,11 @@ def is_fresh(path):
     try:
         old = json.load(open(path, encoding="utf-8"))
         vs = old.get("views_by_task", [])
-        return ((not vs) or any("groups" in v for v in vs)) and "shelves" in old
+        return (
+            ((not vs) or any("groups" in v for v in vs))
+            and "shelves" in old
+            and old.get("branches_carried") is True
+        )
     except Exception:
         return False
 
@@ -256,7 +285,17 @@ def run(geo, lang):
     # Имена полок — в ТУ ЖЕ пачку меток: их ≤9 на гео (глобальная таксономия), отдельный
     # вызов ради них был бы лишним запросом на каждое гео×язык.
     shelf_names = sorted({sh["shelf"] for sh in shelves})
-    label_map = translate_labels([v["zadacha"] for v in views] + shelf_names, lang)
+    # Имена ВЕТВЕЙ — туда же: отдельный вызов на каждое гео×язык был бы лишним запросом.
+    sub_names = sorted(
+        {
+            sub["name"]
+            for src in list(views) + list(shelves)
+            for sub in (src.get("subshelves") or [])
+        }
+    )
+    label_map = translate_labels(
+        [v["zadacha"] for v in views] + shelf_names + sub_names, lang
+    )
     rol = ROL.get(lang, ROL["en"])  # прочие языки — англ. роли (не блокируем)
 
     out_views = []
@@ -288,6 +327,11 @@ def run(geo, lang):
             # укладка 0.10: группы дедупа языконезависимы (id-состав) — несём сквозь перевод
             if v.get("groups"):
                 tv["groups"] = carry_groups(v, kept, by_text)
+            subs = carry_subs(v, kept, label_map)
+            if subs:
+                tv["subshelves"] = subs
+            elif v.get("branch_tried"):
+                tv["branch_tried"] = True  # цельная и по-русски — незачем звать снова
             out_views.append(tv)
 
     # ПОЛКИ: раскладка уже посчитана в ru-файле и от языка не зависит — переносим её,
@@ -324,11 +368,16 @@ def run(geo, lang):
             "key": SHELF_KEY.get(sh["shelf"], ""),
             "items": s_items,
         }
+        kept = {i["id"] for i in s_items}
         if sh.get("groups"):
-            kept = {i["id"] for i in s_items}
             tsh["groups"] = carry_groups(
                 sh, kept, {i["id"]: i["text"] for i in s_items}
             )
+        subs = carry_subs(sh, kept, label_map)
+        if subs:
+            tsh["subshelves"] = subs
+        elif sh.get("branch_tried"):
+            tsh["branch_tried"] = True
         out_shelves.append(tsh)
 
     # КОРЕНЬ бага «пустой файл»: RU-гео ИМЕЕТ ≥4-виды, а перевод дал 0 → это ПРОВАЛ (429/сдох),
@@ -344,6 +393,9 @@ def run(geo, lang):
         "geo": geo,
         "views_by_task": out_views,
         "shelves": out_shelves,  # ключ пишем ВСЕГДА, даже пустым — по нему is_fresh
+        # Признак формата: файл несёт ветвление. Требуется is_fresh — иначе уже лежащие
+        # файлы (собранные до 07.08) считались бы готовыми навсегда и ветвей не получили.
+        "branches_carried": True,
         "entity_index": {},
     }
     d = f"{HERE}/out_facet_{lang}"
