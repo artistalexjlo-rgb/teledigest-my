@@ -60,6 +60,13 @@ MENU = {
         "Хвост→полки <гео>",
         ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-tail"],
     ),
+    # АДРЕСА страниц. Место в тракте жёсткое: ПОСЛЕ ветвления (ветви тоже получают адрес,
+    # а рождает их dedup) и ДО переводов (перевод несёт `key` из русского файла; нет
+    # ключа — языки соберутся без адресов, а нелатинские почти пустыми).
+    "stamp": (
+        "Адреса страниц <гео>",
+        ["python", "-u", f"{BUILDER}/facet_lang.py", "--stamp-keys", "{geo}"],
+    ),
 }
 
 
@@ -301,6 +308,8 @@ def pipeline_state():
         "no_kratko": 0,
         "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
         "no_shelf": [],
+        "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
+        "no_addr_n": 0,  # сколько таких узлов всего — для честной подписи шага
         "langs": [],
         "failed": [],
         "pending_facet": [],  # гео с новыми (непротегованными) мухами → ждут facet
@@ -332,6 +341,22 @@ def pipeline_state():
             ]
             st["views"] += len(vs)
             st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
+            # ⭐ АДРЕСА (2026-08-08). Считаем ВЫПОЛНИМОЕ: узел без `key`, которому ключ
+            # можно проштамповать. Ключ нужен и видам, и ветвям — у ветви свой адрес
+            # под-страницы. Без него `pages.py` берёт слаг локализованной метки, а на
+            # нелатинице (zh ja ko ar hi th) от метки не остаётся НИ ОДНОГО символа:
+            # страница просто не собирается. Замер 08.08 на живом ar/gr — 56 видов из 59
+            # пропущено. Раньше штамповка не звалась вообще: ни шага, ни кнопки.
+            need_addr = sum(1 for v in vs if not v.get("key")) + sum(
+                1
+                for c in (d.get("views_by_task", []), d.get("shelves", []))
+                for x in c
+                for sub in (x.get("subshelves") or [])
+                if not sub.get("key")
+            )
+            if need_addr:
+                st["no_addr"].append(geo)
+                st["no_addr_n"] += need_addr
             # ⭐ ВЕТВЛЕНИЕ — ТОЖЕ РАБОТА ШАГА 2 (2026-08-07). `dedup.py` делает две вещи:
             # короткие ответы И ветвление страниц-гигантов, а метрика смотрела только на
             # первую. Итог: шаг показывал ✅ при 95 недоделанных страницах, кнопка не
@@ -517,14 +542,22 @@ def state_card():
         todo.append("kratko")
     else:
         lines.append("2) короткие ответы и ветвление: ✅")
+    if s["no_addr"]:
+        lines.append(
+            f"3) адреса страниц: {len(s['no_addr'])} гео, {s['no_addr_n']} узлов без ключа"
+            " — на нелатинице эти страницы не собираются"
+        )
+        todo.append("stamp")
+    else:
+        lines.append("3) адреса страниц: ✅ у всех узлов")
     if s["langs"]:
         worst = ", ".join(
             f"{lang}(нет {m}, устар {st_})" for lang, m, st_ in s["langs"][:5]
         )
-        lines.append(f"3) переводы: {len(s['langs'])} языков не готовы — {worst}")
+        lines.append(f"4) переводы: {len(s['langs'])} языков не готовы — {worst}")
         todo.append("translate")
     else:
-        lines.append("3) переводы: ✅ все языки свежие")
+        lines.append("4) переводы: ✅ все языки свежие")
     # ⛔ «СЕЙЧАС НАДО» берём из pipeline_steps, а не из своего todo: раньше это была
     # ТРЕТЬЯ независимая копия порядка (карточка / меню / цикл), и расходились они молча.
     nxt = next((st for st in pipeline_steps(s) if st["jobs"]), None)
@@ -916,13 +949,24 @@ def pipeline_steps(s):
             "note": "",
         },
         {
+            "kind": "stamp",
+            "jobs": [("stamp", g) for g in s["no_addr"]],
+            "geos": [],
+            "label": (
+                f"3. Адреса страниц — {len(s['no_addr'])} гео, {s['no_addr_n']} узлов"
+                if s["no_addr"]
+                else "3. Адреса страниц"
+            ),
+            "note": "до переводов: язык несёт адрес из русского файла",
+        },
+        {
             "kind": "translate",
             "jobs": [("translate", None)] if s["langs"] else [],
             "geos": [],
             "label": (
-                f"3. Переводы — {len(s['langs'])} языков"
+                f"4. Переводы — {len(s['langs'])} языков"
                 if s["langs"]
-                else "3. Переводы"
+                else "4. Переводы"
             ),
             "note": "",
         },

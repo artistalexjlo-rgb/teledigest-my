@@ -24,17 +24,15 @@ import bot  # noqa: E402
 
 
 def state(**kw):
-    """Состояние тракта. Пустое = всё готово; ключами наполняем нужный случай."""
-    s = {
-        "geos": 0,
-        "views": 0,
-        "no_kratko": 0,
-        "no_branch": 0,
-        "no_shelf": [],
-        "langs": [],
-        "failed": [],
-        "pending_facet": [],
-    }
+    """Состояние тракта. Пустое = всё готово; ключами наполняем нужный случай.
+
+    ⛔ Форму состояния берём У САМОГО ПУЛЬТА (`pipeline_state` на пустом каталоге), а не
+    переписываем словарь здесь. Своя копия формы уже сломала эту фикстуру: 08.08 в тракт
+    добавился шаг «Адреса страниц», в состоянии появились `no_addr`/`no_addr_n`, а тут
+    остался прежний набор — и тест упал с KeyError на ПРАВИЛЬНОМ коде. Копия формы = та же
+    болезнь «одно правило в двух местах», только в сторожевой обвязке.
+    """
+    s = bot.pipeline_state()  # BRAIN_DIR указывает в несуществующий каталог → всё пусто
     s.update(kw)
     return s
 
@@ -58,7 +56,8 @@ if __name__ == "__main__":
 
     # 1. Вертикаль шагов — жёсткая и именно эта.
     good &= ok(
-        [st["kind"] for st in steps] == ["facet", "assign", "kratko", "translate"],
+        [st["kind"] for st in steps]
+        == ["facet", "assign", "kratko", "stamp", "translate"],
         "1. порядок шагов жёсткий",
         str([st["kind"] for st in steps]),
     )
@@ -97,7 +96,7 @@ if __name__ == "__main__":
     part = state(no_kratko=7)
     st2 = bot.pipeline_steps(part)
     good &= ok(
-        len(st2) == 4 and [len(x["jobs"]) for x in st2] == [0, 0, 1, 0],
+        len(st2) == 5 and [len(x["jobs"]) for x in st2] == [0, 0, 1, 0, 0],
         "5. пустые шаги на месте, но в цикл не идут",
         str([len(x["jobs"]) for x in st2]),
     )
