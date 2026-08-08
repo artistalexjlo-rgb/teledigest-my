@@ -2038,21 +2038,32 @@ def build_geo(geo, lang="ru"):
         (facts or {}).get("views_by_task", []), key=lambda v: -len(v["items"])
     )
     fviews = [v for v in fviews if len(v["items"]) >= 4]
-    if (
-        lang != "ru"
-    ):  # страховка: непереведённая (кириллическая) метка → не плодим кириллический URL
-        fviews = [v for v in fviews if not re.search("[а-яёА-ЯЁ]", v["zadacha"])]
+
+    # (отсев непереведённых меток переехал в `_skip` — одно место на обе причины)
     # ⛔ Безадресные виды выбрасываем ЗДЕСЬ, до сиблингов: иначе в «похожие темы» уехали
     # бы ссылки на страницы, которых не будет. Молчаливое усечение запрещено — считаем и
     # печатаем, см. `no_addr` ниже.
-    no_addr = [v for v in fviews if not addr(v, "zadacha")]
-    if no_addr:
+    # ⛔ ОТСЕВ ОДИН И ДО СИБЛИНГОВ. Причин выпасть у страницы две — нет адреса и метка не
+    # перевелась, — и решать надо ОДНИМ местом. Раньше проверка кириллицы стояла НИЖЕ,
+    # внутри цикла записи: страница не писалась, а в «похожие темы» ссылка на неё уже
+    # уехала. Замер 08.08: 118 битых ссылок в 13 языках.
+    def _skip(v):
+        if not addr(v, "zadacha"):
+            return "без адреса"
+        if lang != "ru" and re.search("[а-яёА-ЯЁ]", v["zadacha"]):
+            return "метка не перевелась"
+        return None
+
+    dropped = [r for r in (_skip(v) for v in fviews) if r]
+    if dropped:
+        from collections import Counter as _C
+
         print(
-            f"{geo}/{lang}: {len(no_addr)} видов БЕЗ АДРЕСА пропущено "
-            f"(нелатинская метка без ключа) — нужен facet_lang.py --stamp-keys",
+            f"{geo}/{lang}: пропущено видов {len(dropped)} — "
+            + ", ".join(f"{k}: {n}" for k, n in _C(dropped).items()),
             flush=True,
         )
-    fviews = [v for v in fviews if addr(v, "zadacha")]
+    fviews = [v for v in fviews if not _skip(v)]
     for v in fviews:
         s = addr(v, "zadacha")
         fact_sibs.append(
@@ -2249,6 +2260,9 @@ def build_geo(geo, lang="ru"):
             page = {
                 "lang": lang,
                 "path": f"/{lang}/{geo}/s/{sk}/",
+                # хвост полки ОБЩИЙ по построению: ключ латинский, из таксономии, один во
+                # всех языках. Признака не было — и 5616 страниц шли без hreflang.
+                "shared_tail": True,
                 "geo": geo,
                 "geo_name": name,
                 "intent_name": sv["shelf"],
