@@ -50,6 +50,8 @@ if __name__ == "__main__":
         failed=[{"geo": "vn", "n": 1, "flies": 37, "what": "перевозка"}],
         no_shelf=["br", "kz"],
         no_kratko=452,
+        no_addr=["br", "vn", "me"],
+        no_addr_n=57,
         langs=[("en", 10, 2), ("es", 5, 1)],
     )
     steps = bot.pipeline_steps(full)
@@ -69,11 +71,17 @@ if __name__ == "__main__":
         "2. цикл НАЧИНАЕТСЯ с разметки, а не с assign",
         str([k for k, _ in chain[:4]]),
     )
+    # ⛔ Проверяем ИНВАРИАНТ, а не перечень ротов. Прежняя форма сравнивала цепочку со
+    #    списком `["facet"]*3 + ["assign"]*2 + [...]` — и ломалась на КАЖДОМ новом шаге
+    #    тракта, хотя код был верен (08.08, шаг «Адреса страниц»). Инвариант же вечен:
+    #    в цепочке ровно все работы шагов, и они идут группами в порядке вертикали.
+    order = {st["kind"]: i for i, st in enumerate(steps)}
+    idx = [order[k] for k, _ in chain]
     good &= ok(
-        [k for k, _ in chain]
-        == ["facet"] * 3 + ["assign"] * 2 + ["kratko", "translate"],
-        "   цепочка целиком совпадает с вертикалью",
-        "%d шагов" % len(chain),
+        idx == sorted(idx) and len(chain) == sum(len(st["jobs"]) for st in steps),
+        "   цепочка = все работы шагов, в порядке вертикали",
+        "%d работ, порядок %s"
+        % (len(chain), "не нарушен" if idx == sorted(idx) else "СБИТ"),
     )
 
     # 3. Брак идёт ПЕРВЫМ внутри шага 0: доделать сломанное прежде, чем брать новое.
@@ -91,6 +99,31 @@ if __name__ == "__main__":
     )
     q2 = [x["geo"] for x in bot.facet_queue(dup)]
     good &= ok(q2 == ["vn", "ph"], "4. дубль гео не удваивает работу", str(q2))
+
+    # 4-БИС. ⛔ КНОПКА ШАГА РАСКРЫВАЕТСЯ В ЕГО ЖЕ РАБОТЫ — для ЛЮБОГО рота, а не для тех
+    #    двух, кому в обработчике завели ветку руками. Именно на этом упала штамповка 08.08:
+    #    шаг «Адреса страниц» был в реестре ртов, в метрике и в вертикали, а в обработчике
+    #    кнопки — нет; он ушёл в общую ветку без гео, вышло `--stamp-keys ""` и падение на
+    #    пути `out_facet/.json`. Проверяем СВОЙСТВО: у каждого шага с работой первая работа
+    #    несёт непустой аргумент, если рот вообще по-гео (у kratko/translate он None по
+    #    построению — им гео не нужно).
+    PER_GEO = {"facet", "assign", "stamp"}  # рты, которым argv подставляет {geo}
+    for st in bot.pipeline_steps(full):
+        if not st["jobs"]:
+            continue
+        kind, arg = st["jobs"][0]
+        good &= ok(
+            kind == st["kind"]
+            and (arg is not None if kind in PER_GEO else arg is None),
+            "4-бис. шаг «%s»: первая работа с аргументом" % st["kind"],
+            "%r → %r" % (kind, arg),
+        )
+    stamp_step = next(x for x in bot.pipeline_steps(full) if x["kind"] == "stamp")
+    good &= ok(
+        all(g for _, g in stamp_step["jobs"]),
+        "   у штамповки НИ ОДНОЙ работы без гео",
+        str(stamp_step["jobs"][:3]),
+    )
 
     # 5. Шаг без работы не исчезает (позиции стабильны), но и в цикл не попадает.
     part = state(no_kratko=7)

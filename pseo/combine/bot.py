@@ -1108,26 +1108,37 @@ def main():
                     start_cycle(job)
                 elif data.startswith("run:"):
                     _, kind, geo = (data + ":").split(":")[:3]
-                    # ШАГ 0 ЦЕЛИКОМ: брак + новые мухи одной цепочкой, порядок берём из
-                    # facet_queue — того же списка, что рисует меню. `all`/`new` остались
-                    # как псевдонимы: их шлют кнопки СТАРЫХ сообщений в чате, которые
-                    # Telegram хранит вечно, и молча ронять их нельзя.
-                    if kind == "facet" and geo in ("", "all", "new"):
-                        q = facet_queue(pipeline_state())
-                        if not q:
-                            say("размечать нечего: брака нет, новых мух нет.")
+                    # КНОПКА ШАГА БЕЗ ГЕО = ВСЕ РАБОТЫ ЭТОГО ШАГА, и берём их из
+                    # `pipeline_steps` — того же списка, что рисует меню и собирает цикл.
+                    #
+                    # ⛔ Раньше здесь была ветка НА КАЖДЫЙ РОТ: своя для `facet` (цепочка из
+                    # facet_queue), своя для `assign` (из no_shelf), а всё остальное падало
+                    # в `job.start(kind, geo or None)`. То есть правило «как развернуть шаг
+                    # в цепочку» жило третьей копией — и новый шаг её не получил: кнопка
+                    # «3. Адреса страниц» ушла в общую ветку без гео, вышло
+                    # `--stamp-keys ""` и падение на пути `out_facet/.json` (08.08). Шаг был
+                    # добавлен в реестр ртов, в метрику и в вертикаль — в четвёртое место
+                    # нет. Теперь мест ОДНО: добавил шаг в pipeline_steps — кнопка работает.
+                    #
+                    # `all`/`new` — псевдонимы пустого гео: их шлют кнопки СТАРЫХ сообщений,
+                    # которые Telegram хранит вечно, и молча ронять их нельзя.
+                    if not geo or geo in ("all", "new"):
+                        st = next(
+                            (
+                                x
+                                for x in pipeline_steps(pipeline_state())
+                                if x["kind"] == kind
+                            ),
+                            None,
+                        )
+                        jobs = (st or {}).get("jobs") or []
+                        if not jobs:
+                            say(f"шагу «{kind}» делать нечего.")
                         else:
-                            job.chain = [("facet", x["geo"]) for x in q[1:]]
-                            job.start("facet", q[0]["geo"], _chain=True)
-                    elif kind == "assign" and not geo:
-                        s = pipeline_state()  # без гео — разложить все, где полок нет
-                        if not s["no_shelf"]:
-                            say("хвост разложен везде, assign не нужен.")
-                        else:
-                            job.chain = [("assign", g) for g in s["no_shelf"][1:]]
-                            job.start("assign", s["no_shelf"][0], _chain=True)
+                            job.chain = jobs[1:]
+                            job.start(jobs[0][0], jobs[0][1], _chain=True)
                     else:
-                        job.start(kind, geo or None)
+                        job.start(kind, geo)
                 continue
             msg = u.get("message") or {}
             src = msg.get("from", {}).get("id")
