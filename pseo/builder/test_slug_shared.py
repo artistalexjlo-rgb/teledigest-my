@@ -260,12 +260,47 @@ if __name__ == "__main__":
         'slug(v["zadacha"])' not in src_pg and "slug(g['tema'])" not in src_pg,
         "   и прямых slug() по локализованной метке в pages.py больше нет",
     )
+    # ── 8. hreflang объявляет ТОЛЬКО существующие языки. Проверяем ПОВЕДЕНИЕ, а не строку
+    #    шаблона: прежняя версия этой проверки искала литерал `{%- if page.shared_tail %}`,
+    #    я строку изменил — и она упала на верном коде. Литерал в тесте = та же болезнь
+    #    «одно решение в двух местах», только в обвязке.
+    #    ⛔ Повод для самой правки: `shared_tail` отвечает «хвост общий», а hreflang нужен
+    #    ответ «страница в этом языке ЕСТЬ». Замер 08.08: 118 битых ссылок, все из hreflang
+    #    и свитчера вида «есть в ar, нет в pt» (вид выпал при переводе).
+    sys.path.insert(0, os.path.dirname(HERE))
+    import render as rd  # noqa: E402
+
+    page = {"path": "/ru/br/money/", "shared_tail": True, "geo": "br"}
+    rd._PATHS = {"/ru/br/money/", "/en/br/money/", "/de/br/money/"}  # в pt страницы НЕТ
+    alts = rd.alt_langs(page)
+    good &= ok(
+        set(alts) == {"ru", "en", "de"} and "pt" in rd.SITE["languages"],
+        "8. hreflang объявляет только СУЩЕСТВУЮЩИЕ языки",
+        str(alts),
+    )
+    # ⛔ Список языков сайта берётся из i18n, а не руками. Руками стояло четыре, и
+    #    08.08 это тихо обнулило работу: десять новых языков собрались, но свитчер их не
+    #    показывал и hreflang о них не знал. Проверяем, что список ПОЛНЫЙ.
+    good &= ok(
+        len(rd.SITE["languages"]) >= 14 and rd.SITE["languages"][0] == "ru",
+        "   языков сайта столько же, сколько словарей i18n",
+        "%d: %s…" % (len(rd.SITE["languages"]), ", ".join(rd.SITE["languages"][:5])),
+    )
+    good &= ok(
+        rd.alt_langs({"path": "/ru/br/x/", "shared_tail": False}) == [],
+        "   без общего хвоста альтернатив нет вовсе",
+    )
+    rd._PATHS = set()
+    good &= ok(
+        rd.alt_langs(page) == list(rd.SITE["languages"]),
+        "   одиночный рендер (индекса нет) — прежнее поведение",
+    )
     tpl = open(
         f"{os.path.dirname(HERE)}/templates/base.html.j2", encoding="utf-8"
     ).read()
     good &= ok(
-        "{%- if page.shared_tail %}" in tpl,
-        "   hreflang и свитчер закрыты этим же признаком",
+        "alt_langs" in tpl and "{%- if page.shared_tail %}" not in tpl,
+        "   шаблон опирается на alt_langs, а не на shared_tail напрямую",
     )
 
     print("\nVERDICT:", "OK — адрес один на все языки" if good else "FAIL")

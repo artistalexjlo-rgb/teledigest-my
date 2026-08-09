@@ -236,5 +236,50 @@ if __name__ == "__main__":
         "куплено %d из 7" % BOUGHT["texts"],
     )
 
+    # ── 7. ⛔ АНГЛИЙСКИЙ = ИСХОДНИК, БЕЗ ВЫЗОВА МОДЕЛИ. Сторож на мою же ошибку 08.08:
+    #    я счёл абзац с кириллическим символом «русским исходником» и отправил 182 таких
+    #    на перевод. Это были АНГЛИЙСКИЕ тексты с оригинальными терминами в кавычках
+    #    («'туризъм' purpose», «travel itinerary (маршрутный лист)», «"Госзакупки"»), а
+    #    `translate_texts` бракует ответ с кириллицей — значит модель была ВЫНУЖДЕНА
+    #    термины выбросить. Итог: 191 абзац обеднён, ~76 обращений впустую, восстановление
+    #    из БД. Замер, который надо было сделать ДО: текстов преимущественно кириллических
+    #    НОЛЬ, дефекта не существовало.
+    #    Правило: для `en` текст совпадает с источником побайтово, что бы в нём ни стояло.
+    tmp3 = tempfile.mkdtemp()
+    os.makedirs(f"{tmp3}/out_facet", exist_ok=True)
+    SRC = {
+        "e0": "Standard visas ('туризъм' purpose) are limited to 30 days.",
+        "e1": "A travel itinerary (маршрутный лист) is sufficient.",
+        "e2": "Plain English advice with no quotes at all.",
+        "e3": 'Check the "Госзакупки" portal for tenders.',
+        "e4": "Ask at the registry (like ЗАГС in Russia).",
+    }
+    stub(tmp3, SRC)
+    json.dump(
+        ru_geo(list(SRC)),
+        open(f"{tmp3}/out_facet/xx.json", "w", encoding="utf-8"),
+        ensure_ascii=False,
+    )
+    BOUGHT.update(texts=0, labels=0)
+    assert fl.run("xx", "en") is True
+    en = json.load(open(f"{tmp3}/out_facet_en/xx.json", encoding="utf-8"))
+    got = {it["id"]: it["text"] for it in en["views_by_task"][0]["items"]}
+    good &= ok(
+        BOUGHT["texts"] == 0,
+        "7. английский НЕ покупает текст, даже с кириллицей в цитатах",
+        "куплено %d" % BOUGHT["texts"],
+    )
+    good &= ok(
+        all(got.get(i) == t for i, t in SRC.items()),
+        "   и текст совпадает с источником побайтово",
+        "совпало %d из %d"
+        % (sum(1 for i, t in SRC.items() if got.get(i) == t), len(SRC)),
+    )
+    good &= ok(
+        "туризъм" in (got.get("e0") or "")
+        and "маршрутный лист" in (got.get("e1") or ""),
+        "   ⭐ оригинальные термины на месте, не выброшены",
+    )
+
     print("\nVERDICT:", "OK — повторный перевод не покупает заново" if good else "FAIL")
     sys.exit(0 if good else 1)

@@ -68,13 +68,52 @@ def text_dir(lang: str) -> str:
     return "rtl" if lang in RTL_LANGS else "ltr"
 
 
+# ⛔ hreflang и свитчер обязаны знать, в каких языках страница СУЩЕСТВУЕТ, а не только
+# что хвост адреса общий. `shared_tail` отвечал на второй вопрос и этого мало: вид может
+# выпасть в отдельном языке (метка не перевелась, после отсева осталось <4 пункта). Замер
+# 08.08: 118 битых ссылок — все из hreflang и свитчера, вида «есть в ar, нет в pt».
+# Индекс строится ОДИН раз из data/ и хранится в модуле; при рендере одиночного файла
+# (render.py <файл>) он пуст, и тогда падаем на прежнее поведение по `shared_tail`.
+_PATHS: set[str] = set()
+
+
+def index_paths() -> set[str]:
+    """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы."""
+    global _PATHS
+    _PATHS = set()
+    for jf in (BASE / "data").glob("*.json"):
+        try:
+            p = json.loads(jf.read_text(encoding="utf-8")).get("path")
+        except Exception:
+            continue
+        if p:
+            _PATHS.add(p)
+    return _PATHS
+
+
+def alt_langs(page: dict) -> list:
+    """Языки, в которых ЭТА страница есть. Пустой список = альтернатив не объявляем."""
+    if not page.get("shared_tail"):
+        return []
+    tail = "/".join(page["path"].split("/")[2:])
+    if not _PATHS:  # одиночный рендер: индекса нет, доверяем shared_tail как раньше
+        return list(SITE["languages"])
+    return [x for x in SITE["languages"] if f"/{x}/{tail}" in _PATHS]
+
+
 def render_page(page: dict, lang: str | None = None) -> str:
     lang = lang or page.get("lang", "ru")
     t = load_i18n(lang)
     cta = build_cta(t, page)
     tmpl = _env.get_template(page.get("template", "page.html.j2"))
     html = tmpl.render(
-        site=SITE, t=t, page=page, lang=lang, cta=cta, text_dir=text_dir(lang)
+        site=SITE,
+        t=t,
+        page=page,
+        lang=lang,
+        cta=cta,
+        text_dir=text_dir(lang),
+        alt_langs=alt_langs(page),
     )
     # Маркер #luky в текстах (интро/проза) → реальная дверь в продукт (единый источник — site.py).
     door = f'href="{SITE["cta_luky_url"]}" target="_blank" rel="noopener"'
@@ -102,6 +141,7 @@ def build_all(lastmod: str = "") -> dict:
     lastmod — ISO-дата для <lastmod> (freshness-сигнал); пустая → без тега.
     Возвращает {rendered, indexed, skipped_noindex}."""
     data_dir = BASE / "data"
+    index_paths()  # ДО рендера: hreflang опирается на состав собранного, а не на догадку
     urls, n_rendered, n_noindex = [], 0, 0
     for jf in sorted(data_dir.glob("*.json")):
         page = json.loads(jf.read_text(encoding="utf-8"))
