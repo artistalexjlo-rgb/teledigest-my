@@ -474,7 +474,25 @@ def run(geo, lang):
     # Что уже переведено и лежит — не покупаем заново (см. harvest).
     have_text, old_nodes = harvest(out_path, en_text)
     if lang == "en":
-        text = en_text
+        # ⛔ «en = оригинал, платить не надо» верно НЕ для всех мух: у части `ai_lesson`
+        # написан по-русски, и такие абзацы уезжали на английские страницы как есть.
+        # Замер 08.08: 131 муха из 13 158 (1%) → 153 английские страницы с русским текстом.
+        # Переводим ТОЛЬКО русские исходники: три запроса на весь корпус.
+        text = dict(en_text)
+        for i, t in have_text.items():  # уже покупали перевод такого исходника — берём
+            if i in text and _has_cyr(text[i]) and not _has_cyr(t):
+                text[i] = t
+        need_en = {i: t for i, t in text.items() if _has_cyr(t)}
+        if need_en:
+            got, reason = translate_texts(need_en, "en")
+            if reason:
+                print(f"⚠️ НЕУДАЧ: {geo}/en {reason}; гео отложен", flush=True)
+                return False
+            text.update(got)
+            print(
+                f"{geo}/en: русских исходников {len(need_en)} → переведено {len(got)}",
+                flush=True,
+            )
     else:
         need = {i: t for i, t in en_text.items() if i not in have_text}
         got, reason = translate_texts(need, lang) if need else ({}, None)
