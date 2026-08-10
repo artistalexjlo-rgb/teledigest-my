@@ -11,3 +11,7 @@ taxonomy_summary.json
 .claude-launch-note.txt
 _archive_precanon/
 out/
+# резерв снятых схем: 4063 файла, в гит не нужны
+data_stale_*/
+# привезённый артефакт зрелости, не исходник
+builder/mature_geos.json
