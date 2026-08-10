@@ -77,6 +77,36 @@ def text_dir(lang: str) -> str:
 _PATHS: set[str] = set()
 
 
+# ⭐ ОБЩИЕ АССЕТЫ (2026-08-09). 72% каждой страницы было одинаковой обвязкой, повторённой
+# 41 632 раза: CSS 10.8 КБ + октагон-скрипт 1.7 КБ инлайн в КАЖДОМ файле. Итого 1.50 ГБ,
+# из них ~520 МБ — копии одного и того же. Это не только вес репозитория: РФ-сервер собирал
+# из него Docker-образ и лёг по памяти, унеся с собой ВПН, переводчик и БД (09.08).
+# Теперь один файл на сайт: браузер кеширует его один раз, а не тянет копию на каждой
+# странице. Тематический и поисковый скрипты остались инлайн — в них подставляются
+# переводы и данные страницы.
+# `?v=` — хеш содержимого: адрес меняется при правке ассета, иначе Cloudflare отдавал бы
+# старый файл из кеша.
+def asset_version() -> str:
+    h = hashlib.sha1()
+    d = BASE / "static"
+    for f in sorted(d.glob("*")) if d.is_dir() else []:
+        h.update(f.read_bytes())
+    return h.hexdigest()[:8]
+
+
+def copy_assets() -> int:
+    """static/ → out/assets/. Возвращает число файлов."""
+    src, dst = BASE / "static", BASE / "out" / "assets"
+    if not src.is_dir():
+        return 0
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in sorted(src.glob("*")):
+        (dst / f.name).write_bytes(f.read_bytes())
+        n += 1
+    return n
+
+
 def index_paths() -> set[str]:
     """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы."""
     global _PATHS
@@ -114,6 +144,7 @@ def render_page(page: dict, lang: str | None = None) -> str:
         cta=cta,
         text_dir=text_dir(lang),
         alt_langs=alt_langs(page),
+        asset_v=asset_version(),
     )
     # Маркер #luky в текстах (интро/проза) → реальная дверь в продукт (единый источник — site.py).
     door = f'href="{SITE["cta_luky_url"]}" target="_blank" rel="noopener"'
@@ -142,6 +173,7 @@ def build_all(lastmod: str = "") -> dict:
     Возвращает {rendered, indexed, skipped_noindex}."""
     data_dir = BASE / "data"
     index_paths()  # ДО рендера: hreflang опирается на состав собранного, а не на догадку
+    n_assets = copy_assets()  # общие CSS/JS: один файл на сайт вместо копии в странице
     urls, n_rendered, n_noindex = [], 0, 0
     for jf in sorted(data_dir.glob("*.json")):
         page = json.loads(jf.read_text(encoding="utf-8"))
@@ -180,7 +212,12 @@ def build_all(lastmod: str = "") -> dict:
         f"Sitemap: {SITE['domain']}/sitemap.xml\n"
     )
     (BASE / "out" / "robots.txt").write_text(robots, encoding="utf-8")
-    return {"rendered": n_rendered, "indexed": len(urls), "skipped_noindex": n_noindex}
+    return {
+        "rendered": n_rendered,
+        "indexed": len(urls),
+        "skipped_noindex": n_noindex,
+        "assets": n_assets,
+    }
 
 
 if __name__ == "__main__":
