@@ -20,7 +20,16 @@
    `https://api.telegram.org/bot<ТОКЕН>/getUpdates` — в ответе `message.from.id`.
 3. Dokploy → Create Service → **Application**:
    - Source: GitHub `artistalexjlo-rgb/teledigest-my`, branch `main` (после мёржа),
-     Build Path: `pseo/combine`, тип сборки Dockerfile.
+     тип сборки Dockerfile.
+   - **Dockerfile Path**: `pseo/combine/Dockerfile`
+   - **Docker Context Path**: `.` (корень репо)
+
+   ⚠️ **Оба поля обязательны, и это правка существующего сервиса** (раньше стояло
+   Build Path `pseo/combine`). Причина: в образ нужна рендер-половина сайта —
+   `pseo/render.py`, `templates/`, `i18n/`, `static/`, `config/`, `builder/pages.py`,
+   `builder/readycheck.py`. Из контекста `pseo/combine` эти файлы недостижимы, и их
+   пришлось бы держать вторыми копиями в git — на копиях этот проект горел трижды.
+   Пока поля не поменяны, сборка падает на `COPY` (громко, не молча).
 4. Environment (вкладка Environment):
    - `COMBINE_BOT_TOKEN` = токен из п.1
    - `ADMIN_ID` = число из п.2 (твой личный telegram-id; в приватном чате он же chat_id)
@@ -41,6 +50,13 @@
 
 ## Границы
 
-- Ship/pages/render — ДЕСКТОП, в комбайне их нет (репо pages и CF-доступ там).
+- **Рендер-половина теперь В ОБРАЗЕ** (`render.py`, `builder/pages.py`,
+  `builder/readycheck.py`, `templates/`, `i18n/`, `static/`, `config/`) — это шаг 1 схемы
+  «ПУБЛИКАЦИЯ БЕЗ АССИСТЕНТА» из `pseo/docs/PROCESSES.md`. Дублей в git не появилось:
+  файлы едут из `pseo/` благодаря контексту сборки в корне репо.
+  ⚠️ Самой публикации ещё НЕТ: шага в пульте и каталога сайта не существует, кнопки нет.
+  Пока это только наличие рендера в образе.
+- Git-транспорт (`ship.py`, репо страниц, доступ к Cloudflare) остаётся на десктопе и в
+  целевую схему не входит: пульт будет писать в примонтированный каталог, не в git.
 - Прод-бот bots-grab не затронут. Осиротевших процессов нет: рты — дети контейнера,
   умирают вместе с ним (start_new_session + killpg на стопе).
