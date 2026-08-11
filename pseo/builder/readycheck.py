@@ -13,7 +13,15 @@ import subprocess
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
-OUT = f"{BASE}/out"
+sys.path.insert(0, BASE)
+from render import (  # noqa: E402  каталог вывода объявлен ОДИН раз — в render.py
+    OUT as _OUT,
+)
+
+# ⛔ Своего `f"{BASE}/out"` здесь быть не должно. Гейт обязан смотреть ТУДА, КУДА ПИСАЛ
+# рендер: в пульте вывод уходит в примонтированный каталог (PSEO_OUT), и со своей копией
+# пути гейт проверял бы пустой `/app/out` и рапортовал «готово 0» при собранном сайте.
+OUT = str(_OUT)
 
 
 def main():
