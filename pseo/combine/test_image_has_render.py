@@ -43,9 +43,13 @@ def _copy_sources() -> list[str]:
 SOURCES = _copy_sources()
 
 
-def _copied(rel_to_pseo: str) -> bool:
-    """Попадает ли `pseo/<rel>` в образ — сам или вместе с родительским каталогом."""
-    target = f"pseo/{rel_to_pseo}".rstrip("/")
+def _copied(rel_from_root: str) -> bool:
+    """Попадает ли путь ОТ КОРНЯ РЕПО в образ — сам или вместе с родительским каталогом.
+
+    ⚠️ От корня, а не от `pseo/`: модуль репо может лежать и вне него — справочник стран
+    живёт в `src/teledigest/`, и `pages.py` берёт имена оттуда.
+    """
+    target = rel_from_root.rstrip("/")
     for src in SOURCES:
         s = src.rstrip("/")
         if target == s or target.startswith(s + "/"):
@@ -54,10 +58,16 @@ def _copied(rel_to_pseo: str) -> bool:
 
 
 def test_context_is_repo_root():
-    """Все COPY идут от корня репо. Это не стиль, а условие существования схемы: из
-    контекста `pseo/combine` файлы рендера недостижимы, и их пришлось бы дублировать."""
-    bad = [s for s in SOURCES if not s.startswith("pseo/")]
-    assert not bad, f"COPY мимо корня репо: {bad} — контекст сборки должен быть `.`"
+    """Все COPY адресуются ОТ КОРНЯ РЕПО. Это не стиль, а условие существования схемы: из
+    контекста `pseo/combine` файлы рендера недостижимы, и их пришлось бы дублировать.
+
+    ⛔ Проверяем СВОЙСТВО, а не префикс. Сначала тут стояло «строка начинается с pseo/» — и
+    правило покраснело на первом же законном пути из `src/`, хотя свойство соблюдалось.
+    Сторож, проверяющий похожесть вместо сути, ломается на правильном коде.
+    """
+    tops = {x.name for x in ROOT.iterdir()}
+    bad = [s for s in SOURCES if s.split("/")[0] not in tops]
+    assert not bad, f"COPY не от корня репо: {bad} — контекст сборки должен быть `.`"
 
 
 def test_copy_sources_exist():
@@ -70,13 +80,13 @@ def test_copy_sources_exist():
 def test_entries_copied():
     for rel in ENTRIES:
         assert (PSEO / rel).exists(), f"{rel} нет в репо"
-        assert _copied(rel), f"{rel} не попадает в образ"
+        assert _copied(f"pseo/{rel}"), f"{rel} не попадает в образ"
 
 
 def test_runtime_dirs_copied():
     for d in RUNTIME_DIRS:
         assert (PSEO / d).is_dir(), f"pseo/{d} нет в репо"
-        assert _copied(d), f"каталог {d} не попадает в образ"
+        assert _copied(f"pseo/{d}"), f"каталог {d} не попадает в образ"
 
 
 def _local_and_third_party(path: pathlib.Path):
@@ -98,13 +108,13 @@ def _local_and_third_party(path: pathlib.Path):
     for n in sorted(names):
         here = path.parent.name if path.parent != PSEO else ""
         cands = [
-            f"{here}/{n}.py" if here else f"{n}.py",
-            f"{n}.py",
-            f"{n}/__init__.py",
-            f"combine/builder/{n}.py",
-            n if (PSEO / n).is_dir() else "",  # пакет без __init__ (config/)
+            f"pseo/{here}/{n}.py" if here else f"pseo/{n}.py",
+            f"pseo/{n}.py",
+            f"pseo/{n}/__init__.py",
+            f"pseo/combine/builder/{n}.py",
+            f"pseo/{n}" if (PSEO / n).is_dir() else "",  # пакет без __init__ (config/)
         ]
-        found = [c for c in cands if c and (PSEO / c).exists()]
+        found = [c for c in cands if c and (ROOT / c).exists()]
         if found:
             local[n] = found
         else:

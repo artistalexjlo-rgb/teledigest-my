@@ -14,11 +14,10 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 PSEO = HERE.parent
-sys.path[:0] = [str(HERE), str(PSEO.parent / "src")]
+sys.path[:0] = [str(HERE)]
 
+import country_codes as ref  # noqa: E402  копия рядом; дословность сторожит test_country_codes_copy
 import pages  # noqa: E402
-
-from teledigest import country_codes as ref  # noqa: E402
 
 
 def test_every_country_has_region():
