@@ -5,7 +5,7 @@
 
 CLI:
     python render.py data/ru_br_finance.json
-        → пишет out/<path>/index.html
+        → пишет $PSEO_OUT/<path>/index.html (по умолчанию out/)
 
 Смена ссылки/домена/бренда = правка config/site.py + повторный прогон рендера
 (обновляет все страницы разом, без квот).
@@ -13,6 +13,7 @@ CLI:
 
 import hashlib
 import json
+import os
 import pathlib
 import sys
 
@@ -21,6 +22,13 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 BASE = pathlib.Path(__file__).parent
 sys.path.insert(0, str(BASE))
 from config.site import SITE  # noqa: E402
+
+# ⭐ ЕДИНСТВЕННОЕ определение каталога вывода. `readycheck.py` и `ship.py` берут его отсюда
+# импортом и своего не заводят: до 2026-08-11 `BASE/out` было выписано в трёх местах, и при
+# переносе публикации в пульт рендер писал бы в примонтированный каталог, а гейт проверял
+# пустой `/app/out` и рапортовал «готово 0» при собранном сайте. Одно знание — одно место.
+# PSEO_OUT нужен именно пульту: писать сразу в маунт, а не копировать после рендера.
+OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (BASE / "out"))
 
 _env = Environment(
     loader=FileSystemLoader(str(BASE / "templates")),
@@ -96,7 +104,7 @@ def asset_version() -> str:
 
 def copy_assets() -> int:
     """static/ → out/assets/. Возвращает число файлов."""
-    src, dst = BASE / "static", BASE / "out" / "assets"
+    src, dst = BASE / "static", OUT / "assets"
     if not src.is_dir():
         return 0
     dst.mkdir(parents=True, exist_ok=True)
@@ -154,7 +162,7 @@ def render_page(page: dict, lang: str | None = None) -> str:
 def build(data_path: str) -> pathlib.Path:
     page = json.loads(pathlib.Path(data_path).read_text(encoding="utf-8"))
     html = render_page(page)
-    out = BASE / "out" / page["path"].strip("/") / "index.html"
+    out = OUT / page["path"].strip("/") / "index.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     return out
@@ -206,12 +214,12 @@ def build_all(lastmod: str = "") -> dict:
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         f"{body}\n</urlset>\n"
     )
-    (BASE / "out" / "sitemap.xml").write_text(sm, encoding="utf-8")
+    (OUT / "sitemap.xml").write_text(sm, encoding="utf-8")
     robots = (
         "User-agent: *\nAllow: /\nDisallow: /landing/\n\n"
         f"Sitemap: {SITE['domain']}/sitemap.xml\n"
     )
-    (BASE / "out" / "robots.txt").write_text(robots, encoding="utf-8")
+    (OUT / "robots.txt").write_text(robots, encoding="utf-8")
     return {
         "rendered": n_rendered,
         "indexed": len(urls),

@@ -24,7 +24,13 @@ import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
 BUILT = f"{BASE}/builder"
-OUT = f"{BASE}/out"
+sys.path.insert(0, BASE)
+from render import OUT as _OUT  # noqa: E402  один источник каталога вывода — render.py
+
+# ⛔ Не заводить свой путь: ship, readycheck и render обязаны читать ОДНО определение,
+# иначе при заданном PSEO_OUT они разъедутся молча — рендер напишет в одно место, гейт
+# проверит другое, а push уедет с пустым третьим.
+OUT = str(_OUT)
 PAGES_REPO = os.path.abspath(f"{BASE}/../../multyspeak-pages")
 VPS = "root@199.195.252.114"
 VPS_DIR = "/root/pseo_builder"
