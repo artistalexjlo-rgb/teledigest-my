@@ -169,6 +169,7 @@ from country_codes import COUNTRY_NAMES_EN as REF_EN  # noqa: E402
 # вместо «Кыргызстан» — так говорит аудитория.
 GEO_NAMES = {
     "ru": {
+        "any": "Везде",
         "br": "Бразилия",
         "vn": "Вьетнам",
         "me": "Черногория",
@@ -206,6 +207,7 @@ GEO_NAMES = {
         "kg": "Киргизия",
     },
     "en": {
+        "any": "Anywhere",
         "br": "Brazil",
         "vn": "Vietnam",
         "me": "Montenegro",
@@ -243,6 +245,7 @@ GEO_NAMES = {
         "kg": "Kyrgyzstan",
     },
     "es": {
+        "any": "Cualquier país",
         "br": "Brasil",
         "vn": "Vietnam",
         "me": "Montenegro",
@@ -280,6 +283,7 @@ GEO_NAMES = {
         "kg": "Kirguistán",
     },
     "pt": {
+        "any": "Qualquer país",
         "br": "Brasil",
         "vn": "Vietnã",
         "me": "Montenegro",
@@ -317,6 +321,7 @@ GEO_NAMES = {
         "kg": "Quirguistão",
     },
     "de": {
+        "any": "Überall",
         "br": "Brasilien",
         "vn": "Vietnam",
         "me": "Montenegro",
@@ -354,6 +359,7 @@ GEO_NAMES = {
         "kg": "Kirgisistan",
     },
     "fr": {
+        "any": "Partout",
         "br": "Brésil",
         "vn": "Vietnam",
         "me": "Monténégro",
@@ -391,6 +397,7 @@ GEO_NAMES = {
         "kg": "Kirghizistan",
     },
     "it": {
+        "any": "Ovunque",
         "br": "Brasile",
         "vn": "Vietnam",
         "me": "Montenegro",
@@ -428,6 +435,7 @@ GEO_NAMES = {
         "kg": "Kirghizistan",
     },
     "tr": {
+        "any": "Her yerde",
         "br": "Brezilya",
         "vn": "Vietnam",
         "me": "Karadağ",
@@ -465,6 +473,7 @@ GEO_NAMES = {
         "kg": "Kırgızistan",
     },
     "zh": {
+        "any": "任何地方",
         "br": "巴西",
         "vn": "越南",
         "me": "黑山",
@@ -502,6 +511,7 @@ GEO_NAMES = {
         "kg": "吉尔吉斯斯坦",
     },
     "ja": {
+        "any": "どこでも",
         "br": "ブラジル",
         "vn": "ベトナム",
         "me": "モンテネグロ",
@@ -539,6 +549,7 @@ GEO_NAMES = {
         "kg": "キルギス",
     },
     "ko": {
+        "any": "어디서나",
         "br": "브라질",
         "vn": "베트남",
         "me": "몬테네그로",
@@ -576,6 +587,7 @@ GEO_NAMES = {
         "kg": "키르기스스탄",
     },
     "ar": {
+        "any": "في أي مكان",
         "br": "البرازيل",
         "vn": "فيتنام",
         "me": "الجبل الأسود",
@@ -613,6 +625,7 @@ GEO_NAMES = {
         "kg": "قيرغيزستان",
     },
     "hi": {
+        "any": "कहीं भी",
         "br": "ब्राज़ील",
         "vn": "वियतनाम",
         "me": "मोंटेनेग्रो",
@@ -650,6 +663,7 @@ GEO_NAMES = {
         "kg": "किर्गिज़स्तान",
     },
     "th": {
+        "any": "ทุกที่",
         "br": "บราซิล",
         "vn": "เวียดนาม",
         "me": "มอนเตเนโกร",
@@ -689,6 +703,9 @@ GEO_NAMES = {
 }
 # ru: «где» с предлогом (в/на + предложный падеж) — «в {name}» даёт «в Бразилия»
 GEO_LOC = {
+    # ⛔ Не «в Везде»: русские строки шаблона подставляют падежную форму, и для
+    # псевдо-гео её надо задать явно.
+    "any": "везде",
     "br": "в Бразилии",
     "vn": "во Вьетнаме",
     "me": "в Черногории",
@@ -742,10 +759,18 @@ def geo_name(geo, lang="ru"):
     return REF_EN.get(geo) or (REF[geo][0] if geo in REF else geo)
 
 
+# Знаки для ПСЕВДО-гео: они не страны, и флага у них в справочнике нет по определению.
+# ⛔ Сюда нельзя добавлять настоящие страны — это снова начало второй таблицы флагов
+# (сторож `test_geo_names.py` падает, если тут появится код из справочника).
+PSEUDO_FLAG = {"any": "🌍"}
+
+
 def geo_flag(geo):
-    """Флаг из справочника. Своей таблицы флагов больше нет — она совпадала со справочником
-    один в один на всех 35 странах, то есть была чистым дублем."""
-    return REF[geo][1] if geo in REF else "•"
+    """Знак гео: справочник → псевдо-гео → заглушка. Своей таблицы флагов для СТРАН нет —
+    она совпадала со справочником один в один на всех 35, то есть была чистым дублем."""
+    if geo in REF:
+        return REF[geo][1]
+    return PSEUDO_FLAG.get(geo, "•")
 
 
 ICON = {
