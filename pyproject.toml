@@ -35,6 +35,10 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
+# Нужен pSEO-рендеру (`pseo/render.py`). Боту не нужен, поэтому не в основных зависимостях,
+# но CI обязан его иметь: тесты импортируют ship/readycheck, а те — render. Без объявления
+# сюита падала на сборе (ModuleNotFoundError у test_ship_pull и test_sitemap_filter).
+jinja2 = ">=3.1.0,<4.0.0"
 black = ">=25.12.0,<26.0.0"
 isort = ">=7.0.0,<8.0.0"
 mypy = ">=1.19.0,<2.0.0"
