@@ -149,6 +149,22 @@ DATA = f"{BASE}/data"
 # built-данные лежат либо локально (pull с VPS), либо укажи путь
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
+# ⭐ ИМЕНА И ФЛАГИ СТРАН — ИЗ ОБЩЕГО СПРАВОЧНИКА (2026-08-11).
+# `src/teledigest/country_codes.py` лежит в репо с 24.04 (коммит `130855a`, дословно
+# «replace hardcoded country map») и знает 249 стран с русскими именами и флагами плюс
+# 124 английских. А 11.07 я завёл рядом свои 35 имён и 35 флагов — и 214 стран остались
+# безымянными: сайт печатал сырые коды (`ae`, `al`, `bo`), а всё неопознанное валилось в
+# группу «Другие» (55 позиций). `CLAUDE.md` это прямо запрещал: «Страны: ISO коды из
+# country_codes.py, хардкод больше не нужен». Импорт БЕЗ try/except — молчаливый фолбэк на
+# «свою табличку» и есть тот самый механизм, из-за которого дефект жил месяц.
+sys.path.insert(0, os.path.join(os.path.dirname(BASE), "src"))
+from teledigest.country_codes import COUNTRIES as REF  # noqa: E402
+from teledigest.country_codes import COUNTRY_NAMES_EN as REF_EN  # noqa: E402
+
+# ⚠️ GEO_NAMES остаётся, но как СЛОЙ ПЕРЕОПРЕДЕЛЕНИЯ, а не источник: в нём лежат имена на
+# все 14 языков для 35 стран, а справочник знает только русский и английский. Плюс два
+# осознанных расхождения по-русски: «Южная Корея» вместо «Республика Корея» и «Киргизия»
+# вместо «Кыргызстан» — так говорит аудитория.
 GEO_NAMES = {
     "ru": {
         "br": "Бразилия",
@@ -707,43 +723,29 @@ GEO_LOC = {
     "tr": "в Турции",
     "kg": "в Киргизии",
 }
-GEO_FLAG = {
-    "br": "🇧🇷",
-    "vn": "🇻🇳",
-    "me": "🇲🇪",
-    "id": "🇮🇩",
-    "gr": "🇬🇷",
-    "kr": "🇰🇷",
-    "ph": "🇵🇭",
-    "de": "🇩🇪",
-    "gb": "🇬🇧",
-    "bg": "🇧🇬",
-    "jp": "🇯🇵",
-    "by": "🇧🇾",
-    "fr": "🇫🇷",
-    "au": "🇦🇺",
-    "ar": "🇦🇷",
-    "hu": "🇭🇺",
-    "at": "🇦🇹",
-    "ru": "🇷🇺",
-    "cl": "🇨🇱",
-    "fi": "🇫🇮",
-    "ge": "🇬🇪",
-    "cz": "🇨🇿",
-    "mu": "🇲🇺",
-    "lk": "🇱🇰",
-    "be": "🇧🇪",
-    "ch": "🇨🇭",
-    "cn": "🇨🇳",
-    "cu": "🇨🇺",
-    "eg": "🇪🇬",
-    "hr": "🇭🇷",
-    "il": "🇮🇱",
-    "in": "🇮🇳",
-    "kz": "🇰🇿",
-    "tr": "🇹🇷",
-    "kg": "🇰🇬",
-}
+
+
+def geo_name(geo, lang="ru"):
+    """Имя страны для языка. Порядок: наше переопределение → справочник → код.
+
+    ⛔ Код как имя — последнее средство и признак дефекта: на сайте это выглядело как
+    «ae», «al», «bo» в списке стран. Для языков, кроме ru и en, справочник даёт английское
+    имя — это хуже локализованного, но несравнимо лучше кода. Сторож на это есть.
+    """
+    own = GEO_NAMES.get(lang, {}).get(geo)
+    if own:
+        return own
+    if lang == "ru" and geo in REF:
+        return REF[geo][0]
+    return REF_EN.get(geo) or (REF[geo][0] if geo in REF else geo)
+
+
+def geo_flag(geo):
+    """Флаг из справочника. Своей таблицы флагов больше нет — она совпадала со справочником
+    один в один на всех 35 странах, то есть была чистым дублем."""
+    return REF[geo][1] if geo in REF else "•"
+
+
 ICON = {
     "документ": "🛂",
     "виз": "🛂",
@@ -1624,80 +1626,452 @@ HOME_ABOUT = {
 
 
 # ── Портал-home: регионы + образные вайбы стран ──
-REGION_ORDER = ["la", "eu", "asia", "mea", "cis", "oce"]
-CODE2REGION = {
-    "br": "la",
-    "ar": "la",
-    "cl": "la",
-    "cu": "la",
-    "de": "eu",
-    "gb": "eu",
-    "fr": "eu",
-    "at": "eu",
-    "be": "eu",
-    "ch": "eu",
-    "cz": "eu",
-    "bg": "eu",
-    "hu": "eu",
-    "fi": "eu",
-    "hr": "eu",
-    "gr": "eu",
-    "me": "eu",
-    "vn": "asia",
-    "id": "asia",
-    "ph": "asia",
-    "kr": "asia",
-    "jp": "asia",
-    "cn": "asia",
-    "in": "asia",
-    "lk": "asia",
-    "kz": "asia",
-    "kg": "asia",
-    "ge": "asia",
-    "tr": "mea",
-    "eg": "mea",
-    "il": "mea",
-    "mu": "mea",
-    "ru": "cis",
-    "by": "cis",
-    "au": "oce",
+# ── Регионы: ПОЛНОЕ покрытие справочника, а не «наши гео» ──
+# ⛔ 2026-08-11: регион был у 35 кодов из 249, всё остальное валилось в «Другие» — 55 позиций
+# сырыми кодами на главной. Юзер: «звучит как опять урезанная версия на сейчас». Поэтому
+# раскладка покрывает справочник ЦЕЛИКОМ, а сторож падает, если появилась страна без региона.
+# Восемь регионов вместо шести: Африка отделена от Ближнего Востока, добавлена Северная
+# Америка — до этого Канада и США жили в «Других».
+# ⚠️ Ключи — СЛОВАМИ, не двухбуквенные: `me`, `na`, `af`, `la` заняты реальными странами
+# (Черногория, Намибия, Афганистан, Лаос), и совпадение ключа с кодом — мина для читателя.
+REGION_CODES = {
+    "europe": {
+        "ad",
+        "al",
+        "at",
+        "ax",
+        "ba",
+        "be",
+        "bg",
+        "ch",
+        "cy",
+        "cz",
+        "de",
+        "dk",
+        "ee",
+        "es",
+        "fi",
+        "fo",
+        "fr",
+        "gb",
+        "gg",
+        "gi",
+        "gr",
+        "hr",
+        "hu",
+        "ie",
+        "im",
+        "is",
+        "it",
+        "je",
+        "li",
+        "lt",
+        "lu",
+        "lv",
+        "mc",
+        "me",
+        "mk",
+        "mt",
+        "nl",
+        "no",
+        "pl",
+        "pt",
+        "ro",
+        "rs",
+        "se",
+        "si",
+        "sj",
+        "sk",
+        "sm",
+        "va",
+        "xk",
+    },
+    "cis": {
+        "am",
+        "az",
+        "by",
+        "ge",
+        "kg",
+        "kz",
+        "md",
+        "ru",
+        "tj",
+        "tm",
+        "ua",
+        "uz",
+    },
+    "asia": {
+        "af",
+        "bd",
+        "bn",
+        "bt",
+        "cn",
+        "hk",
+        "id",
+        "in",
+        "jp",
+        "kh",
+        "kp",
+        "kr",
+        "la",
+        "lk",
+        "mm",
+        "mn",
+        "mo",
+        "mv",
+        "my",
+        "np",
+        "ph",
+        "pk",
+        "sg",
+        "th",
+        "tl",
+        "tw",
+        "vn",
+    },
+    "mideast": {
+        "ae",
+        "bh",
+        "il",
+        "iq",
+        "ir",
+        "jo",
+        "kw",
+        "lb",
+        "om",
+        "ps",
+        "qa",
+        "sa",
+        "sy",
+        "tr",
+        "ye",
+    },
+    "africa": {
+        "ao",
+        "bf",
+        "bi",
+        "bj",
+        "bw",
+        "cd",
+        "cf",
+        "cg",
+        "ci",
+        "cm",
+        "cv",
+        "dj",
+        "dz",
+        "eg",
+        "er",
+        "et",
+        "ga",
+        "gh",
+        "gm",
+        "gn",
+        "gq",
+        "gw",
+        "ke",
+        "km",
+        "lr",
+        "ls",
+        "ly",
+        "ma",
+        "mg",
+        "ml",
+        "mr",
+        "mu",
+        "mw",
+        "mz",
+        "na",
+        "ne",
+        "ng",
+        "re",
+        "rw",
+        "sc",
+        "sd",
+        "sh",
+        "sl",
+        "sn",
+        "so",
+        "ss",
+        "st",
+        "sz",
+        "td",
+        "tg",
+        "tn",
+        "tz",
+        "ug",
+        "yt",
+        "za",
+        "zm",
+        "zw",
+    },
+    "namerica": {
+        "bm",
+        "ca",
+        "gl",
+        "pm",
+        "us",
+    },
+    "latam": {
+        "ag",
+        "ai",
+        "ar",
+        "aw",
+        "bb",
+        "bl",
+        "bo",
+        "bq",
+        "br",
+        "bs",
+        "bz",
+        "cl",
+        "co",
+        "cr",
+        "cu",
+        "cw",
+        "dm",
+        "do",
+        "ec",
+        "fk",
+        "gd",
+        "gf",
+        "gp",
+        "gs",
+        "gt",
+        "gy",
+        "hn",
+        "ht",
+        "jm",
+        "kn",
+        "ky",
+        "lc",
+        "mf",
+        "mq",
+        "ms",
+        "mx",
+        "ni",
+        "pa",
+        "pe",
+        "pr",
+        "py",
+        "sr",
+        "sv",
+        "sx",
+        "tc",
+        "tt",
+        "uy",
+        "vc",
+        "ve",
+        "vg",
+        "vi",
+    },
+    "oceania": {
+        "as",
+        "au",
+        "cc",
+        "ck",
+        "cx",
+        "fj",
+        "fm",
+        "gu",
+        "ki",
+        "mh",
+        "mp",
+        "nc",
+        "nf",
+        "nr",
+        "nu",
+        "nz",
+        "pf",
+        "pg",
+        "pn",
+        "pw",
+        "sb",
+        "tk",
+        "to",
+        "tv",
+        "um",
+        "vu",
+        "wf",
+        "ws",
+    },
+    "other": {
+        "aq",
+        "bv",
+        "hm",
+        "io",
+        "tf",
+    },
 }
+# Нежилые и приполярные территории лежат в "other": страниц у них не бывает, но регион
+# иметь обязаны, иначе сторож полноты бессмыслен.
+REGION_ORDER = [
+    "europe",
+    "cis",
+    "asia",
+    "mideast",
+    "africa",
+    "namerica",
+    "latam",
+    "oceania",
+]
+CODE2REGION = {c: r for r, cs in REGION_CODES.items() for c in cs}
+OTHER_REGION = "other"  # единственное место, где живёт этот ключ
+
 REGION_NAMES = {
     "ru": {
-        "la": "Латинская Америка",
-        "eu": "Европа",
-        "asia": "Азия",
-        "mea": "Ближний Восток и Африка",
+        "europe": "Европа",
         "cis": "СНГ",
-        "oce": "Океания",
-        "oth": "Другие",
+        "asia": "Азия",
+        "mideast": "Ближний Восток",
+        "africa": "Африка",
+        "namerica": "Северная Америка",
+        "latam": "Латинская Америка",
+        "oceania": "Океания",
+        "other": "Другие",
     },
     "en": {
-        "la": "Latin America",
-        "eu": "Europe",
-        "asia": "Asia",
-        "mea": "Middle East & Africa",
+        "europe": "Europe",
         "cis": "CIS",
-        "oce": "Oceania",
-        "oth": "Other",
+        "asia": "Asia",
+        "mideast": "Middle East",
+        "africa": "Africa",
+        "namerica": "North America",
+        "latam": "Latin America",
+        "oceania": "Oceania",
+        "other": "Other",
     },
     "es": {
-        "la": "América Latina",
-        "eu": "Europa",
-        "asia": "Asia",
-        "mea": "Oriente Medio y África",
+        "europe": "Europa",
         "cis": "CEI",
-        "oce": "Oceanía",
-        "oth": "Otros",
+        "asia": "Asia",
+        "mideast": "Oriente Medio",
+        "africa": "África",
+        "namerica": "América del Norte",
+        "latam": "América Latina",
+        "oceania": "Oceanía",
+        "other": "Otros",
     },
     "pt": {
-        "la": "América Latina",
-        "eu": "Europa",
-        "asia": "Ásia",
-        "mea": "Oriente Médio e África",
+        "europe": "Europa",
         "cis": "CEI",
-        "oce": "Oceania",
-        "oth": "Outros",
+        "asia": "Ásia",
+        "mideast": "Oriente Médio",
+        "africa": "África",
+        "namerica": "América do Norte",
+        "latam": "América Latina",
+        "oceania": "Oceania",
+        "other": "Outros",
+    },
+    "de": {
+        "europe": "Europa",
+        "cis": "GUS",
+        "asia": "Asien",
+        "mideast": "Naher Osten",
+        "africa": "Afrika",
+        "namerica": "Nordamerika",
+        "latam": "Lateinamerika",
+        "oceania": "Ozeanien",
+        "other": "Andere",
+    },
+    "fr": {
+        "europe": "Europe",
+        "cis": "CEI",
+        "asia": "Asie",
+        "mideast": "Moyen-Orient",
+        "africa": "Afrique",
+        "namerica": "Amérique du Nord",
+        "latam": "Amérique latine",
+        "oceania": "Océanie",
+        "other": "Autres",
+    },
+    "it": {
+        "europe": "Europa",
+        "cis": "CSI",
+        "asia": "Asia",
+        "mideast": "Medio Oriente",
+        "africa": "Africa",
+        "namerica": "America del Nord",
+        "latam": "America Latina",
+        "oceania": "Oceania",
+        "other": "Altri",
+    },
+    "tr": {
+        "europe": "Avrupa",
+        "cis": "BDT",
+        "asia": "Asya",
+        "mideast": "Orta Doğu",
+        "africa": "Afrika",
+        "namerica": "Kuzey Amerika",
+        "latam": "Latin Amerika",
+        "oceania": "Okyanusya",
+        "other": "Diğer",
+    },
+    "ar": {
+        "europe": "أوروبا",
+        "cis": "رابطة الدول المستقلة",
+        "asia": "آسيا",
+        "mideast": "الشرق الأوسط",
+        "africa": "أفريقيا",
+        "namerica": "أمريكا الشمالية",
+        "latam": "أمريكا اللاتينية",
+        "oceania": "أوقيانوسيا",
+        "other": "أخرى",
+    },
+    "hi": {
+        "europe": "यूरोप",
+        "cis": "सीआईएस",
+        "asia": "एशिया",
+        "mideast": "मध्य पूर्व",
+        "africa": "अफ़्रीका",
+        "namerica": "उत्तरी अमेरिका",
+        "latam": "लैटिन अमेरिका",
+        "oceania": "ओशिनिया",
+        "other": "अन्य",
+    },
+    "ja": {
+        "europe": "ヨーロッパ",
+        "cis": "CIS",
+        "asia": "アジア",
+        "mideast": "中東",
+        "africa": "アフリカ",
+        "namerica": "北米",
+        "latam": "ラテンアメリカ",
+        "oceania": "オセアニア",
+        "other": "その他",
+    },
+    "ko": {
+        "europe": "유럽",
+        "cis": "독립국가연합",
+        "asia": "아시아",
+        "mideast": "중동",
+        "africa": "아프리카",
+        "namerica": "북아메리카",
+        "latam": "라틴아메리카",
+        "oceania": "오세아니아",
+        "other": "기타",
+    },
+    "th": {
+        "europe": "ยุโรป",
+        "cis": "เครือรัฐเอกราช",
+        "asia": "เอเชีย",
+        "mideast": "ตะวันออกกลาง",
+        "africa": "แอฟริกา",
+        "namerica": "อเมริกาเหนือ",
+        "latam": "ละตินอเมริกา",
+        "oceania": "โอเชียเนีย",
+        "other": "อื่น ๆ",
+    },
+    "zh": {
+        "europe": "欧洲",
+        "cis": "独联体",
+        "asia": "亚洲",
+        "mideast": "中东",
+        "africa": "非洲",
+        "namerica": "北美洲",
+        "latam": "拉丁美洲",
+        "oceania": "大洋洲",
+        "other": "其他",
     },
 }
 # Образный блёрб «характер страны в двух мазках» — seed-тон (roadmap_portal_skeleton).
@@ -1746,13 +2120,12 @@ VIBE = {
 def home_data(lang, geos, counts):
     """Портал-данные главной: популярные (по числу тем) + регионы + поиск-индекс.
     Единый источник для ru (pages) и прочих языков — форма одинаковая."""
-    names = GEO_NAMES.get(lang, {})
 
     def nm(g):
-        return names.get(g, g)
+        return geo_name(g, lang)
 
     def tile(g):
-        return {"flag": GEO_FLAG.get(g, "•"), "name": nm(g), "url": f"/{lang}/{g}/"}
+        return {"flag": geo_flag(g), "name": nm(g), "url": f"/{lang}/{g}/"}
 
     gs = sorted(geos, key=nm)
     search_index = [tile(g) for g in gs]
@@ -1760,11 +2133,15 @@ def home_data(lang, geos, counts):
     vibe = VIBE.get(lang, {})
     popular = [{**tile(g), "vibe": vibe.get(g, "")} for g in pop_codes]
     rn = REGION_NAMES.get(lang, REGION_NAMES["en"])
+    # ⛔ Ключ региона не зашивать литералом: строка "oth" тут пережила переименование ключей
+    # и печаталась на главной как есть — «oth» вместо названия. Один источник — REGION_CODES.
     groups = {}
     for g in geos:
-        groups.setdefault(CODE2REGION.get(g, "oth"), []).append(g)
+        if g not in CODE2REGION:
+            continue  # не страна (`any` = «везде») — у неё своё место, не регион
+        groups.setdefault(CODE2REGION[g], []).append(g)
     regions = []
-    for rk in REGION_ORDER + ["oth"]:
+    for rk in REGION_ORDER + [OTHER_REGION]:
         gl = groups.get(rk)
         if not gl:
             continue
@@ -2022,7 +2399,7 @@ def _ques_dir(lang):
 
 def build_geo(geo, lang="ru"):
     C = COPY[lang]
-    name = GEO_NAMES.get(lang, {}).get(geo, geo)
+    name = geo_name(geo, lang)
     # «где» для ru-строк («{tl} в Бразилии»); прочие языки — имя как есть
     namep = GEO_LOC.get(geo, f"в {name}") if lang == "ru" else name
     facts = load(f"{_facet_dir(lang)}/{geo}.json")
