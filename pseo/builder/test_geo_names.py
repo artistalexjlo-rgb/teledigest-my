@@ -75,12 +75,9 @@ def test_no_publishing_geo_falls_back_to_code():
             geos.append(p.stem)
     if not geos:  # на чистой машине корпуса нет — проверять нечего
         return
-    # `any` — не страна, а «везде»: человеческое имя ему даёт следующий шаг (ключ в i18n).
+    # `any` тоже проверяется: с шага 2 у него есть имя на каждом языке, исключений нет.
     bare = [
-        (g, lang)
-        for g in geos
-        for lang in pages.COPY
-        if g != "any" and pages.geo_name(g, lang) == g
+        (g, lang) for g in geos for lang in pages.COPY if pages.geo_name(g, lang) == g
     ]
     assert not bare, f"имя не нашлось, печатался бы код: {bare[:10]}"
 
@@ -102,6 +99,41 @@ def test_home_shows_names_not_keys():
         ], f"{lang}: страна кодом"
         inside = [g["url"] for r in regions for g in r["geos"]]
         assert f"/{lang}/any/" not in inside, "`any` не страна, в регионе ей не место"
+
+
+def test_any_is_named_in_every_language():
+    """`any` — не страна, а «везде»: 3 077 мух и 86 страниц, второе по объёму «гео» после
+    Бразилии. Ставит его сам экстрактор, дословно из промпта: «если совет не привязан к
+    конкретной стране — укажи any».
+
+    ⛔ Справочник даёт для него `Universal` — английское слово, которое до этой правки ехало
+    на ВСЕ 14 языков, включая русский, японский и арабский. Имя обязано быть на языке страницы.
+    """
+    for lang in pages.COPY:
+        name = pages.geo_name("any", lang)
+        assert name != "any", f"{lang}: печатается код"
+        assert (
+            name != "Universal" or lang == "en"
+        ), f"{lang}: английское имя из справочника"
+        assert name.strip(), f"{lang}: пустое имя"
+
+
+def test_any_has_russian_case_form():
+    """Русские строки шаблона подставляют падежную форму («живой опыт про {tl} {namep}»).
+    Без своей записи вышло бы «в Везде» — правило подставляет «в {name}» по умолчанию.
+    """
+    assert pages.GEO_LOC.get("any") == "везде"
+    assert not pages.GEO_LOC["any"].startswith(
+        "в "
+    ), "падежная форма не должна брать предлог"
+
+
+def test_pseudo_flags_hold_no_real_countries():
+    """Знаки псевдо-гео — отдельная горстка, и она не имеет права разрастись во вторую
+    таблицу флагов: именно так и родился дефект с 35 странами из 249."""
+    intruders = sorted(k for k in pages.PSEUDO_FLAG if k in ref.COUNTRIES)
+    assert not intruders, f"в PSEUDO_FLAG попали настоящие страны: {intruders}"
+    assert pages.geo_flag("any") == "🌍", "у «везде» должен быть свой знак, не заглушка"
 
 
 def test_flags_come_from_reference():
