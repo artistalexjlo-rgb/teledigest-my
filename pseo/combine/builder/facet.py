@@ -764,6 +764,61 @@ def run_assign_tail(geo):
     )
 
 
+def run_reassign_shelf(geo, shelf_name):
+    """Пере-разложить ТОЛЬКО одну полку по текущей таксономии. Остальные не трогаем.
+
+    ⭐ Зачем отдельный режим (2026-08-13). При смене набора полок смысл меняется не у всего
+    хвоста, а у той полки, которую разобрали. Полный `--assign-tail` по всем гео — 120 вызовов
+    и потолок 1440 обращений к Google; целевой по одной полке — 15 вызовов и потолок 180.
+    Разница в восемь раз, и она в общем ресурсе ключей, а не в удобстве.
+
+    ⚠️ ЧЕСТНОСТЬ МЕТКИ: помечаем `taxonomy_version` текущей версией, но рядом пишем
+    `taxonomy_reassigned` — какие именно полки пере-разложены. Иначе файл заявлял бы полное
+    соответствие новой таксономии, хотя мухи из ДРУГИХ полок под уточнённые границы не
+    пересматривались (например «погода» могла осесть в транспорте, а её место — в туризме).
+    """
+    tagged = json.load(open(f"tags/{geo}.json", encoding="utf-8"))
+    by_id = {r["id"]: r for r in tagged}
+    out_fn = f"out_facet/{geo}.json"
+    page = json.load(open(out_fn, encoding="utf-8"))
+    shelves = {
+        s["shelf"]: list(s.get("items") or []) for s in page.get("shelves") or []
+    }
+    target = shelves.pop(shelf_name, None)
+    if target is None:
+        print(f"{geo}: полки «{shelf_name}» нет — пропуск", flush=True)
+        return 0
+    fids = [it["id"] for it in target if it.get("id") in by_id]
+    lost = len(target) - len(fids)  # мухи, которых нет в tags: считаем и говорим
+    run_fails = []
+    fresh, prochee = assign_tail(fids, by_id, run_fails)
+    for sh, its in fresh.items():
+        have = {it["id"] for it in shelves.get(sh, [])}
+        shelves.setdefault(sh, []).extend(it for it in its if it["id"] not in have)
+    page["shelves"] = [
+        {"shelf": sh, "items": its} for sh, its in shelves.items() if its
+    ]
+    old_pro = {it["id"] for it in (page.get("prochee") or [])}
+    page["prochee"] = (page.get("prochee") or []) + [
+        it for it in prochee if it["id"] not in old_pro
+    ]
+    page["taxonomy_version"] = tax.VERSION
+    page["taxonomy_reassigned"] = sorted(
+        set(page.get("taxonomy_reassigned") or []) | {shelf_name}
+    )
+    if run_fails:
+        page["fails"] = (page.get("fails") or []) + run_fails
+    _atomic_json(out_fn, page)
+    print(
+        f"{geo}: «{shelf_name}» {len(fids)} мух → "
+        + ", ".join(f"{sh}: {len(its)}" for sh, its in sorted(fresh.items()))
+        + f"; прочее +{len(prochee)}"
+        + (f"; без текста {lost}" if lost else ""),
+        flush=True,
+    )
+    return len(fids)
+
+
 if __name__ == "__main__":
     # --mature: список зрелых гео в JSON. Зовёт ship (гейт публикации) — тут, а не у себя,
     # чтобы правило «что такое зрелое» жило рядом с тем, кто по нему берёт работу.
@@ -771,9 +826,15 @@ if __name__ == "__main__":
         print(json.dumps(mature_geos(), ensure_ascii=False))
         sys.exit(0)
     if len(sys.argv) < 2:
-        print("usage: facet.py <geo> [--limit N] [--assign-tail] | facet.py --mature")
+        print(
+            "usage: facet.py <geo> [--limit N] [--assign-tail] "
+            '[--reassign-shelf "<полка>"] | facet.py --mature'
+        )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--reassign-shelf" in sys.argv:
+        run_reassign_shelf(geo, sys.argv[sys.argv.index("--reassign-shelf") + 1])
+        sys.exit(0)
     if "--assign-tail" in sys.argv:
         run_assign_tail(geo)
         sys.exit(0)

@@ -17,6 +17,7 @@ import os
 import signal
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 
@@ -49,6 +50,33 @@ STOP_FLAGS = [
 ]
 
 # Меню: kind → (кнопка, argv дубля; {geo} подставляется). cwd=BRAIN — данные хоста.
+# Версия таксономии — из ТОГО ЖЕ модуля, по которому раскладывают рты. Литералом нельзя:
+# на копиях чисел этот проект уже горел (DEAD_AT разъехался по трём файлам).
+sys.path.insert(0, BUILDER)
+import tail_taxonomy as _tax  # noqa: E402
+
+_TAX_VERSION = _tax.VERSION
+
+
+def stale_shelf(geo):
+    """Полка гео, которой в ТЕКУЩЕЙ таксономии больше нет — её и надо пере-разложить.
+
+    Имя берётся из ДАННЫХ, а не из константы: переименовали или разобрали полку — пульт
+    узнает об этом сам. Ничего не нашлось (сменились только границы, имена целы) — значит
+    целевым режимом делать нечего, нужна полная раскладка, и об этом честно говорим.
+    """
+    try:
+        with open(f"{BRAIN}/out_facet/{geo}.json", encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        return None
+    known = set(_tax.SHELF_NAMES)
+    for sh in d.get("shelves") or []:
+        if sh.get("shelf") and sh["shelf"] not in known:
+            return sh["shelf"]
+    return None
+
+
 MENU = {
     "kratko": (
         "Kratko (дожим)",
@@ -59,6 +87,20 @@ MENU = {
     "assign": (
         "Хвост→полки <гео>",
         ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-tail"],
+    ),
+    # Целевая пере-раскладка ОДНОЙ полки: при смене набора полок смысл меняется у неё, и
+    # гонять весь хвост незачем. Полный проход по всем гео — потолок 1440 обращений,
+    # целевой — 180. Имя полки подставляет шаг.
+    "reshelf": (
+        "Пере-разложить полку <гео>",
+        [
+            "python",
+            "-u",
+            f"{BUILDER}/facet.py",
+            "{geo}",
+            "--reassign-shelf",
+            "{shelf}",
+        ],
     ),
     # АДРЕСА страниц. Место в тракте жёсткое: ПОСЛЕ ветвления (ветви тоже получают адрес,
     # а рождает их dedup) и ДО переводов (перевод несёт `key` из русского файла; нет
@@ -308,6 +350,7 @@ def pipeline_state():
         "no_kratko": 0,
         "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
         "no_shelf": [],
+        "stale_tax": [],  # полки есть, но по старой версии таксономии
         "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
         "no_addr_n": 0,  # сколько таких узлов всего — для честной подписи шага
         "langs": [],
@@ -389,6 +432,12 @@ def pipeline_state():
                 )
                 if tail:
                     st["no_shelf"].append(geo)
+            # ⭐ ШАГ 1, ВТОРАЯ ПРИЧИНА (2026-08-13): полки ЕСТЬ, но разложены по УСТАРЕВШЕЙ
+            # таксономии. Раньше счётчик мерил только НАЛИЧИЕ полок — и после смены набора
+            # 82 гео выглядели готовыми, пока пляжи лежали в полке «Работа, учёба, быт».
+            # Версия таксономии пишется в файл гео самим facet, читать её — бесплатно.
+            elif d.get("taxonomy_version") != _TAX_VERSION:
+                st["stale_tax"].append(geo)
             # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
             # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
             # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
@@ -514,8 +563,13 @@ def state_card():
             f"   carve не разобрал → собрано откатом, нужен перепрогон"
         )
         todo.append("failed")
-    if s["no_shelf"]:
-        lines.append(f"1) хвост не разложен по полкам: {len(s['no_shelf'])} гео")
+    if s["no_shelf"] or s["stale_tax"]:
+        parts = []
+        if s["no_shelf"]:
+            parts.append(f"не разложен: {len(s['no_shelf'])} гео")
+        if s["stale_tax"]:
+            parts.append(f"старая таксономия: {len(s['stale_tax'])} гео")
+        lines.append("1) хвост→полки — " + ", ".join(parts))
         todo.append("assign")
     else:
         lines.append("1) хвост→полки: ✅ все гео")
@@ -600,6 +654,15 @@ class Job:
             if not _chain:
                 self.chain = []  # ручной запуск отменяет недобеганную цепочку
             argv = [a.replace("{geo}", geo or "") for a in MENU[kind][1]]
+            if any("{shelf}" in a for a in argv):
+                sh = stale_shelf(geo)
+                if not sh:
+                    say(
+                        f"{geo}: полок из старой таксономии нет — целевым режимом нечего "
+                        f"делать, нужна полная раскладка (кнопка «Хвост→полки»)."
+                    )
+                    return
+                argv = [a.replace("{shelf}", sh) for a in argv]
             for f in STOP_FLAGS:  # прошлый стоп не должен глушить новый заказ
                 if os.path.exists(f):
                     os.remove(f)
@@ -918,11 +981,14 @@ def pipeline_steps(s):
         },
         {
             "kind": "assign",
-            "jobs": [("assign", g) for g in s["no_shelf"]],
+            # Работа шага = и «полок нет» (полная раскладка), и «полки по старой версии»
+            # (целевая пере-раскладка разобранной полки). Второе дешевле в восемь раз.
+            "jobs": [("assign", g) for g in s["no_shelf"]]
+            + [("reshelf", g) for g in s["stale_tax"]],
             "geos": [],
             "label": (
-                f"1. Хвост → полки — {len(s['no_shelf'])} гео"
-                if s["no_shelf"]
+                f"1. Хвост → полки — {len(s['no_shelf']) + len(s['stale_tax'])} гео"
+                if (s["no_shelf"] or s["stale_tax"])
                 else "1. Хвост → полки"
             ),
             "note": "",
