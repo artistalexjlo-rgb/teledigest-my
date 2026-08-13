@@ -92,6 +92,12 @@ MENU = {
     # Целевая пере-раскладка ОДНОЙ полки: при смене набора полок смысл меняется у неё, и
     # гонять весь хвост незачем. Полный проход по всем гео — потолок 1440 обращений,
     # целевой — 180. Имя полки подставляет шаг.
+    # Полка (тема) КАЖДОМУ виду-странице — тем же ртом `assign`, что раскладывает хвост.
+    # Отдельного способа нет и не надо: одна таксономия, один рот, один учёт ключей.
+    "assignv": (
+        "Полки видам <гео>",
+        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-views"],
+    ),
     "reshelf": (
         "Пере-разложить полку <гео>",
         [
@@ -351,6 +357,8 @@ def pipeline_state():
         "no_kratko": 0,
         "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
         "no_shelf": [],
+        "no_view_shelf": [],  # виды-страницы без полки (темы) → работа рта assign
+        "no_view_shelf_n": 0,  # сколько таких видов всего — для честной подписи
         "stale_tax": [],  # есть полка, которой больше нет в таксономии → целевой режим
         "stale_tax_bounds": [],  # версия старая, но имена полок целы → только границы
         "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
@@ -449,6 +457,20 @@ def pipeline_state():
                     st["stale_tax"].append(geo)
                 else:
                     st["stale_tax_bounds"].append(geo)
+            # ⭐ ПОЛКА У ВИДА (2026-08-13). ⛔ Блок стоит ПОСЛЕ цепочки if/elif про полки: сперва
+            # я вставил его в середину, и `elif` про версию привязался к НЕМУ — из-за
+            # чего `stale_tax` перестал наполняться совсем. Поймали сторожа, не глаза.
+            # Уровня темы у фактовых страниц не было вовсе:
+            # хаб вываливал плоский список (63 ссылки у gr, 87 у any). Полку даёт тот же рот
+            # assign; работа шага = виды-страницы, у которых поля ещё нет.
+            nvs = [
+                v
+                for v in d.get("views_by_task", [])
+                if len(v.get("items") or []) >= 4 and not v.get("shelf")
+            ]
+            if nvs:
+                st["no_view_shelf"].append(geo)
+                st["no_view_shelf_n"] += len(nvs)
             # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
             # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
             # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
@@ -574,12 +596,16 @@ def state_card():
             f"   carve не разобрал → собрано откатом, нужен перепрогон"
         )
         todo.append("failed")
-    if s["no_shelf"] or s["stale_tax"] or s["stale_tax_bounds"]:
+    if s["no_shelf"] or s["stale_tax"] or s["stale_tax_bounds"] or s["no_view_shelf"]:
         parts = []
         if s["no_shelf"]:
             parts.append(f"не разложен: {len(s['no_shelf'])} гео")
         if s["stale_tax"]:
             parts.append(f"старая таксономия: {len(s['stale_tax'])} гео")
+        if s["no_view_shelf"]:
+            parts.append(
+                f"виды без темы: {s['no_view_shelf_n']} на {len(s['no_view_shelf'])} гео"
+            )
         if s["stale_tax_bounds"]:
             parts.append(
                 f"уточнились только границы: {len(s['stale_tax_bounds'])} гео "
@@ -1000,11 +1026,13 @@ def pipeline_steps(s):
             # Работа шага = и «полок нет» (полная раскладка), и «полки по старой версии»
             # (целевая пере-раскладка разобранной полки). Второе дешевле в восемь раз.
             "jobs": [("assign", g) for g in s["no_shelf"]]
-            + [("reshelf", g) for g in s["stale_tax"]],
+            + [("reshelf", g) for g in s["stale_tax"]]
+            + [("assignv", g) for g in s["no_view_shelf"]],
             "geos": [],
             "label": (
-                f"1. Хвост → полки — {len(s['no_shelf']) + len(s['stale_tax'])} гео"
-                if (s["no_shelf"] or s["stale_tax"])
+                f"1. Полки — {len(s['no_shelf']) + len(s['stale_tax'])} гео хвост, "
+                f"{len(s['no_view_shelf'])} гео темы"
+                if (s["no_shelf"] or s["stale_tax"] or s["no_view_shelf"])
                 else "1. Хвост → полки"
             ),
             "note": (
