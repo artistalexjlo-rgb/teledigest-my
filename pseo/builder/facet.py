@@ -364,7 +364,7 @@ def carve_family(fids, by_id, fails=None, family=None):
 # ложится на полку(и) как антология + получает тип. Метод open→lock→assign доказан на ru
 # 2026-07-19 (192/192, ~94% чисто). Непокрытое → prochee (park-ведро, сигнал роста таксономии).
 ASSIGN_SYS = (
-    "Ниже разрозненные советы путешественников/экспатов (id: текст) — каждый самостоятелен, "
+    "Ниже разрозненные советы людей из чатов (id: текст) — каждый самостоятелен, "
     "НЕ схлопывай и НЕ выкидывай. Разложи КАЖДЫЙ по ЗАКРЫТОЙ таксономии:\n"
     "ПОЛКИ (можно НЕСКОЛЬКО, минимум 1): " + " | ".join(tax.SHELF_NAMES) + "\n"
     "ТИП (РОВНО один): " + " | ".join(tax.TYPE_NAMES) + "\n"
@@ -731,6 +731,83 @@ def run(geo, limit=None):
 PAGE_MIN = 4  # гейт страницы (зеркало pages.py): вид <4 мух страницей не станет
 
 
+# ── ПОЛКА ВИДУ: тот же рот `assign`, что раскладывает хвост (заказ юзера 13.08) ──
+# Ось адресации у видов — формулировка метки задачи, и уровня темы у них не было: у Греции
+# 62 вида при 8 настоящих темах, а хаб вываливал 63 ссылки плоским списком. На этом поле
+# стоят плитки хаба и довод CTA по теме.
+# ⛔ Способ ОДИН и он существующий: тот же рот, та же закрытая таксономия, тот же сосок мозга.
+# Своей механики (векторы, центры полок) не заводить — заказа не было, а второй способ = вторая
+# правда.
+# На вход идут МЕТКИ видов, а не тексты мух: метка коротка, и полка по ней видна (замер 13.08:
+# 60 меток из 62 у Греции опознавались даже словарём).
+ASSIGN_VIEW_BATCH = 90  # меток в пачку: они короткие, окно соска держит с запасом
+
+ASSIGN_VIEW_SYS = (
+    "Ниже названия тем страниц гида (id: название). Отнеси КАЖДУЮ ровно к ОДНОЙ полке "
+    "закрытой таксономии. Отвечай КЛЮЧОМ полки.\n"
+    + "\n".join(f"{k} — {name}: {desc}" for k, name, desc in tax.SHELVES)
+    + "\nНи одна не подходит → ключ 'prochee' (сигнал дырки, не злоупотребляй).\n"
+    'СТРОГО JSON: {"map":{"0":"<ключ полки>",...}}'
+)
+
+
+def assign_views(geo, fails=None):
+    """Полка каждому виду-странице гео. Пишет `view["shelf"]` в out_facet/<geo>.json.
+
+    Работой считаются только виды БЕЗ полки — повторный запуск ключей не тратит.
+    Вид, на который рот не ответил или ответил неизвестным ключом, остаётся БЕЗ полки: молча
+    приписать ближайшую значило бы соврать, а пустое поле видно и в пульте, и в сборке.
+    """
+    out_fn = f"out_facet/{geo}.json"
+    page = json.load(open(out_fn, encoding="utf-8"))
+    views = [
+        (i, v)
+        for i, v in enumerate(page.get("views_by_task") or [])
+        if len(v.get("items") or []) >= PAGE_MIN
+    ]
+    todo = [(i, v) for i, v in views if not v.get("shelf")]
+    if not todo:
+        print(f"{geo}: полки у всех {len(views)} видов — пропуск", flush=True)
+        return 0
+    by_key = {k: name for k, name, _ in tax.SHELVES}
+    done = unknown = 0
+    for s in range(0, len(todo), ASSIGN_VIEW_BATCH):
+        if os.path.exists("RUNNER_STOP"):  # стоп МЕЖДУ пачками: сделанное не теряем
+            print(f"  стоп между пачками на {s}/{len(todo)}", flush=True)
+            break
+        chunk = todo[s : s + ASSIGN_VIEW_BATCH]
+        idx = {str(j): (v.get("zadacha") or "") for j, (_i, v) in enumerate(chunk)}
+        res = call(
+            json.dumps(idx, ensure_ascii=False), ASSIGN_VIEW_SYS, consumer="assign"
+        )
+        m = (res or {}).get("map") or {}
+        if not m:
+            if fails is not None:  # сбой ВИДЕН, а не проглочен
+                fails.append(
+                    {
+                        "step": "assign_views",
+                        "geo": geo,
+                        "batch": s // ASSIGN_VIEW_BATCH,
+                    }
+                )
+            continue
+        for j, (_i, v) in enumerate(chunk):
+            k = (m.get(str(j)) or "").strip()
+            if k in by_key:
+                v["shelf"] = by_key[k]
+                done += 1
+            else:
+                unknown += 1
+    if done:
+        _atomic_json(out_fn, page)
+    print(
+        f"{geo}: видов {len(views)}, без полки было {len(todo)} -> разложено {done}"
+        + (f", неопознанный ключ {unknown}" if unknown else ""),
+        flush=True,
+    )
+    return done
+
+
 def run_assign_tail(geo):
     """Только джоб2 на УЖЕ построенном out_facet: хвост = тегнутые мухи, НЕ доходящие
     ни до одной страницы (все их виды <PAGE_MIN; в старом формате синглы лежат видами
@@ -832,6 +909,9 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--assign-views" in sys.argv:
+        assign_views(geo, [])
+        sys.exit(0)
     if "--reassign-shelf" in sys.argv:
         run_reassign_shelf(geo, sys.argv[sys.argv.index("--reassign-shelf") + 1])
         sys.exit(0)
