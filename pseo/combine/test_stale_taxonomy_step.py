@@ -51,8 +51,11 @@ def test_version_comes_from_taxonomy_not_literal():
 
 
 def test_stale_geo_is_counted(tmp_path, monkeypatch):
+    """Работа считается по РАЗОБРАННОЙ полке, поэтому гео заводим именно с ней."""
     monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
-    _corpus(tmp_path, "gr", "v0-2026-07-19")
+    _corpus(
+        tmp_path, "gr", "v0-2026-07-19", shelf_name="Работа, учёба, сообщества и быт"
+    )
     _corpus(tmp_path, "br", tax.VERSION)
     st = bot.pipeline_state()
     assert "gr" in st["stale_tax"], "гео со старой версией не попало в работу шага"
@@ -62,7 +65,9 @@ def test_stale_geo_is_counted(tmp_path, monkeypatch):
 def test_step_label_and_jobs_include_stale(tmp_path, monkeypatch):
     """Шаг обязан и посчитать гео, и выдать РАБОТУ — иначе кнопка нарисуется пустой."""
     monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
-    _corpus(tmp_path, "gr", "v0-2026-07-19")
+    _corpus(
+        tmp_path, "gr", "v0-2026-07-19", shelf_name="Работа, учёба, сообщества и быт"
+    )
     st = bot.pipeline_state()
     step = next(s for s in bot.pipeline_steps(st) if s["kind"] == "assign")
     assert "1 гео" in step["label"], step["label"]
@@ -88,3 +93,25 @@ def test_menu_has_targeted_mode():
     assert "reshelf" in bot.MENU
     argv = bot.MENU["reshelf"][1]
     assert "--reassign-shelf" in argv and "{geo}" in argv and "{shelf}" in argv
+
+
+def test_boundaries_only_geo_is_not_queued(tmp_path, monkeypatch):
+    """Гео со старой версией, но ЖИВЫМИ именами полок, в работу не попадает.
+
+    ⛔ Замер на первом же боевом прогоне 13.08: цепочка встала на `ae` — целевой режим умеет
+    только полки, которых в таксономии больше нет, а у `ae` все имена целы. Из 89 гео со
+    старой версией таких 29. Считать работой всё расхождение версии — значит спотыкаться на
+    каждом из них.
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    _corpus(tmp_path, "ae", "v0-2026-07-19", shelf_name="Визовые процедуры")
+    _corpus(
+        tmp_path, "gr", "v0-2026-07-19", shelf_name="Работа, учёба, сообщества и быт"
+    )
+    st = bot.pipeline_state()
+    assert st["stale_tax"] == ["gr"], st["stale_tax"]
+    assert st["stale_tax_bounds"] == ["ae"], st["stale_tax_bounds"]
+    step = next(s for s in bot.pipeline_steps(st) if s["kind"] == "assign")
+    assert ("reshelf", "gr") in step["jobs"]
+    assert ("reshelf", "ae") not in step["jobs"], "цикл встанет на этом гео"
+    assert "границ" in step["note"], "про остаток надо сказать, а не проглотить"

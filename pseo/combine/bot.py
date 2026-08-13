@@ -56,6 +56,7 @@ sys.path.insert(0, BUILDER)
 import tail_taxonomy as _tax  # noqa: E402
 
 _TAX_VERSION = _tax.VERSION
+_TAX_NAMES = set(_tax.SHELF_NAMES)
 
 
 def stale_shelf(geo):
@@ -350,7 +351,8 @@ def pipeline_state():
         "no_kratko": 0,
         "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
         "no_shelf": [],
-        "stale_tax": [],  # полки есть, но по старой версии таксономии
+        "stale_tax": [],  # есть полка, которой больше нет в таксономии → целевой режим
+        "stale_tax_bounds": [],  # версия старая, но имена полок целы → только границы
         "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
         "no_addr_n": 0,  # сколько таких узлов всего — для честной подписи шага
         "langs": [],
@@ -437,7 +439,16 @@ def pipeline_state():
             # 82 гео выглядели готовыми, пока пляжи лежали в полке «Работа, учёба, быт».
             # Версия таксономии пишется в файл гео самим facet, читать её — бесплатно.
             elif d.get("taxonomy_version") != _TAX_VERSION:
-                st["stale_tax"].append(geo)
+                # ⚠️ РАБОТА ЦЕЛЕВОГО РЕЖИМА — только полки, которой в таксономии больше нет.
+                # Замер 13.08: из 89 гео со старой версией разобранная полка есть у 60, а у
+                # 29 все имена целы (сменились лишь границы). Если считать работой всё
+                # расхождение версии, цикл спотыкается на каждом из этих 29 — так и вышло на
+                # первом же прогоне (`ae`).
+                names = [s0.get("shelf") for s0 in d.get("shelves") or []]
+                if any(n and n not in _TAX_NAMES for n in names):
+                    st["stale_tax"].append(geo)
+                else:
+                    st["stale_tax_bounds"].append(geo)
             # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
             # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
             # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
@@ -563,12 +574,17 @@ def state_card():
             f"   carve не разобрал → собрано откатом, нужен перепрогон"
         )
         todo.append("failed")
-    if s["no_shelf"] or s["stale_tax"]:
+    if s["no_shelf"] or s["stale_tax"] or s["stale_tax_bounds"]:
         parts = []
         if s["no_shelf"]:
             parts.append(f"не разложен: {len(s['no_shelf'])} гео")
         if s["stale_tax"]:
             parts.append(f"старая таксономия: {len(s['stale_tax'])} гео")
+        if s["stale_tax_bounds"]:
+            parts.append(
+                f"уточнились только границы: {len(s['stale_tax_bounds'])} гео "
+                f"(целевым не сделать, нужна полная раскладка)"
+            )
         lines.append("1) хвост→полки — " + ", ".join(parts))
         todo.append("assign")
     else:
@@ -991,7 +1007,12 @@ def pipeline_steps(s):
                 if (s["no_shelf"] or s["stale_tax"])
                 else "1. Хвост → полки"
             ),
-            "note": "",
+            "note": (
+                f"ещё {len(s['stale_tax_bounds'])} гео с уточнёнными границами — "
+                f"только полной раскладкой"
+                if s["stale_tax_bounds"]
+                else ""
+            ),
         },
         {
             "kind": "kratko",
