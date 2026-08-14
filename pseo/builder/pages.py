@@ -2369,6 +2369,9 @@ def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
             "template": "page.html.j2",
             "path": f"{url_pref}{ss}/",
             "shared_tail": bool(sub.get("key")),
+            # раздел ветка наследует от своей страницы: на нём стоят и довод CTA, и шлюз
+            # клика. Без этого ветвлённые страницы (202 в корпусе) остались бы без адресности.
+            "shelf_key": ctx.get("shelf_key"),
             "geo": geo,
             "geo_name": name,
             "intent_name": sub["name"],
@@ -2607,11 +2610,16 @@ def build_geo(geo, lang="ru"):
         tema = v["zadacha"]
         s = addr(v, "zadacha")
         items = [it["text"] for it in v["items"]]
+        vkey = view_theme(v, geo, lang)  # раздел разбора: и плитка, и довод CTA, и шлюз
         page = {
             "lang": lang,
             "path": f"/{lang}/{geo}/{s}/",
             # хвост адреса общий для всех языков? от этого зависят свитчер и hreflang
             "shared_tail": bool(v.get("key")),
+            # ⭐ ШАГ 6: раздел на самой странице. Довод CTA выбирался по хешу пути, поэтому
+            # на странице про сроки визы обещали «и официант не перепутает заказ». Ещё этот
+            # ключ уезжает в шлюз клика, чтобы переход считался ПО РАЗДЕЛУ.
+            "shelf_key": vkey,
             "geo": geo,
             "geo_name": name,
             "intent_name": tema,
@@ -2637,7 +2645,13 @@ def build_geo(geo, lang="ru"):
                     "list_label": "fact_list_label",
                     "blurb": "fact",
                 },
-                ctx={"geo": geo, "name": name, "namep": namep, "tl": tl},
+                ctx={
+                    "geo": geo,
+                    "name": name,
+                    "namep": namep,
+                    "tl": tl,
+                    "shelf_key": vkey,
+                },
                 lang=lang,
                 write_fn=write,
             )
@@ -2669,10 +2683,8 @@ def build_geo(geo, lang="ru"):
                 "title": tema,
                 "blurb": blurb(C, "fact", len(items)),
                 "url": f"/{lang}/{geo}/{s}/",
-                "n": len(
-                    items
-                ),  # масса: и счётчик темы, и порядок адресов внутри плитки
-                "theme": view_theme(v, geo, lang),
+                "n": len(items),  # масса: счётчик раздела и порядок плиток внутри него
+                "theme": vkey,
             }
         )
 
@@ -2803,12 +2815,20 @@ def build_geo(geo, lang="ru"):
         ]
         for sv in shelves:
             sk = _sk(sv)
+            # ⭐ ШАГ 5: РАЗБОРЫ ЭТОГО РАЗДЕЛА — плитками СВЕРХУ страницы раздела. До этого
+            # раздел показывал только свой хвост, а разборы висели плоским списком на хабе
+            # страны (у `gr` 63 ссылки, у `any` 87). Своей страницы разделу не завожу —
+            # это она и есть; новых адресов шаг не создаёт.
+            tkey = sv.get("key") or SHELF_KEY.get(sv["shelf"]) or ""
+            own = by_theme.get(tkey) or []
+            theme_urls[tkey] = f"/{lang}/{geo}/s/{sk}/"  # куда ведёт плитка на хабе
             page = {
                 "lang": lang,
                 "path": f"/{lang}/{geo}/s/{sk}/",
                 # хвост полки ОБЩИЙ по построению: ключ латинский, из таксономии, один во
                 # всех языках. Признака не было — и 5616 страниц шли без hreflang.
                 "shared_tail": True,
+                "shelf_key": tkey,  # шаг 6: довод CTA и шлюз клика — по разделу
                 "geo": geo,
                 "geo_name": name,
                 "intent_name": sv["shelf"],
@@ -2833,13 +2853,6 @@ def build_geo(geo, lang="ru"):
                     if x["slug"] != sk
                 ][:6],
             }
-            # ⭐ ШАГ 5: РАЗБОРЫ ЭТОГО РАЗДЕЛА — плитками СВЕРХУ страницы раздела. До этого
-            # раздел показывал только свой хвост, а разборы висели плоским списком на хабе
-            # страны (у `gr` 63 ссылки, у `any` 87). Своей страницы разделу не завожу —
-            # это она и есть; новых адресов шаг не создаёт.
-            tkey = sv.get("key") or SHELF_KEY.get(sv["shelf"]) or ""
-            own = by_theme.get(tkey) or []
-            theme_urls[tkey] = f"/{lang}/{geo}/s/{sk}/"  # куда ведёт плитка на хабе
             if sv.get("subshelves"):  # полка-гигант ВЕТВИТСЯ: хаб + под-страницы
                 n_before = n
                 subtiles, rest = build_branches(
@@ -2854,7 +2867,13 @@ def build_geo(geo, lang="ru"):
                         "list_label": "shelf_list_label",
                         "blurb": "shelf",
                     },
-                    ctx={"geo": geo, "name": name, "namep": namep, "tl": tl},
+                    ctx={
+                        "geo": geo,
+                        "name": name,
+                        "namep": namep,
+                        "tl": tl,
+                        "shelf_key": tkey,
+                    },
                     lang=lang,
                     write_fn=write,
                 )
@@ -3022,6 +3041,32 @@ def build_home(lang, geos, counts=None):
     )
 
 
+def build_gateway(lang):
+    """⭐ ШАГ 6: ШЛЮЗ КЛИКА `/<язык>/go/luky/` — чтобы переход в продукт был ПОСЧИТАН.
+
+    Замер до шлюза: сколько людей уходит со страниц в Luky, мы не знали вовсе — ни одной
+    цифры. Все двери (кнопка CTA и маркеры `#luky` в текстах) ведут теперь сюда, а сюда
+    приходит `?geo=&shelf=`, то есть видно, какая страна и какой РАЗДЕЛ отдаёт переходы.
+
+    ⛔ Своего бэкенда не заводим: nginx уже пишет строку запроса и Referer в access.log —
+    счёт бесплатный. Страница только пересылает дальше.
+    ⛔ `noindex`: это не контент, в карту сайта ей нельзя (её отсекает `_indexable`).
+    """
+    HA = HOME_ABOUT[lang]
+    write(
+        f"{lang}_go_luky.json",
+        {
+            "lang": lang,
+            "template": "go.html.j2",
+            "path": f"/{lang}/go/luky/",
+            "noindex": True,
+            "crumb_label": None,
+            "title": HA["home_title"],
+            "meta_desc": HA["home_desc"],
+        },
+    )
+
+
 def build_about(lang):
     HA = HOME_ABOUT[lang]
     write(
@@ -3070,5 +3115,8 @@ if __name__ == "__main__":
         build_home(lang, sorted(gl), counts.get(lang, {}))
         if lang != "ru":
             build_about(lang)
-        print(f"{lang}: home{'' if lang == 'ru' else ' + about'} ({len(gl)} стран)")
+        build_gateway(lang)  # шаг 6: без этой страницы все двери сайта отдают 404
+        print(
+            f"{lang}: home{'' if lang == 'ru' else ' + about'} + шлюз ({len(gl)} стран)"
+        )
     print(f"ИТОГО data-страниц: {total} (дальше render.py --all)")

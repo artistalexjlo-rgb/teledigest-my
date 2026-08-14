@@ -1,0 +1,17 @@
+{% extends "base.html.j2" %}
+{#- ШЛЮЗ КЛИКА (шаг 6). Не контент: страница только пересылает в продукт, а nginx пишет
+    в access.log строку запроса (`?geo=&shelf=`) и Referer — отсюда и берётся статистика
+    переходов, которой раньше не было вовсе. В карту сайта не попадает: `noindex`. #}
+
+{% block content %}
+  <h1>{{ t.cta_btn }}</h1>
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+    <p><a class="btn" href="{{ door }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a></p>
+  </div></div>
+{% endblock %}
+
+{% block scripts %}
+{#- Пересылаем сразу; кнопка выше — для тех, у кого скрипты выключены. `replace`, а не
+    `assign`: иначе кнопка «назад» возвращала бы на шлюз и снова уводила в продукт. #}
+<script>location.replace({{ door | tojson }});</script>
+{% endblock %}
