@@ -38,6 +38,15 @@
   </div>
   {%- endif %}
 
+  {%- if page.questions %}{# хвост раздела БЕЗ дедупа: заметками, иначе пропали бы молча #}
+  {%- if page.faqs_label %}<h2>{{ page.faqs_label }}</h2>{% endif %}
+  <ul class="qlist">
+    {%- for q in page.questions %}
+    <li>{{ q }}</li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
+
   {%- if page.faqs %}{# остаток полки-хаба: пункты вне веток (ветвление полок) #}
   {%- if page.faqs_label %}<h2>{{ page.faqs_label }}</h2>{% endif %}
   {%- for f in page.faqs %}

@@ -2424,6 +2424,136 @@ def _ques_dir(lang):
     return f"{BUILT}/out_questions" if lang == "ru" else f"{BUILT}/out_questions_{lang}"
 
 
+# ── ПЛИТКИ РАЗДЕЛОВ НА ХАБЕ ГЕО (канон §0.12: «хаб страны = плитки полок со счётчиком;
+#    адреса живут ВНУТРИ плитки, хаб их не перечисляет»).
+#    Замер до правила: `/ru/gr/` — 63 ссылки плоским списком, `/ru/any/` — 87. После
+#    раскладки разборов по разделам (13.08): у `gr` 6 разделов, у `me` 10, у `br` 13 —
+#    потолок хаба 13 плиток + мостики, а не «сколько собралось страниц».
+#
+# ⛔ ВТОРАЯ ПОЛОВИНА ПРАВИЛА, которую я 13.08 сначала не исполнил: «хаб их НЕ ПЕРЕЧИСЛЯЕТ».
+# Первый заход я сделал плитку-аккордеон — адреса лежали в HTML хаба под кликом, то есть
+# правило нарушалось незаметно глазами. Плитка обязана быть ССЫЛКОЙ на страницу раздела,
+# а сами адреса — перечислены уже там. Страница раздела не новая: полочный контур ниже
+# строит её из хвоста, имя раздела то же самое (таксономия).
+THEME_ICON = {  # по КЛЮЧУ полки, а не по имени: имя своё в каждом из 14 языков, ключ один
+    "border": "🛬",  # 🛂 занят визами: два одинаковых значка на одном хабе — видно глазом
+    "visa": "🛂",
+    "finance": "💰",
+    "transport": "🚕",
+    "docs": "📄",
+    "safety": "🛡",
+    "customs": "📦",
+    "digital": "📶",
+    "tourism": "🗺",
+    "housing": "🏠",
+    "shopping": "🛒",
+    "work": "💼",
+    "health": "🩺",
+}
+_RU_THEMES = {}  # geo → {key разбора: латинский ключ его раздела}
+_THEME_NAMES = {}  # lang → {латинский ключ раздела: имя на этом языке}
+
+
+def ru_themes(geo):
+    """Раздел разбора лежит в РУССКОМ корпусе: его пишет рот `assign`, перевод не несёт.
+
+    Соединяем по `key` разбора — хвост адреса, одинаковый во всех языках по построению
+    (штамповка адресов). Замер 13.08: штамп есть у 1889 разборов из 1889 в `ru` и у 1851
+    из 1851 в `de`, так что соединение полное, а не выборочное.
+    """
+    if geo not in _RU_THEMES:
+        d = load(f"{_facet_dir('ru')}/{geo}.json") or {}
+        _RU_THEMES[geo] = {
+            v["key"]: SHELF_KEY[v["shelf"]]
+            for v in d.get("views_by_task") or []
+            if v.get("key") and SHELF_KEY.get(v.get("shelf") or "")
+        }
+    return _RU_THEMES[geo]
+
+
+def theme_names(lang):
+    """Имя раздела на языке — из корпуса ЭТОГО языка (union по всем гео).
+
+    Перевод уже несёт локализованное имя полки и латинский `key` рядом с ним, и этими
+    же именами подписаны полочные страницы. Своей таблицы имён не заводим: она бы
+    разъехалась с тем, что на сайте уже написано.
+    """
+    if lang == "ru":
+        return {k: name for k, name, _ in _tax.SHELVES}
+    if lang not in _THEME_NAMES:
+        out = {}
+        for p in sorted(glob.glob(f"{_facet_dir(lang)}/*.json")):
+            for s in (load(p) or {}).get("shelves") or []:
+                if s.get("key") and s.get("shelf"):
+                    out.setdefault(s["key"], s["shelf"])
+        _THEME_NAMES[lang] = out
+    return _THEME_NAMES[lang]
+
+
+def view_theme(v, geo, lang):
+    """Латинский ключ раздела разбора: из самого разбора (ru) либо из русского по `key`."""
+    k = SHELF_KEY.get(v.get("shelf") or "")
+    if not k and lang != "ru":
+        k = ru_themes(geo).get(v.get("key") or "")
+    return k
+
+
+def theme_tiles(cards, lang, geo, urls):
+    """Плитки разделов для хаба гео. Возвращает (плитки, несгруппированное).
+
+    `urls` — {ключ раздела: адрес его страницы}: плитка это ССЫЛКА, а не раскрытие, и
+    вести ей некуда, если страницы раздела в этом гео нет. Так бывает: страница раздела
+    строится из хвоста при трёх и более заметках. Замер 13.08: таких пар «гео × раздел»
+    12 из 249 в 9 гео, за ними 23 разбора — они остаются обычными карточками.
+
+    ⛔ ПОЛОВИНЧАТОГО НЕ ВЫПУСКАЕМ: если у гео есть раздел, у которого на этом языке нет
+    имени, хаб остаётся плоским ЦЕЛИКОМ (как был) и причина печатается. Полу-состояния в
+    этом проекте уже стоили прода: язык, полный наполовину, давал три разных исхода —
+    тихий скип, KeyError и код страны вместо имени. Возврат `(None, …)` и значит «этот
+    язык ещё не готов группировать»: языковые корпуса стоят на таксономии v0, и пяти
+    новых имён (`tourism`, `housing`, `shopping`, `work`, `health`) там нет.
+
+    Разбор без раздела плиткой не становится, но и не теряется: остаётся карточкой. Такие
+    метки сборные («Прочее», «Общие советы») — брак нарезки, он лечится в карве, а до тех
+    пор адрес обязан быть достижим с хаба.
+    """
+    names = theme_names(lang)
+    groups, loose = {}, []
+    for c in cards:
+        k = c.pop("theme", None)
+        if k:
+            groups.setdefault(k, []).append(c)
+        else:
+            loose.append(c)
+    # ⛔ ДВЕ ПРИЧИНЫ, И ИХ НЕЛЬЗЯ СЛИВАТЬ (поймано сторожем 13.08). Сначала я фильтровал по
+    # `urls`, и раздел без ИМЕНИ на языке уходил тем же путём, что раздел без страницы, —
+    # то есть язык, не готовый группировать, выглядел как «просто нет страниц» и молчал.
+    # Нет имени → хаб плоский целиком и причина в логе. Нет страницы → карточки, тоже в лог.
+    missing = sorted(k for k in groups if k not in names)
+    if missing:
+        print(
+            f"{geo}/{lang}: хаб плоский — на этом языке нет имени разделов: "
+            + ",".join(missing),
+            flush=True,
+        )
+        return None, cards
+    for k in [k for k in groups if k not in urls]:
+        loose.extend(groups.pop(k))
+    # порядок: крупный раздел выше, дальше по имени. Из словаря порядок пришёл бы от
+    # порядка данных, и хаб перетряхивался бы каждый прогон — лишний дифф в репо страниц.
+    order = sorted(groups.items(), key=lambda kv: (-len(kv[1]), names[kv[0]]))
+    tiles = [
+        {
+            "icon": THEME_ICON.get(k, "•"),
+            "title": names[k],
+            "blurb": blurb(COPY[lang], "fact", sum(x["n"] for x in cs)),
+            "url": urls[k],
+        }
+        for k, cs in order
+    ]
+    return tiles, loose
+
+
 def build_geo(geo, lang="ru"):
     C = COPY[lang]
     name = geo_name(geo, lang)
@@ -2539,6 +2669,10 @@ def build_geo(geo, lang="ru"):
                 "title": tema,
                 "blurb": blurb(C, "fact", len(items)),
                 "url": f"/{lang}/{geo}/{s}/",
+                "n": len(
+                    items
+                ),  # масса: и счётчик темы, и порядок адресов внутри плитки
+                "theme": view_theme(v, geo, lang),
             }
         )
 
@@ -2611,6 +2745,14 @@ def build_geo(geo, lang="ru"):
             },
         )
         n += 1
+
+    # Разборы по разделам — для плиток НА СТРАНИЦЕ РАЗДЕЛА (ниже) и для плиток раздела на
+    # хабе (в самом конце). Считаем ДО того, как `theme_tiles` разберёт карточки.
+    by_theme = {}
+    for c in fact_tiles:
+        if c.get("theme"):
+            by_theme.setdefault(c["theme"], []).append(c)
+    theme_urls = {}  # ключ раздела → адрес его страницы; наполняется в шелф-контуре
 
     # --- ШЕЛФ-КОНТУР (антологии хвоста: полки под /<lang>/<geo>/s/) ---
     # Хвост-курирование: синглы, что раньше терялись фильтром ≥4, живут на широких
@@ -2691,6 +2833,13 @@ def build_geo(geo, lang="ru"):
                     if x["slug"] != sk
                 ][:6],
             }
+            # ⭐ ШАГ 5: РАЗБОРЫ ЭТОГО РАЗДЕЛА — плитками СВЕРХУ страницы раздела. До этого
+            # раздел показывал только свой хвост, а разборы висели плоским списком на хабе
+            # страны (у `gr` 63 ссылки, у `any` 87). Своей страницы разделу не завожу —
+            # это она и есть; новых адресов шаг не создаёт.
+            tkey = sv.get("key") or SHELF_KEY.get(sv["shelf"]) or ""
+            own = by_theme.get(tkey) or []
+            theme_urls[tkey] = f"/{lang}/{geo}/s/{sk}/"  # куда ведёт плитка на хабе
             if sv.get("subshelves"):  # полка-гигант ВЕТВИТСЯ: хаб + под-страницы
                 n_before = n
                 subtiles, rest = build_branches(
@@ -2713,7 +2862,7 @@ def build_geo(geo, lang="ru"):
                 # хаб полки: плитки веток + остаток (репы вне веток) аккордеоном внизу
                 page["template"] = "index.html.j2"
                 page["list_label"] = C["list_label_topics"]
-                page["tiles"] = subtiles
+                page["tiles"] = own + subtiles
                 if rest:
                     # ⛔ БЫЛО `rest[:30]` — пункты за тридцатым исчезали БЕЗ СЛЕДА и без
                     # строчки в логе (2026-08-07, юзер: «звучит как нездоровая хрень»).
@@ -2727,6 +2876,15 @@ def build_geo(geo, lang="ru"):
                         {"items": sv["items"], "groups": rest}, lang
                     )
                     page["faqs_label"] = C["shelf_list_label"]
+            elif own:  # разборы сверху плитками, хвост раздела — ниже, как лежит
+                page["template"] = "index.html.j2"
+                page["list_label"] = C["list_label_topics"]
+                page["tiles"] = own
+                page["faqs_label"] = C["shelf_list_label"]
+                if sv.get("groups"):
+                    page["faqs"] = groups_to_faqs(sv, lang)
+                else:  # хвост без дедупа: пунктами, чтобы заметки не пропали молча
+                    page["questions"] = [it["text"] for it in sv["items"]]
             elif sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
                 page["template"] = "page.html.j2"
                 page["list_label"] = C["shelf_list_label"]
@@ -2764,8 +2922,16 @@ def build_geo(geo, lang="ru"):
         )
         n += 1
 
-    # --- ГЕО-ХАБ (тайлы фактов + мостики вопросов и разделов) ---
-    tiles = list(fact_tiles)
+    # --- ГЕО-ХАБ (плитки разделов + мостики вопросов и разделов) ---
+    themed, loose = theme_tiles(fact_tiles, lang, geo, theme_urls)
+    tiles = list(fact_tiles) if themed is None else themed + loose
+    if themed is not None:
+        print(
+            f"{geo}/{lang}: хаб — {len(themed)} плиток разделов "
+            f"на {len(fact_tiles)} адресов"
+            + (f", карточками {len(loose)}" if loose else ""),
+            flush=True,
+        )
     if s_ok:
         tiles.insert(
             0,

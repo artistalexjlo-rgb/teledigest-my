@@ -82,7 +82,13 @@ def test_empty_geo_gets_no_hub():
 
 def test_no_hub_without_internal_links():
     """Инвариант, а не частный случай: КАЖДЫЙ написанный хаб имеет хотя бы одну ссылку
-    внутрь гео. Именно этого правила не хватало — 33 хаба на зеркале его нарушали."""
+    внутрь гео. Именно этого правила не хватало — 33 хаба на зеркале его нарушали.
+
+    ⚠️ 13.08 правило пришлось усилить: после шага «плитки тем» адреса живут ВНУТРИ плитки
+    (`tile["links"]`), а не в `tile["url"]`. Сторож, который смотрит только на `url`,
+    пропустил бы хаб, у которого наружу не ведёт ни одна ссылка, — то есть перестал бы
+    проверять то, ради чего написан.
+    """
     for geo, views in (
         ("aa", [_view("Docs", 5, "docs")]),
         ("bb", [_view("T", 1, "t")]),
@@ -91,7 +97,10 @@ def test_no_hub_without_internal_links():
         for fn, d in files.items():
             if not fn.endswith("_hub.json"):
                 continue
-            urls = [t.get("url", "") for t in d.get("tiles") or []]
+            urls = []
+            for t in d.get("tiles") or []:
+                urls.append(t.get("url", ""))
+                urls += [x.get("url", "") for x in t.get("links") or []]
             inner = [u for u in urls if u.startswith(f"/ru/{geo}/")]
             assert inner, f"{fn}: хаб без ссылок внутрь гео"
 
