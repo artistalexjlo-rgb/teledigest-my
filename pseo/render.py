@@ -16,6 +16,8 @@ import json
 import os
 import pathlib
 import sys
+import urllib.parse
+from html import escape as html_escape
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -49,9 +51,53 @@ def _pick(pool: list, seed: str):
     return pool[idx]
 
 
+# ── ДОВОД CTA ПО РАЗДЕЛУ (канон §0.12, шаг 6) ──
+# Замер до правила: слот голоса выбирался ТОЛЬКО по хешу пути, поэтому на странице про сроки
+# визы человеку обещали «и официант не перепутает заказ». Раздел даёт адресность.
+# ⛔ Нового копирайта не заводим: пулы CTA в 14 языках ПАРАЛЛЕЛЬНЫ по индексу (сверено на
+# ru/en/de, длину держит `test_lang_complete`), поэтому адресность задаётся картой ИНДЕКСОВ —
+# одна на все языки, без 182 новых строк, которые я всё равно писал бы не как носитель.
+VOICE_BY_SHELF = {
+    "tourism": [1, 4, 5, 6, 7],  # официант, гид, лобби, дорога, ресепшен
+    "transport": [2, 6],  # таксист, спросить дорогу
+    "shopping": [3, 9],  # рынок, магазин
+    "health": [8],  # врач
+    "housing": [0, 7],  # местные, ресепшен
+}
+# Разделы, которым в пуле сказать нечего (визы, границы, документы, финансы, таможня, связь,
+# работа, безопасность), берут УНИВЕРСАЛЬНЫЕ строки, а не случайную из всех. Случайная и
+# рождала «официанта» на визовой странице. Что этим разделам нужен свой копирайт — правда,
+# но это отдельная работа и отдельное решение, а не выдумка по ходу.
+VOICE_ANY = [0, 6]  # «объяснись с местными», «спроси дорогу и пойми ответ»
+
+
+def voice_pool(pools: dict, page: dict) -> list:
+    idx = VOICE_BY_SHELF.get(page.get("shelf_key") or "", VOICE_ANY)
+    lines = [pools["voice"][i] for i in idx if i < len(pools["voice"])]
+    return lines or pools["voice"]  # пул короче ожидаемого → ведём себя как раньше
+
+
+def door_url(page: dict) -> str:
+    """Дверь в продукт — ЧЕРЕЗ ШЛЮЗ `/<язык>/go/luky/`, чтобы переход был посчитан.
+
+    Замер до шага 6: статистики переходов на Luky не было ни одной цифры. Шлюз несёт
+    `?geo=&shelf=`, а nginx уже пишет строку запроса и Referer — значит видно, какая страна
+    и какой раздел отдают переходы, и своего бэкенда для этого не нужно.
+
+    Сам шлюз ведёт в продукт НАПРЯМУЮ: иначе страница слала бы на саму себя.
+    """
+    if "/go/luky/" in (page.get("path") or ""):
+        return SITE["cta_luky_url"]
+    lang = page.get("lang", "ru")
+    q = [("geo", page.get("geo") or ""), ("shelf", page.get("shelf_key") or "")]
+    tail = urllib.parse.urlencode([(k, v) for k, v in q if v])
+    return f"/{lang}/go/luky/" + (f"?{tail}" if tail else "")
+
+
 def build_cta(t: dict, page: dict) -> dict | None:
     """Собирает CTA-«бутер» из cta_pools: hook + assistant(L1) + voice(L2) + ps(оффтоп).
-    Выбор слотов — по пути страницы (варьируем); PS — свой сид (оффтоп, не по теме)."""
+    Слоты варьируем по пути страницы; голос — по РАЗДЕЛУ; PS — свой сид (оффтоп, не по теме).
+    """
     pools = t.get("cta_pools")
     if not pools:
         return None
@@ -61,7 +107,7 @@ def build_cta(t: dict, page: dict) -> dict | None:
         "assistant_lead": pools["assistant_lead"],
         "assistant": _pick(pools["assistant"], key + "|assistant"),
         "voice_lead": pools["voice_lead"],
-        "voice": _pick(pools["voice"], key + "|voice"),
+        "voice": _pick(voice_pool(pools, page), key + "|voice"),
         "ps": _pick(pools["ps"], key + "|ps"),
     }
 
@@ -144,18 +190,23 @@ def render_page(page: dict, lang: str | None = None) -> str:
     t = load_i18n(lang)
     cta = build_cta(t, page)
     tmpl = _env.get_template(page.get("template", "page.html.j2"))
+    url = door_url(page)  # ОДНА дверь на страницу: и кнопка, и маркеры #luky в текстах
     html = tmpl.render(
         site=SITE,
         t=t,
         page=page,
         lang=lang,
         cta=cta,
+        door=url,
         text_dir=text_dir(lang),
         alt_langs=alt_langs(page),
         asset_v=asset_version(),
     )
-    # Маркер #luky в текстах (интро/проза) → реальная дверь в продукт (единый источник — site.py).
-    door = f'href="{SITE["cta_luky_url"]}" target="_blank" rel="noopener"'
+    # Маркер #luky в текстах (интро/проза) → та же дверь, что у кнопки. Единый источник —
+    # `door_url`: раньше здесь стоял прямой адрес продукта, и переходы из текста не считались.
+    # ⛔ `&` в атрибуте обязан быть `&amp;`: шаблон экранирует сам, а эта подстановка идёт
+    # мимо Jinja, и без экранирования одна и та же ссылка выходила в двух разных видах.
+    door = f'href="{html_escape(url)}" target="_blank" rel="noopener"'
     return html.replace("href='#luky'", door).replace('href="#luky"', door)
 
 
