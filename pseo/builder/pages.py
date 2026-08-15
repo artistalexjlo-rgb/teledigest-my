@@ -3067,6 +3067,34 @@ def build_gateway(lang):
     )
 
 
+def build_find(lang):
+    """⭐ ШАГ 7: страница поиска `/<язык>/find/?s=…` — она же прибор для замера спроса.
+
+    Зачем именно страница, а не только подсказки в поле: переход на неё — обычная
+    навигация, поэтому запрос человека оседает в логе веб-сервера вместе с реферером.
+    Замер 14.08 на живом сайте: nginx в контейнере пишет access.log в `/dev/stdout`
+    (проверено `ls -l /var/log/nginx/`), то есть запросы видны в логах приложения СРАЗУ,
+    без своего бэкенда, без монтирования и без правки конфига.
+
+    Результаты рисует браузер из `/<язык>/search.json` — на статике иначе никак, а
+    генерацию на сайте канон запрещает (40 000 страниц = открытая труба расходов).
+    ⛔ `noindex`: это не контент, в карту сайта ей нельзя.
+    """
+    HA = HOME_ABOUT[lang]
+    write(
+        f"{lang}_find.json",
+        {
+            "lang": lang,
+            "template": "find.html.j2",
+            "path": f"/{lang}/find/",
+            "noindex": True,
+            "crumb_label": None,
+            "title": HA["home_title"],
+            "meta_desc": HA["home_desc"],
+        },
+    )
+
+
 def build_about(lang):
     HA = HOME_ABOUT[lang]
     write(
@@ -3116,7 +3144,9 @@ if __name__ == "__main__":
         if lang != "ru":
             build_about(lang)
         build_gateway(lang)  # шаг 6: без этой страницы все двери сайта отдают 404
+        build_find(lang)  # шаг 7: без неё поле поиска ведёт в 404
         print(
-            f"{lang}: home{'' if lang == 'ru' else ' + about'} + шлюз ({len(gl)} стран)"
+            f"{lang}: home{'' if lang == 'ru' else ' + about'} + шлюз + поиск "
+            f"({len(gl)} стран)"
         )
     print(f"ИТОГО data-страниц: {total} (дальше render.py --all)")

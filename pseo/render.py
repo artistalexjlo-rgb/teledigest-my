@@ -161,11 +161,15 @@ def copy_assets() -> int:
     return n
 
 
-def index_paths() -> set[str]:
-    """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы."""
+def index_paths(data_dir=None) -> set[str]:
+    """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы.
+
+    `data_dir` нужен сторожу: подменять `BASE` нельзя — от него же берутся i18n, шаблоны
+    и ассеты, и тест ломался бы на них, а не проверял правило.
+    """
     global _PATHS
     _PATHS = set()
-    for jf in (BASE / "data").glob("*.json"):
+    for jf in pathlib.Path(data_dir or (BASE / "data")).glob("*.json"):
         try:
             p = json.loads(jf.read_text(encoding="utf-8")).get("path")
         except Exception:
@@ -226,20 +230,31 @@ def _indexable(page: dict) -> bool:
     return not SITE.get("draft") and not page.get("noindex")
 
 
-def build_all(lastmod: str = "") -> dict:
+def build_all(lastmod: str = "", data_dir=None) -> dict:
     """Рендерит все data/*.json, пишет sitemap.xml (только indexable) + robots.txt.
     lastmod — ISO-дата для <lastmod> (freshness-сигнал); пустая → без тега.
-    Возвращает {rendered, indexed, skipped_noindex}."""
-    data_dir = BASE / "data"
-    index_paths()  # ДО рендера: hreflang опирается на состав собранного, а не на догадку
+    data_dir — только для сторожей (боевой прогон берёт `BASE/data`).
+    Возвращает {rendered, indexed, skipped_noindex, assets, search_titles}."""
+    data_dir = pathlib.Path(data_dir or (BASE / "data"))
+    index_paths(
+        data_dir
+    )  # ДО рендера: hreflang опирается на собранное, а не на догадку
     n_assets = copy_assets()  # общие CSS/JS: один файл на сайт вместо копии в странице
     urls, n_rendered, n_noindex = [], 0, 0
+    search = {}  # язык → [[заголовок, адрес], …] для поиска по заголовкам (шаг 7)
     for jf in sorted(data_dir.glob("*.json")):
         page = json.loads(jf.read_text(encoding="utf-8"))
         if "path" not in page:
             continue  # не страница (конфиг/фикстура) — пропускаем
         build(str(jf))  # статьи (faqs) + хабы/главная/about (index-шаблон)
         n_rendered += 1
+        # ⭐ ИНДЕКС ПОИСКА СОБИРАЕТСЯ ИЗ ТОГО, ЧТО РЕАЛЬНО ОТРЕНДЕРИЛОСЬ, а не из корпуса:
+        # иначе он обещал бы страницы, которые отсеялись (без адреса, метка не перевелась,
+        # гео пустое) — то есть поиск вёл бы в 404. Служебные страницы (`noindex`: шлюз,
+        # сама страница поиска) в индекс не идут.
+        title = page.get("intent_name") or page.get("h1")
+        if title and page.get("lang") and not page.get("noindex"):
+            search.setdefault(page["lang"], []).append([title, page["path"]])
         if _indexable(page):
             # ⚠️ Именно `updated_iso`, НЕ `updated`: второе — подпись в подвале в формате
             # MM.YYYY («08.2026»), и sitemap такую дату не принимает. Фикстура
@@ -271,11 +286,26 @@ def build_all(lastmod: str = "") -> dict:
         f"Sitemap: {SITE['domain']}/sitemap.xml\n"
     )
     (OUT / "robots.txt").write_text(robots, encoding="utf-8")
+    # ⭐ ПОИСК ПО ЗАГОЛОВКАМ — ОДИН ФАЙЛ НА ЯЗЫК, тянется по первому нажатию (шаг 7).
+    # Замер на настоящей сборке: `ru` — 3124 заголовка, 352 КБ, в gzip 77 КБ (nginx жмёт
+    # `application/json`… точнее — жмёт по `gzip_types`, поэтому тип добавлен в конфиг).
+    # Инлайнить в каждую страницу нельзя: это те же 352 КБ × 41 630 страниц.
+    n_search = 0
+    for lang, rows in sorted(search.items()):
+        rows.sort(key=lambda r: r[0].lower())
+        p = OUT / lang / "search.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(rows, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        n_search += len(rows)
     return {
         "rendered": n_rendered,
         "indexed": len(urls),
         "skipped_noindex": n_noindex,
         "assets": n_assets,
+        "search_titles": n_search,
     }
 
 

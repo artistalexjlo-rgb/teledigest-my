@@ -127,9 +127,14 @@ details .src{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.06em;
 .search input::placeholder{color:var(--muted)}
 .search .oct path{fill:var(--card);stroke:var(--hud-dim)}
 .search:focus-within .oct path{stroke:var(--hud)}
-#sugg{margin:-6px 0 8px;display:none}
-#sugg a{display:block;padding:9px 14px;color:var(--text);font-size:.98rem;border-bottom:1px solid var(--border)}
-#sugg a:hover{color:var(--hud);text-decoration:none} #sugg a.nores{color:var(--muted);cursor:default}
+#sugg,#gsugg{margin:-6px 0 8px;display:none}
+#sugg a,#gsugg a{display:block;padding:9px 14px;color:var(--text);font-size:.98rem;border-bottom:1px solid var(--border)}
+#sugg a:hover,#gsugg a:hover{color:var(--hud);text-decoration:none}
+#sugg a.nores,#gsugg a.nores{color:var(--muted);cursor:default}
+/* поиск по заголовкам стоит над крошками на каждой странице — поле уже, чем на главной */
+.gsearch{margin:10px 0 4px}
+.gsearch input{font-size:.98rem;padding:12px 16px}
+p.nores{color:var(--muted)}
 
 /* ── По регионам (home): details-аккордеон ── */
 .regions{margin:10px 0 4px}

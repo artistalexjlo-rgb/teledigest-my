@@ -1,0 +1,57 @@
+{% extends "base.html.j2" %}
+{#- СТРАНИЦА ПОИСКА (шаг 7). Она же прибор замера спроса: переход сюда — обычная навигация,
+    поэтому запрос человека виден в логе веб-сервера (nginx пишет access.log в /dev/stdout,
+    проверено на живом контейнере 14.08). Результаты рисует браузер из того же
+    `/<язык>/search.json`, что и подсказки в поле: на статике иначе никак, а генерацию на
+    сайте канон запрещает. В карту сайта не попадает: `noindex`. #}
+
+{#- Заголовок и крошка — из подписи поля БЕЗ многоточия: «Поиск по заголовкам…» годится
+    подписью ввода, но не заголовком страницы (видно на превью). Новых строк копирайта на
+    14 языков ради этого не заводим. #}
+{% set search_h = t.search_ph | replace('…', '') | replace('...', '') | trim %}
+
+{% block crumbs %}
+  <nav class="crumbs">
+    <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
+    <b>{{ search_h }}</b>
+  </nav>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ search_h }}</h1>
+
+  <div class="search">{{ oct(OCT_BOX, 10, 3) }}
+    <input id="fq" placeholder="{{ t.search_ph }}" autocomplete="off" aria-label="{{ t.search_ph }}"
+           data-find="/{{ t.html_lang }}/find/">
+  </div>
+
+  <div id="results" data-index="/{{ t.html_lang }}/search.json" data-none="{{ t.home_search_none }}">
+    <noscript><p class="nores">{{ t.home_search_none }}</p></noscript>
+  </div>
+
+  <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+  {%- if cta %}
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+  {%- else %}
+    <h2>{{ t.cta_hook }}</h2>
+  {%- endif %}
+    <a class="btn" href="{{ door }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
+{% endblock %}
+
+{% block scripts %}
+{#- Поле на самой странице ищет тем же путём: Enter → тот же адрес, значит новый запрос
+    тоже попадает в лог, а не остаётся только в браузере. #}
+<script>
+(function(){
+  var i=document.getElementById("fq"); if(!i) return;
+  i.addEventListener("keydown",function(e){
+    if(e.key==="Enter"){e.preventDefault();var v=i.value.trim();
+      if(v) location.href=i.dataset.find+"?s="+encodeURIComponent(v);}
+  });
+})();
+</script>
+{% endblock %}
