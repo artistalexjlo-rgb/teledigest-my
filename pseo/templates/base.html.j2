@@ -60,6 +60,23 @@
     </div>
   </div>
 
+  {#- ПОИСК ПО ЗАГОЛОВКАМ (шаг 7) — на КАЖДОЙ странице, поэтому живёт в базовом шаблоне.
+      Индекс не инлайнится: он тянется одним файлом `/<язык>/search.json` по первому вводу
+      (замер: ru — 3124 заголовка, 352 КБ, 77 КБ в gzip; инлайн = те же 352 КБ на каждую из
+      41 630 страниц). Ввод + Enter уводит на `/<язык>/find/?s=…`, и запрос человека
+      оседает в логе веб-сервера — это и есть прибор замера спроса.
+      ⛔ Где поле НЕ рисуем: на главной у неё своё (поиск по странам), а на самой странице
+      поиска поле стоит в содержимом и уже заполнено запросом. Первый заход рисовал два
+      поля подряд — видно на превью сразу, тестами нет. #}
+  {%- if page.template not in ('home.html.j2', 'find.html.j2') %}
+  <div class="search gsearch">{{ oct(OCT_BOX, 10, 3) }}
+    <input id="gq" placeholder="{{ t.search_ph }}" autocomplete="off" aria-label="{{ t.search_ph }}"
+           data-find="/{{ t.html_lang }}/find/" data-index="/{{ t.html_lang }}/search.json"
+           data-none="{{ t.home_search_none }}">
+  </div>
+  <div id="gsugg"></div>
+  {%- endif %}
+
   {% block crumbs %}{% endblock %}
 
   {% block content %}{% endblock %}

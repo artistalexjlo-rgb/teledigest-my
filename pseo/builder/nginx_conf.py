@@ -51,7 +51,9 @@ server {{
     gzip on;
     gzip_comp_level 5;
     gzip_min_length 512;
-    gzip_types text/css application/javascript application/xml image/svg+xml;
+    # `application/json` — из-за поискового индекса (шаг 7): `/<язык>/search.json` весит
+    # 352 КБ, в gzip 77 КБ. Без этого типа nginx отдаёт его несжатым.
+    gzip_types text/css application/javascript application/json application/xml image/svg+xml;
 
     # Ассеты помечены хешем в имени запроса (?v=), поэтому кешировать можно надолго.
     location /assets/ {{

@@ -17,3 +17,51 @@
   if(document.readyState!=="loading")init();else document.addEventListener("DOMContentLoaded",init);
   if(!ro){window.addEventListener("load",init);var t;window.addEventListener("resize",function(){clearTimeout(t);t=setTimeout(init,120);});}
 })();
+
+/* ПОИСК ПО ЗАГОЛОВКАМ (шаг 7). Индекс языка тянем ОДИН раз по первому вводу:
+   ru — 3124 заголовка, 352 КБ (77 КБ в gzip). Инлайн в страницу означал бы те же
+   352 КБ × 41 630 страниц. Ни ключей, ни сервера, ни продукта — только статика.
+   Enter уводит на /<язык>/find/?s=…: это обычная навигация, поэтому запрос виден в
+   логе веб-сервера, и мы наконец знаем, ЧТО люди спрашивают. */
+(function(){
+  var q=document.getElementById("gq"); if(!q) return;
+  var sg=document.getElementById("gsugg"), IDX=null, loading=false;
+  function go(){var v=q.value.trim(); if(v) location.href=q.dataset.find+"?s="+encodeURIComponent(v);}
+  function show(){
+    var v=q.value.trim().toLowerCase();
+    if(!v||!IDX){sg.style.display="none";return;}
+    var m=[],i;
+    for(i=0;i<IDX.length&&m.length<8;i++) if(IDX[i][0].toLowerCase().indexOf(v)>=0) m.push(IDX[i]);
+    sg.innerHTML = m.length
+      ? m.map(function(r){return '<a href="'+r[1]+'">'+r[0]+"</a>";}).join("")
+      : '<a class="nores">'+q.dataset.none+"</a>";
+    sg.style.display="block";
+  }
+  function load(){
+    if(IDX||loading) return; loading=true;
+    fetch(q.dataset.index).then(function(r){return r.json();}).then(function(j){IDX=j;show();})
+      .catch(function(){loading=false;});  /* индекс не доехал — поле просто уводит на find */
+  }
+  q.addEventListener("focus",load);
+  q.addEventListener("input",function(){load();show();});
+  q.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();go();}});
+  document.addEventListener("click",function(e){
+    if(!e.target.closest(".gsearch")&&e.target.id!=="gq") sg.style.display="none";
+  });
+})();
+
+/* Страница поиска /<язык>/find/: рисуем результаты из того же индекса. На статике
+   иначе никак, а генерацию на сайте канон запрещает. */
+(function(){
+  var box=document.getElementById("results"); if(!box) return;
+  var s=new URLSearchParams(location.search).get("s")||"";
+  var inp=document.getElementById("fq"); if(inp) inp.value=s;  /* запрос виден в самом поле */
+  if(!s){box.innerHTML="";return;}
+  fetch(box.dataset.index).then(function(r){return r.json();}).then(function(j){
+    var v=s.toLowerCase(), m=j.filter(function(r){return r[0].toLowerCase().indexOf(v)>=0;});
+    box.innerHTML = m.length
+      ? '<ul class="qlist">'+m.slice(0,200).map(function(r){
+          return '<li><a href="'+r[1]+'">'+r[0]+"</a></li>";}).join("")+"</ul>"
+      : '<p class="nores">'+box.dataset.none+"</p>";
+  }).catch(function(){box.innerHTML='<p class="nores">'+box.dataset.none+"</p>";});
+})();
