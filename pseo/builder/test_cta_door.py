@@ -7,7 +7,8 @@
 
 ⛔ Что защищаем:
   1. на визовой странице голосовой довод больше НЕ про официанта;
-  2. адресность там, где копирайт её позволяет (туризм, транспорт, покупки, здоровье, жильё);
+  2. у КАЖДОГО из 13 разделов свой довод, и он есть во всех 14 языках (визы → консульство,
+     границы → погранконтроль, финансы → банк, …);
   3. ВСЕ двери страницы — и кнопка, и маркеры `#luky` в текстах — идут через шлюз с
      `?geo=&shelf=`, иначе переход не посчитан;
   4. сам шлюз ведёт в продукт НАПРЯМУЮ (иначе бесконечная петля на себя) и не лезет в карту.
@@ -102,8 +103,8 @@ def test_shelf_key_lands_on_pages(tmp_path):
 def test_visa_page_no_longer_talks_about_waiter(tmp_path):
     """ЖИВОЙ ДЕФЕКТ из канона: на визовой странице обещали «официант не перепутает заказ».
 
-    Проверяем не строку-заглушку, а РЕАЛЬНЫЙ русский пул: довод обязан быть из
-    универсальных, а не из ресторанных.
+    Проверяем не строку-заглушку, а РЕАЛЬНЫЙ русский пул: у визы теперь СВОЙ довод —
+    про консульство, а не нейтральный и уж точно не ресторанный.
     """
     views = [_view("Сроки визы", 9, "visa-terms", RU_NAME["visa"])]
     files, _ = _build(tmp_path, views=views, shelves=[_shelf("visa", RU_NAME["visa"])])
@@ -111,7 +112,10 @@ def test_visa_page_no_longer_talks_about_waiter(tmp_path):
     cta = render.build_cta(I18N_RU, page)
     pool = I18N_RU["cta_pools"]["voice"]
     assert "официант" not in cta["voice"], cta["voice"]
-    assert cta["voice"] in [pool[i] for i in render.VOICE_ANY], cta["voice"]
+    assert cta["voice"] in [pool[i] for i in render.VOICE_BY_SHELF["visa"]], cta[
+        "voice"
+    ]
+    assert "консульств" in cta["voice"], cta["voice"]
 
 
 def test_addressed_shelves_get_their_own_lines(tmp_path):
@@ -251,3 +255,34 @@ def test_gateway_exists_for_every_built_language(tmp_path):
         d = json.load(open(f"{out}/{lang}_go_luky.json", encoding="utf-8"))
         assert d["path"] == f"/{lang}/go/luky/"
         assert d["title"], f"{lang}: шлюз без заголовка"
+
+
+def test_every_shelf_has_its_own_voice_line():
+    """У КАЖДОГО из 13 разделов свой довод, и он есть во всех 14 языках.
+
+    ⛔ Замер, из-за которого это правило появилось: без своих строк 8 разделов из 13
+    брали нейтральную фразу, а в них лежит 1 074 разбора из 1 889 — 57% страниц сайта.
+    То есть «нейтрально» было решением по умолчанию для большинства, а не для остатка.
+    Индексы карты обязаны существовать в пуле КАЖДОГО языка: пулы index-параллельны, и
+    выход за границу молча дал бы другому языку другой довод (или чужой раздел).
+    """
+    keys = {k for k, _n, _d in tax.SHELVES}
+    assert set(render.VOICE_BY_SHELF) >= keys, keys - set(render.VOICE_BY_SHELF)
+    used = {i for idx in render.VOICE_BY_SHELF.values() for i in idx}
+    own = {k: render.VOICE_BY_SHELF[k][0] for k in keys}
+    assert len(set(own.values())) == len(keys), f"разделы делят одну строку: {own}"
+    d = HERE.parent / "i18n"
+    langs = sorted(p.stem for p in d.glob("*.json"))
+    assert len(langs) >= 14, langs
+    for lang in langs:
+        pool = json.loads((d / f"{lang}.json").read_text(encoding="utf-8"))[
+            "cta_pools"
+        ]["voice"]
+        assert max(used) < len(pool), f"{lang}: пул {len(pool)}, карта ждёт {max(used)}"
+        assert len(set(pool)) == len(pool), f"{lang}: в пуле дубли строк"
+        for i in used:
+            # ⛔ Не «непустая», а НЕ ЗАГЛУШКА. Мутация «в одном языке строку не дописали»
+            # (подменить на "x") оставалась зелёной: непустая и не дубль. Порог взят из
+            # замера, а не на глаз: самая короткая живая строка во всех 14 языках — 6
+            # символов (zh «轻松搞定前台»), поэтому 4 отсекает заглушки и не трогает CJK.
+            assert len(pool[i].strip()) >= 4, f"{lang}: строка {i} похожа на заглушку"
