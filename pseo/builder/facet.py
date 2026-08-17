@@ -343,6 +343,11 @@ CARVE_SYS = (
     "нескольких. Правила: дубли/переформулировки ОДНОЙ задачи — в ОДИН подпункт; РАЗНЫЕ "
     "задачи/объекты/места — РАЗДЕЛЬНО (студенческая≠рабочая виза; CPF≠гражданство≠ВНЖ); НЕ "
     "укрупняй в широкие категории; НЕ выдумывай тем, которых в советах нет; охвати ВСЕ.\n"
+    "⛔ ИМЯ ПОДПУНКТА = ЗАГОЛОВОК СТРАНИЦЫ, значит это ОДИН запрос человека, а не рубрика "
+    "и не перечень. ЗАПРЕЩЕНЫ имена «Прочее», «Разное», «Общие советы…», «Полезная "
+    "информация…», «Адаптация…», «Особенности» без предмета, а также имя, совпадающее с "
+    "названием широкой темы (например «Транспорт и логистика»). Если подпункт выходит "
+    "сборным — раздели его или НЕ ВЫДЕЛЯЙ вовсе.\n"
     'СТРОГО JSON: {"intents":[{"name":"<конкретная тема>","ids":["0",...]}]}'
 )
 
@@ -500,6 +505,7 @@ def build_views_by_carve(tagged, fails=None):
 
     views = {}
     carved_fids = set()
+    dropped = []  # сборные метки: отсев обязан быть ВИДЕН, а не молчалив
 
     def add(name, fid):
         r = by_id[fid]
@@ -522,6 +528,15 @@ def build_views_by_carve(tagged, fails=None):
         ):  # плотная семья: carve по текстам
             if len(it["ids"]) < 2:
                 continue  # одиночный интент carve = тонкий абзац → в хвост-раскладку, не 1-мушь-страница
+            # ⛔ СБОРНАЯ МЕТКА — БРАК НАРЕЗКИ, А НЕ ТЕМА (канон §0.13). Вид НЕ записываем:
+            # мухи остаются в хвосте и раскладываются по разделам обычным порядком, то есть
+            # содержимое не теряется, а страница с заголовком «Прочее» не рождается.
+            # Замер 14.08 по ВСЕМУ корпусу: таких меток 26 из 1 889, за ними 194 абзаца;
+            # у трёх гео меткой страницы стало имя раздела («Транспорт и логистика»).
+            why = tax.bad_label(it["name"])
+            if why:
+                dropped.append((it["name"], len(it["ids"]), why))
+                continue
             for fid in it["ids"]:
                 add(it["name"], fid)
                 carved_fids.add(fid)
@@ -534,6 +549,14 @@ def build_views_by_carve(tagged, fails=None):
                 seen.add(it["id"])
                 uniq.append(it)
         views[name] = uniq
+
+    if dropped:
+        print(
+            f"  сборных меток отсеяно {len(dropped)} "
+            f"(мух {sum(c for _n, c, _w in dropped)}) -> в хвост: "
+            + "; ".join(f"{n!r}({c}): {w}" for n, c, w in dropped[:5]),
+            flush=True,
+        )
 
     # ХВОСТ = мухи, не попавшие ни в один плотный карв-вид → раскладка по таксономии
     tail_fids = [fid for fid in by_id if fid not in carved_fids]
@@ -809,6 +832,7 @@ def assign_views(geo, fails=None):
         return 0
     by_key = {k: name for k, name, _ in tax.SHELVES}
     done = unknown = 0
+    unknown_keys = []
     for s in range(0, len(todo), ASSIGN_VIEW_BATCH):
         if os.path.exists("RUNNER_STOP"):  # стоп МЕЖДУ пачками: сделанное не теряем
             print(f"  стоп между пачками на {s}/{len(todo)}", flush=True)
@@ -836,11 +860,17 @@ def assign_views(geo, fails=None):
                 done += 1
             else:
                 unknown += 1
+                if k and k not in unknown_keys:
+                    unknown_keys.append(k)  # ЧТО пришло, а не только сколько
     if done:
         _atomic_json(out_fn, page)
     print(
         f"{geo}: видов {len(views)}, без полки было {len(todo)} -> разложено {done}"
-        + (f", неопознанный ключ {unknown}" if unknown else ""),
+        + (
+            f", неопознанный ключ {unknown} ({','.join(unknown_keys[:5])})"
+            if unknown
+            else ""
+        ),
         flush=True,
     )
     return done

@@ -157,7 +157,10 @@ def test_no_address_is_lost(tmp_path):
             _view("Сроки визы", 9, "visa-terms", RU_NAME["visa"]),
             _view("Паромы", 5, "ferries", RU_NAME["transport"]),
             _view("Аренда авто", 4, "car-rental", RU_NAME["transport"]),
-            _view("Прочее", 4, "misc"),  # без раздела — тоже обязан быть достижим
+            # ⚠️ 14.08: метка «Прочее» теперь вообще не становится страницей (канон §0.13),
+            # поэтому случай «без раздела» показываем КОНКРЕТНОЙ меткой, которой просто нет
+            # места в таксономии. Таких в корпусе 5 из 10 — живой остаток.
+            _view("Электричество и бытовые стандарты", 4, "power-standards"),
         ],
         "shelves": [
             _shelf("visa", RU_NAME["visa"]),
@@ -241,18 +244,20 @@ def test_section_without_page_keeps_cards_on_hub(tmp_path):
 def test_view_without_section_stays_reachable(tmp_path):
     """Разбор без раздела остаётся карточкой на хабе.
 
-    Таких 10 на корпус, все со сборной меткой («Прочее», «Общие советы») — брак нарезки.
-    Лечится он в карве, а до тех пор адрес обязан быть достижим.
+    ⚠️ 14.08 разделилось на два случая: СБОРНАЯ метка страницей больше не становится вовсе
+    (канон §0.13, отсев в карве и барьер в сборке), а КОНКРЕТНАЯ метка, которой нет места в
+    таксономии («Электричество и бытовые стандарты», «Культура курения» — 5 таких из 10),
+    остаётся карточкой на хабе: адрес обязан быть достижим.
     """
     ru = {
         "views": [
             _view("Сроки визы", 9, "visa-terms", RU_NAME["visa"]),
-            _view("Прочие вопросы", 5, "misc"),
+            _view("Культура курения", 5, "smoking-culture"),
         ],
         "shelves": [_shelf("visa", RU_NAME["visa"])],
     }
     hub, _ = _build(tmp_path, "gr", corpora={"ru": ru})
-    assert [t["url"] for t in _plain(hub)] == ["/ru/gr/misc/"], hub["tiles"]
+    assert [t["url"] for t in _plain(hub)] == ["/ru/gr/smoking-culture/"], hub["tiles"]
 
 
 def test_bigger_section_first(tmp_path):
@@ -351,7 +356,7 @@ def test_hub_says_what_it_did(tmp_path):
     ru = {
         "views": [
             _view("Сроки визы", 9, "visa-terms", RU_NAME["visa"]),
-            _view("Прочее", 4, "misc"),
+            _view("Культура курения", 4, "smoking-culture"),
         ],
         "shelves": [_shelf("visa", RU_NAME["visa"])],
     }
