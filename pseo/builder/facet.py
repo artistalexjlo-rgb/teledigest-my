@@ -352,6 +352,174 @@ CARVE_SYS = (
 )
 
 
+# ── ОСЬ НАРЕЗКИ = РАЗДЕЛ (канон §0.15) ─────────────────────────────────────────────
+# ⛔ ЧТО БЫЛО НЕ ТАК. Семьи для нарезки собирались по ПЕРВОМУ СЛОВУ метки задачи
+# (`_first_word`). Первое слово — грамматическая случайность, а не тема: «Сроки оформления
+# шенгенской визы» и «Требования к документам» уезжали в РАЗНЫЕ семьи, и рот `carve`
+# физически не мог их сравнить — он видит только свою семью. Отсюда 41 разбор при девяти
+# делах (замер по визам Греции): рот честно резал то, что ему дали.
+#
+# ⭐ КАК СТАЛО. Ось — РАЗДЕЛ, он же ось сайта:
+#   1) раздел ставится КАЖДОЙ мухе (тот же рот `assign`, тот же закрытый список 13 —
+#      механизм уже работал на хвосте, тут он применён ко всем мухам);
+#   2) семья = «страна × раздел», значит близкие дела гарантированно в одной пачке;
+#   3) нарезка идёт ДВУМЯ проходами: А составляет ЗАКРЫТЫЙ список дел раздела, Б
+#      присваивает мухам дела ИЗ ЭТОГО списка. Закрытый список и есть защита от
+#      размножения формулировок: рот не может выдумать шестнадцатую.
+FLY_SHELF_BATCH = 90  # мух в пачку (тексты; та же пачка, что у раскладки хвоста)
+
+FLY_SHELF_SYS = (
+    "Ниже советы (id: текст). Отнеси КАЖДЫЙ ровно к ОДНОМУ разделу закрытой таксономии. "
+    "Отвечай КЛЮЧОМ раздела.\n"
+    + "\n".join(f"{k} — {name}: {desc}" for k, name, desc in tax.SHELVES)
+    + "\nНи один не подходит → ключ 'prochee' (сигнал дырки, не злоупотребляй).\n"
+    'СТРОГО JSON: {"map":{"0":"<ключ раздела>",...}}'
+)
+
+DEALS_MAX = 15  # дел в разделе максимум: больше — это уже не список, а простыня
+DEALS_LABELS = 90  # меток в проход А (они коротки, окно держит с запасом)
+
+DEALS_SYS = (
+    "Ниже метки задач из ОДНОГО раздела гида по стране (id: метка), в скобках число "
+    "советов. Составь ЗАКРЫТЫЙ список ДЕЛ этого раздела — то, с чем человек реально "
+    f"приходит. Дел от 5 до {DEALS_MAX}.\n"
+    "ПРАВИЛА ИМЕНИ ДЕЛА: имя = ОДИН запрос человека, оно станет ЗАГОЛОВКОМ страницы. "
+    "Разные формулировки одного дела — ОДНО дело. Разные дела не смешивать "
+    "(студенческая≠рабочая виза; CPF≠гражданство≠ВНЖ). ЗАПРЕЩЕНЫ имена «Прочее», "
+    "«Разное», «Общие советы…», «Полезная информация…», «Адаптация…», «Особенности» без "
+    "предмета, а также имя, совпадающее с названием самого раздела.\n"
+    'СТРОГО JSON: {"deals":["<имя дела>", ...]}'
+)
+
+DEAL_ASSIGN_SYS = (
+    "Ниже ЗАКРЫТЫЙ список дел раздела (номер: имя), затем советы (id: текст). Отнеси "
+    "КАЖДЫЙ совет ровно к ОДНОМУ делу ИЗ СПИСКА — новых дел не придумывать. Если ни одно "
+    'дело не подходит, ставь "0".\n'
+    'СТРОГО JSON: {"map":{"<id совета>":"<номер дела или 0>",...}}'
+)
+
+
+def assign_fly_shelves(geo, fails=None):
+    """Раздел КАЖДОЙ размеченной мухе гео. Пишет `shelf_key` в `tags/<geo>.json`.
+
+    Работой считаются только мухи без раздела — повторный запуск ключей не тратит.
+    Муха, на которую рот не ответил или ответил неизвестным ключом, остаётся без раздела:
+    она уйдёт в хвост, а не в выдуманный раздел.
+    """
+    fn = f"tags/{geo}.json"
+    if not os.path.exists(fn):
+        print(f"{geo}: разметки нет — раздел мухам ставить нечему", flush=True)
+        return 0
+    tagged = json.load(open(fn, encoding="utf-8"))
+    todo = [r for r in tagged if not r.get("shelf_key")]
+    if not todo:
+        print(f"{geo}: раздел у всех {len(tagged)} мух — пропуск", flush=True)
+        return 0
+    keys = {k for k, _n, _d in tax.SHELVES} | {"prochee"}
+    done = unknown = 0
+    unknown_keys = []
+    for st in range(0, len(todo), FLY_SHELF_BATCH):
+        if os.path.exists("RUNNER_STOP"):
+            print(f"  стоп между пачками на {st}/{len(todo)}", flush=True)
+            break
+        chunk = todo[st : st + FLY_SHELF_BATCH]
+        idx = {str(j): r["perevod"] for j, r in enumerate(chunk)}
+        res = call(
+            json.dumps(idx, ensure_ascii=False), FLY_SHELF_SYS, consumer="assign"
+        )
+        m = (res or {}).get("map") or {}
+        if not m:
+            if fails is not None:
+                fails.append(
+                    {"step": "fly_shelf", "geo": geo, "batch": st // FLY_SHELF_BATCH}
+                )
+            continue
+        for j, r in enumerate(chunk):
+            k = (m.get(str(j)) or "").strip()
+            if k in keys:
+                r["shelf_key"] = k
+                done += 1
+            else:
+                unknown += 1
+                if k and k not in unknown_keys:
+                    unknown_keys.append(k)
+    if done:
+        _atomic_json(fn, tagged)
+    print(
+        f"{geo}: мух {len(tagged)}, без раздела было {len(todo)} -> размечено {done}"
+        + (
+            f", неопознанный ключ {unknown} ({','.join(unknown_keys[:5])})"
+            if unknown
+            else ""
+        ),
+        flush=True,
+    )
+    return done
+
+
+def carve_deals(labels_with_mass, fails=None, family=None):
+    """Проход А: метки раздела → ЗАКРЫТЫЙ список дел.
+
+    Возвращает список имён; пустой список означает «рот не дал списка» — тогда раздел
+    целиком уходит в хвост, и это честнее выдуманных дел.
+    """
+    top = sorted(labels_with_mass.items(), key=lambda kv: -kv[1])[:DEALS_LABELS]
+    left = len(labels_with_mass) - len(top)
+    if left:
+        print(f"    проход А: меток сверх пачки роту не показано: {left}", flush=True)
+    idx = {str(j): f"{z} ({n})" for j, (z, n) in enumerate(top)}
+    res = call(json.dumps(idx, ensure_ascii=False), DEALS_SYS, consumer="carve")
+    raw = [(x or "").strip() for x in ((res or {}).get("deals") or [])]
+    good = []
+    for d in [x for x in raw if x][:DEALS_MAX]:
+        why = tax.bad_label(d)  # правило имени то же, что у меток (канон §0.13)
+        if why:
+            print(f"    проход А: имя дела отвергнуто ({why}): {d!r}", flush=True)
+            continue
+        if d not in good:
+            good.append(d)
+    if not good and fails is not None:
+        fails.append({"step": "deals", "geo": family})
+    return good
+
+
+def assign_to_deals(fids, by_id, deals, fails=None, family=None):
+    """Проход Б: мухи раздела → дела ИЗ ЗАКРЫТОГО списка. Возвращает {имя дела: [id мух]}.
+
+    Муха, которой ни одно дело не подошло (ответ "0") или чей номер вне списка, остаётся
+    неприсвоенной — уйдёт в хвост.
+    """
+    out = {}
+    for st in range(0, len(fids), CARVE_BATCH):
+        if os.path.exists("RUNNER_STOP"):
+            print(f"    стоп между пачками на {st}/{len(fids)}", flush=True)
+            break
+        chunk = fids[st : st + CARVE_BATCH]
+        head = "\n".join(f"{i + 1}: {d}" for i, d in enumerate(deals))
+        body = {str(j): by_id[fid]["perevod"] for j, fid in enumerate(chunk)}
+        res = call(
+            head + "\n---\n" + json.dumps(body, ensure_ascii=False),
+            DEAL_ASSIGN_SYS,
+            consumer="carve",
+        )
+        m = (res or {}).get("map") or {}
+        if not m:
+            if fails is not None:
+                fails.append(
+                    {
+                        "step": "deal_assign",
+                        "geo": family,
+                        "batch": st // CARVE_BATCH + 1,
+                    }
+                )
+            continue
+        for j, fid in enumerate(chunk):
+            v = (m.get(str(j)) or "").strip()
+            if v.isdigit() and 1 <= int(v) <= len(deals):
+                out.setdefault(deals[int(v) - 1], []).append(fid)
+    return out
+
+
 def _first_word(z):
     p = z.split()
     return p[0].lower() if p else z.lower()
@@ -506,6 +674,26 @@ def build_views_by_carve(tagged, fails=None):
     views = {}
     carved_fids = set()
     dropped = []  # сборные метки: отсев обязан быть ВИДЕН, а не молчалив
+    # ⭐ ОСЬ = РАЗДЕЛ (канон §0.15). Раздел стоит у мухи (`shelf_key`, рот `assign`),
+    # поэтому семья — «страна × раздел», а не первое слово метки.
+    # ⚠️ ПЕРЕХОД: если раздела нет НИ У ОДНОЙ мухи (гео ещё не прогонялось новым шагом),
+    # падаем на старую ось по первому слову и ГОВОРИМ об этом. Иначе первый же прогон на
+    # старых данных отправил бы весь корпус гео в хвост.
+    by_shelf = {}
+    for r in tagged:
+        k = r.get("shelf_key")
+        if k and k != "prochee":
+            by_shelf.setdefault(k, []).append(r["id"])
+    # ⛔ «Новый шаг прошёл» и «есть что резать» — РАЗНОЕ. Если все мухи гео легли в
+    # парк-ведро `prochee`, раздел у них ЕСТЬ, значит старая ось уже неуместна: иначе гео
+    # молча резалось бы по первому слову. Поймано собственным сторожем.
+    new_axis = any(r.get("shelf_key") for r in tagged)
+    if not new_axis:
+        print(
+            "  РАЗДЕЛА У МУХ НЕТ — семьи по первому слову (старая ось). "
+            "Прогнать шаг «раздел мухам», иначе раздробленность останется",
+            flush=True,
+        )
 
     def add(name, fid):
         r = by_id[fid]
@@ -519,27 +707,57 @@ def build_views_by_carve(tagged, fails=None):
             }
         )
 
-    for w, fset in fams.items():
-        fids = list(fset)
-        if len(fids) < MIN_CARVE:
-            continue  # тонкие семьи → хвост-раскладка ниже (НЕ сырые синглтоны)
-        for it in carve_family(
-            fids, by_id, fails, w
-        ):  # плотная семья: carve по текстам
-            if len(it["ids"]) < 2:
-                continue  # одиночный интент carve = тонкий абзац → в хвост-раскладку, не 1-мушь-страница
-            # ⛔ СБОРНАЯ МЕТКА — БРАК НАРЕЗКИ, А НЕ ТЕМА (канон §0.13). Вид НЕ записываем:
-            # мухи остаются в хвосте и раскладываются по разделам обычным порядком, то есть
-            # содержимое не теряется, а страница с заголовком «Прочее» не рождается.
-            # Замер 14.08 по ВСЕМУ корпусу: таких меток 26 из 1 889, за ними 194 абзаца;
-            # у трёх гео меткой страницы стало имя раздела («Транспорт и логистика»).
-            why = tax.bad_label(it["name"])
-            if why:
-                dropped.append((it["name"], len(it["ids"]), why))
+    if new_axis:
+        # ── ДВА ПРОХОДА ПО РАЗДЕЛУ ─────────────────────────────────────────────────
+        # А: метки раздела → ЗАКРЫТЫЙ список дел. Б: мухи → дела ИЗ этого списка.
+        # Мухи, которым дело не досталось, идут в хвост — как и раньше.
+        for skey, fids in sorted(by_shelf.items(), key=lambda kv: -len(kv[1])):
+            if len(fids) < MIN_CARVE:
+                continue  # тонкий раздел → целиком в хвост, дела там выделять не из чего
+            mass = {}
+            for fid in fids:
+                for z in by_id[fid].get("zadachi") or []:
+                    z = (z or "").strip()
+                    if z:
+                        mass[z] = mass.get(z, 0) + 1
+            if not mass:
                 continue
-            for fid in it["ids"]:
-                add(it["name"], fid)
-                carved_fids.add(fid)
+            deals = carve_deals(mass, fails, f"{skey}")
+            print(
+                f"  раздел {skey}: мух {len(fids)}, меток {len(mass)} -> дел {len(deals)}",
+                flush=True,
+            )
+            if not deals:
+                continue  # список не вышел → раздел в хвост, выдумывать дела нельзя
+            for name, dfids in assign_to_deals(fids, by_id, deals, fails, skey).items():
+                if len(dfids) < 2:
+                    continue  # дело из одной мухи страницей не станет → в хвост
+                why = tax.bad_label(name)
+                if why:
+                    dropped.append((name, len(dfids), why))
+                    continue
+                for fid in dfids:
+                    add(name, fid)
+                    carved_fids.add(fid)
+    else:
+        for w, fset in fams.items():
+            fids = list(fset)
+            if len(fids) < MIN_CARVE:
+                continue  # тонкие семьи → хвост-раскладка ниже (НЕ сырые синглтоны)
+            for it in carve_family(
+                fids, by_id, fails, w
+            ):  # плотная семья: carve по текстам
+                if len(it["ids"]) < 2:
+                    continue  # одиночный интент = тонкий абзац → в хвост, не 1-мушь-страница
+                # ⛔ СБОРНАЯ МЕТКА — БРАК НАРЕЗКИ, А НЕ ТЕМА (канон §0.13). Вид НЕ пишем:
+                # мухи остаются в хвосте и раскладываются по разделам обычным порядком.
+                why = tax.bad_label(it["name"])
+                if why:
+                    dropped.append((it["name"], len(it["ids"]), why))
+                    continue
+                for fid in it["ids"]:
+                    add(it["name"], fid)
+                    carved_fids.add(fid)
 
     # страховка: дедуп мух в карв-виде по id (одна муха могла попасть дважды на стыке семей)
     for name, items in views.items():
@@ -972,11 +1190,15 @@ if __name__ == "__main__":
         sys.exit(0)
     if len(sys.argv) < 2:
         print(
-            "usage: facet.py <geo> [--limit N] [--assign-tail] "
-            '[--reassign-shelf "<полка>"] | facet.py --mature'
+            "usage: facet.py <geo> [--limit N] [--assign-tail] [--assign-flies] "
+            '[--assign-views] [--reassign-shelf "<полка>"] | facet.py --mature'
         )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--assign-flies" in sys.argv:
+        # шаг «раздел мухам» — ось нарезки (канон §0.15). Запускается ПУЛЬТОМ.
+        assign_fly_shelves(geo, [])
+        sys.exit(0)
     if "--assign-views" in sys.argv:
         assign_views(geo, [])
         sys.exit(0)
