@@ -224,3 +224,177 @@ def test_carve_drops_grab_bag_view_and_keeps_flies_in_tail(monkeypatch):
     assert (
         len(seen_tail.get("ids") or []) == 4
     ), seen_tail  # мухи сборного вида → в хвост
+
+
+def test_dropped_paragraphs_land_in_their_section_tail(tmp_path):
+    """⛔ ЗАМЕР, КОТОРЫЙ ПОЙМАЛ МОЮ ЖЕ НЕПРАВДУ (14.08, `br`).
+
+    Я написал «содержимое не теряется» и не проверил. Барьер по метке убирает страницу
+    СРАЗУ, а мухи возвращаются в хвост только на следующем прогоне карва — то есть за
+    ключи и не сегодня. Факт по Бразилии: за 9 отсеянными метками 79 абзацев, из них 63
+    лежат и на других страницах (мухи мульти-лейбл), а **16 не лежат нигде** — они бы
+    просто исчезли с сайта.
+
+    Поэтому сборка сама кладёт такие абзацы в хвост ИХ РАЗДЕЛА (раздел у вида уже
+    проставлен ртом `assign`), и это правило проверяется здесь. Остаток — метки, у которых
+    раздела нет вовсе, — печатается числом: потеря обязана быть видимой.
+    """
+    import io
+    import json
+    import os
+    from contextlib import redirect_stdout
+
+    import pages as pg
+
+    def _v(z, n, key, shelf=None):
+        items = [
+            {"id": f"{key}{i}", "text": f"Уникальный абзац {key}-{i} про важное."}
+            for i in range(n)
+        ]
+        v = {
+            "zadacha": z,
+            "key": key,
+            "items": items,
+            "groups": [{"rep": x["id"], "ids": [x["id"]], "n": 1} for x in items],
+        }
+        if shelf:
+            v["shelf"] = shelf
+        return v
+
+    visa = tax.SHELF_NAMES[[k for k, _n, _d in tax.SHELVES].index("visa")]
+    out = tmp_path / "out"
+    out.mkdir()
+    (tmp_path / "out_facet").mkdir()
+    (tmp_path / "out_facet" / "gr.json").write_text(
+        json.dumps(
+            {
+                "geo": "gr",
+                "views_by_task": [
+                    _v("Сроки оформления шенгенской визы", 9, "visa-terms", visa),
+                    _v("Общие советы по подаче", 5, "general-tips", visa),  # отсев
+                    _v("Прочее", 4, "misc"),  # отсев и раздела нет
+                ],
+                "shelves": [
+                    {
+                        "shelf": visa,
+                        "key": "visa",
+                        "items": [
+                            {"id": f"s{i}", "text": f"Заметка {i}."} for i in range(3)
+                        ],
+                    }
+                ],
+                "prochee": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    built, data = pg.BUILT, pg.DATA
+    pg.BUILT, pg.DATA = str(tmp_path), str(out)
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf):
+            pg.build_geo("gr", "ru")
+    finally:
+        pg.BUILT, pg.DATA = built, data
+
+    pages_built = {
+        json.loads((out / f).read_text(encoding="utf-8")).get("path")
+        for f in os.listdir(out)
+    }
+    blob = "".join((out / f).read_text(encoding="utf-8") for f in os.listdir(out))
+    # ⚠️ Проверяем АДРЕСА, а не подстроку: слаг «general-tips» встречается и в самих
+    # спасённых текстах фикстуры, и первая версия этой проверки краснела на верном коде.
+    assert "/ru/gr/general-tips/" not in pages_built, pages_built
+    assert "/ru/gr/visa-terms/" in pages_built, pages_built
+    for i in range(5):  # абзацы отсеянной метки С разделом обязаны быть на сайте
+        assert f"general-tips-{i}" in blob, f"абзац general-tips-{i} исчез с сайта"
+    log = buf.getvalue()
+    # у «Прочее» раздела нет — эти абзацы пристроить нечем, и это должно быть СКАЗАНО
+    assert "не пристроено" in log and "без раздела вовсе: 4" in log, log
+
+
+def test_rescue_works_when_the_tail_has_dedup_groups(tmp_path):
+    """Та же спасательная операция, но на ветке хвоста С ДЕДУП-ГРУППАМИ (аккордеон).
+
+    ⛔ Мутация «спасённые абзацы не доезжают до страницы раздела» оставалась ЗЕЛЁНОЙ: в
+    первой фикстуре хвост был без групп, и код шёл другой ветвью. У живых гео встречаются
+    обе (у `gr` 24 заметки и 0 групп, а после прогона дедупа группы появятся), значит
+    проверять надо обе.
+    """
+    import json
+    import os
+
+    import pages as pg
+
+    visa = tax.SHELF_NAMES[[k for k, _n, _d in tax.SHELVES].index("visa")]
+    items = [{"id": f"t{i}", "text": f"Заметка хвоста {i}."} for i in range(3)]
+    out = tmp_path / "out"
+    out.mkdir()
+    (tmp_path / "out_facet").mkdir()
+    (tmp_path / "out_facet" / "gr.json").write_text(
+        json.dumps(
+            {
+                "geo": "gr",
+                "views_by_task": [
+                    {
+                        "zadacha": "Общие советы по подаче",
+                        "key": "general-tips",
+                        "shelf": visa,
+                        "items": [
+                            {"id": f"g{i}", "text": f"Спасаемый абзац номер {i}."}
+                            for i in range(5)
+                        ],
+                        "groups": [
+                            {"rep": f"g{i}", "ids": [f"g{i}"], "n": 1} for i in range(5)
+                        ],
+                    },
+                    # ⛔ Уцелевший разбор нужен именно здесь: без него сборка идёт другой
+                    # ветвью, и мутация «спасённые абзацы не доезжают» оставалась зелёной.
+                    # Живой случай — ровно такой: в разделе есть и годные метки, и сборные.
+                    {
+                        "zadacha": "Сроки оформления шенгенской визы",
+                        "key": "visa-terms",
+                        "shelf": visa,
+                        "items": [
+                            {"id": f"v{i}", "text": f"Годный абзац номер {i}."}
+                            for i in range(6)
+                        ],
+                        "groups": [
+                            {"rep": f"v{i}", "ids": [f"v{i}"], "n": 1} for i in range(6)
+                        ],
+                    },
+                ],
+                "shelves": [
+                    {
+                        "shelf": visa,
+                        "key": "visa",
+                        "items": items,
+                        "groups": [
+                            {"rep": x["id"], "ids": [x["id"]], "n": 1} for x in items
+                        ],
+                    }
+                ],
+                "prochee": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    built, data = pg.BUILT, pg.DATA
+    pg.BUILT, pg.DATA = str(tmp_path), str(out)
+    try:
+        pg.build_geo("gr", "ru")
+    finally:
+        pg.BUILT, pg.DATA = built, data
+    sec = next(
+        json.loads((out / f).read_text(encoding="utf-8"))
+        for f in os.listdir(out)
+        if json.loads((out / f).read_text(encoding="utf-8")).get("path")
+        == "/ru/gr/s/visa/"
+    )
+    text = json.dumps(sec, ensure_ascii=False)
+    for i in range(5):
+        assert f"Спасаемый абзац номер {i}." in text, f"абзац {i} потерян на аккордеоне"
+    assert "Заметка хвоста 0." in text, "свой хвост раздела пропал"
+    assert "/ru/gr/visa-terms/" in text, "плитка уцелевшего разбора пропала со раздела"

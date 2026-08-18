@@ -2599,6 +2599,27 @@ def build_geo(geo, lang="ru"):
             return f"сборная метка ({why})"
         return None
 
+    # ⛔ АБЗАЦЫ ОТСЕЯННОГО ВИДА НЕ ИСЧЕЗАЮТ С САЙТА (замер 14.08 по `br`). Барьер по метке
+    # убирает страницу СРАЗУ, а мухи вернулись бы в хвост только на следующем прогоне карва
+    # — то есть за ключи и не сегодня. Замер: за 9 отсеянными метками `br` 79 абзацев, из
+    # них 63 лежат и на других страницах, а 16 — НИГДЕ БОЛЬШЕ. Поэтому кладём их в хвост
+    # своего раздела здесь же, в сборке: раздел у вида уже проставлен ртом `assign`.
+    rescue = {}  # ключ раздела → тексты отсеянных абзацев
+    homeless = 0  # отсеяно, а раздела нет вовсе → пристроить в сборке НЕЧЕМ
+    for v in fviews:
+        if not (_skip(v) or "").startswith("сборная метка"):
+            continue
+        k = view_theme(v, geo, lang)
+        if k:
+            rescue.setdefault(k, []).extend(
+                it["text"] for it in v["items"] if it.get("text")
+            )
+        else:
+            # ⚠️ У сборной метки не бывает раздела ровно потому, что рот по ней раздел
+            # выбрать не смог (замер 13.08: 5 таких из 10). Абзацы вернутся в хвост на
+            # следующем прогоне карва — это ключи. Потеря ВИДИМАЯ: печатаем число.
+            homeless += len([it for it in v["items"] if it.get("text")])
+
     dropped = [r for r in (_skip(v) for v in fviews) if r]
     if dropped:
         from collections import Counter as _C
@@ -2829,6 +2850,7 @@ def build_geo(geo, lang="ru"):
             # это она и есть; новых адресов шаг не создаёт.
             tkey = sv.get("key") or SHELF_KEY.get(sv["shelf"]) or ""
             own = by_theme.get(tkey) or []
+            saved = rescue.pop(tkey, [])  # абзацы отсеянных меток этого раздела
             theme_urls[tkey] = f"/{lang}/{geo}/s/{sk}/"  # куда ведёт плитка на хабе
             page = {
                 "lang": lang,
@@ -2910,16 +2932,20 @@ def build_geo(geo, lang="ru"):
                 page["faqs_label"] = C["shelf_list_label"]
                 if sv.get("groups"):
                     page["faqs"] = groups_to_faqs(sv, lang)
+                    if saved:  # спасённые абзацы — пунктами под аккордеоном
+                        page["questions"] = saved
                 else:  # хвост без дедупа: пунктами, чтобы заметки не пропали молча
-                    page["questions"] = [it["text"] for it in sv["items"]]
+                    page["questions"] = [it["text"] for it in sv["items"]] + saved
             elif sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
                 page["template"] = "page.html.j2"
                 page["list_label"] = C["shelf_list_label"]
                 page["faqs"] = groups_to_faqs(sv, lang)
+                if saved:  # раздел без своих разборов, но с абзацами отсеянной метки
+                    page["questions"] = saved
             else:  # полка без дедупа → старый список (не должно случаться после dedup.py)
                 page["template"] = "qlist.html.j2"
                 page["list_label"] = C["shelf_list_label"]
-                page["questions"] = [it["text"] for it in sv["items"]]
+                page["questions"] = [it["text"] for it in sv["items"]] + saved
             write(f"{lang}_{geo}_s_{sk}.json", page)
             n += 1
         stiles = [
@@ -2948,6 +2974,16 @@ def build_geo(geo, lang="ru"):
             },
         )
         n += 1
+
+    if rescue or homeless:  # не пристроено — сказать, а не проглотить
+        left = sum(len(v) for v in rescue.values())
+        print(
+            f"{geo}/{lang}: абзацев отсеянных меток не пристроено {left + homeless}"
+            + (f" (нет страницы раздела: {','.join(sorted(rescue))})" if rescue else "")
+            + (f", без раздела вовсе: {homeless}" if homeless else "")
+            + " — вернутся в хвост на следующем прогоне карва",
+            flush=True,
+        )
 
     # --- ГЕО-ХАБ (плитки разделов + мостики вопросов и разделов) ---
     themed, loose = theme_tiles(fact_tiles, lang, geo, theme_urls)
