@@ -30,8 +30,19 @@
   function show(){
     var v=q.value.trim().toLowerCase();
     if(!v||!IDX){sg.style.display="none";return;}
-    var m=[],i;
-    for(i=0;i<IDX.length&&m.length<8;i++) if(IDX[i][0].toLowerCase().indexOf(v)>=0) m.push(IDX[i]);
+    /* Страны — вперёд: на главной человек чаще ищет страну, а индекс отсортирован по
+       алфавиту, и «гре» иначе выдало бы шесть заголовков раньше самой Греции.
+       Хаб страны узнаём по адресу: /<язык>/<страна>/ — ровно два сегмента. */
+    var hits=[],i,r,seg;
+    for(i=0;i<IDX.length;i++){
+      r=IDX[i];
+      if(r[0].toLowerCase().indexOf(v)<0) continue;
+      seg=r[1].split("/").filter(function(x){return x;}).length;
+      hits.push([seg===2?0:1,r]);
+      if(hits.length>=40) break;
+    }
+    hits.sort(function(a,b){return a[0]-b[0];});
+    var m=hits.slice(0,8).map(function(h){return h[1];});
     sg.innerHTML = m.length
       ? m.map(function(r){return '<a href="'+r[1]+'">'+r[0]+"</a>";}).join("")
       : '<a class="nores">'+q.dataset.none+"</a>";

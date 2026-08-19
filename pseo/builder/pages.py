@@ -1,4 +1,4 @@
-"""pages.py — из BUILT-данных гео (out_facet[_<lang>]/<geo>.json + out_questions[_<lang>]/<geo>.json)
+"""pages.py — из BUILT-данных гео (out_facet[_<lang>]/<geo>.json)
 собирает portal-схему data/ (октагон-шаблон): гео-хаб + факт-тема-страницы + вопрос-хаб/темы.
 Оба контура, единообразно. Дизайн гарантирован шаблоном (page/qlist/index.html.j2).
 
@@ -889,6 +889,7 @@ COPY = {
         "hub_desc": "Живой опыт по {name} из чатов сообществ: документы, деньги, жильё, безопасность, транспорт. Без воды, под твой случай.",
         "hub_intro": "Живой опыт тех, кто реально через это прошёл — по делу, без воды. Выбери тему, а под свой случай <a href='#luky'>спроси Luky</a>.",
         "list_label_topics": "Темы",
+        "list_label_pages": "Страницы раздела",
         "lower": True,  # темы в тайтле в нижнем регистре (русский стиль)
     },
     "en": {
@@ -933,6 +934,7 @@ COPY = {
         "hub_desc": "Real experience for {name} from community chats: documents, money, housing, safety, transport. No fluff, for your case.",
         "hub_intro": "Real experience of those who actually went through it — to the point, no fluff. Pick a topic, and for your case <a href='#luky'>ask Luky</a>.",
         "list_label_topics": "Topics",
+        "list_label_pages": "Pages in this section",
         "lower": False,  # английские заголовки — как есть (Title-case меток)
     },
     "es": {
@@ -977,6 +979,7 @@ COPY = {
         "hub_desc": "Experiencia real de {name} de chats de comunidades: documentos, dinero, vivienda, seguridad, transporte. Sin relleno, para tu caso.",
         "hub_intro": "Experiencia real de quienes ya pasaron por ello — al grano, sin relleno. Elige un tema, y para tu caso <a href='#luky'>pregúntale a Luky</a>.",
         "list_label_topics": "Temas",
+        "list_label_pages": "Páginas de esta sección",
         "lower": False,
     },
     "pt": {
@@ -1021,6 +1024,7 @@ COPY = {
         "hub_desc": "Experiência real de {name} de chats de comunidades: documentos, dinheiro, moradia, segurança, transporte. Sem enrolação, para o seu caso.",
         "hub_intro": "Experiência real de quem já passou por isso — direto ao ponto, sem enrolação. Escolha um tema, e para o seu caso <a href='#luky'>pergunte ao Luky</a>.",
         "list_label_topics": "Temas",
+        "list_label_pages": "Páginas desta seção",
         "lower": False,
     },
     "de": {
@@ -1065,6 +1069,7 @@ COPY = {
         "hub_desc": "Echte Erfahrungen für {name} aus Community-Chats: Dokumente, Geld, Wohnen, Sicherheit, Transport. Ohne Geschwätz, für deinen Fall.",
         "hub_intro": "Echte Erfahrungen von denen, die es selbst durchgemacht haben — auf den Punkt, ohne Geschwätz. Wähle ein Thema, und für deinen Fall <a href='#luky'>frag Luky</a>.",
         "list_label_topics": "Themen",
+        "list_label_pages": "Seiten dieses Bereichs",
         "lower": False,
     },
     "fr": {
@@ -1109,6 +1114,7 @@ COPY = {
         "hub_desc": "L'expérience réelle pour {name} issue des chats communautaires : documents, argent, logement, sécurité, transport. Sans blabla, pour ton cas.",
         "hub_intro": "L'expérience réelle de ceux qui l'ont vécu — droit au but, sans blabla. Choisis un thème, et pour ton cas <a href='#luky'>demande à Luky</a>.",
         "list_label_topics": "Thèmes",
+        "list_label_pages": "Pages de cette rubrique",
         "lower": False,
     },
     "it": {
@@ -1153,6 +1159,7 @@ COPY = {
         "hub_desc": "Esperienza reale per {name} dalle chat della community: documenti, soldi, casa, sicurezza, trasporti. Senza fronzoli, per il tuo caso.",
         "hub_intro": "L'esperienza reale di chi ci è passato davvero — diretta al punto, senza fronzoli. Scegli un tema, e per il tuo caso <a href='#luky'>chiedi a Luky</a>.",
         "list_label_topics": "Temi",
+        "list_label_pages": "Pagine di questa sezione",
         "lower": False,
     },
     "tr": {
@@ -1197,6 +1204,7 @@ COPY = {
         "hub_desc": "{name} için topluluk sohbetlerinden gerçek deneyim: belgeler, para, konut, güvenlik, ulaşım. Laf kalabalığı yok, kendi durumun için.",
         "hub_intro": "Bunu bizzat yaşamış olanların gerçek deneyimi — doğrudan konuya, laf kalabalığı yok. Bir konu seç, kendi durumun için <a href='#luky'>Luky'ye sor</a>.",
         "list_label_topics": "Konular",
+        "list_label_pages": "Bu bölümdeki sayfalar",
         "lower": False,
     },
     "zh": {
@@ -1241,6 +1249,7 @@ COPY = {
         "hub_desc": "来自社区聊天群的{name}真实经验：证件、钱、住房、安全、交通。不掺水，针对你的情况。",
         "hub_intro": "真正亲身经历过的人的经验 — 直奔要点，不掺水。挑一个主题，你的情况就<a href='#luky'>问 Luky</a>。",
         "list_label_topics": "主题",
+        "list_label_pages": "本板块的页面",
         "lower": False,
     },
     "ja": {
@@ -1285,6 +1294,7 @@ COPY = {
         "hub_desc": "コミュニティのチャットからの{name}の実際の経験：書類、お金、住まい、安全、交通。水増しなし、あなたのケースに。",
         "hub_intro": "実際に自分で通ってきた人たちの経験 — 要点だけ、水増しなし。テーマを選んで、あなたのケースは<a href='#luky'>Luky に聞いて</a>。",
         "list_label_topics": "テーマ",
+        "list_label_pages": "このセクションのページ",
         "lower": False,
     },
     "ko": {
@@ -1329,6 +1339,7 @@ COPY = {
         "hub_desc": "커뮤니티 채팅방에서 나온 {name} 실제 경험: 서류, 돈, 주거, 안전, 교통. 군더더기 없이, 당신의 상황에.",
         "hub_intro": "직접 겪어본 사람들의 실제 경험 — 요점만, 군더더기 없이. 주제를 고르고, 당신의 상황은 <a href='#luky'>Luky에게 물어보세요</a>.",
         "list_label_topics": "주제",
+        "list_label_pages": "이 섹션의 페이지",
         "lower": False,
     },
     "ar": {
@@ -1373,6 +1384,7 @@ COPY = {
         "hub_desc": "تجربة حقيقية عن {name} من محادثات المجتمع: أوراق، مال، سكن، أمان، نقل. بلا حشو، لحالتك.",
         "hub_intro": "تجربة حقيقية لمن مرّ بها بنفسه — إلى الهدف مباشرة، بلا حشو. اختر موضوعاً، ولحالتك <a href='#luky'>اسأل Luky</a>.",
         "list_label_topics": "المواضيع",
+        "list_label_pages": "صفحات هذا القسم",
         "lower": False,
     },
     "hi": {
@@ -1417,6 +1429,7 @@ COPY = {
         "hub_desc": "कम्युनिटी चैट से {name} का असली अनुभव: दस्तावेज़, पैसा, रहने की जगह, सुरक्षा, आवाजाही। बिना लफ़्फ़ाज़ी, अपने मामले के लिए।",
         "hub_intro": "जिन्होंने ख़ुद झेला उनका असली अनुभव — सीधे मुद्दे पर, बिना लफ़्फ़ाज़ी। एक विषय चुनो, और अपने मामले के लिए <a href='#luky'>Luky से पूछो</a>।",
         "list_label_topics": "विषय",
+        "list_label_pages": "इस अनुभाग के पृष्ठ",
         "lower": False,
     },
     "th": {
@@ -1461,6 +1474,7 @@ COPY = {
         "hub_desc": "ประสบการณ์จริงเรื่อง{name}จากแชทของคอมมูนิตี้: เอกสาร เงิน ที่อยู่ ความปลอดภัย การเดินทาง ไม่มีน้ำ ตรงกรณีของคุณ",
         "hub_intro": "ประสบการณ์จริงของคนที่ผ่านมาเองจริง ๆ — ตรงประเด็น ไม่มีน้ำ เลือกหัวข้อ และสำหรับกรณีของคุณ <a href='#luky'>ถาม Luky</a>",
         "list_label_topics": "หัวข้อ",
+        "list_label_pages": "หน้าในหมวดนี้",
         "lower": False,
     },
 }
@@ -2411,20 +2425,68 @@ def build_branches(sv, *, url_pref, file_pref, C, keys, ctx, lang, write_fn):
     return subtiles, [g for g in sv["groups"] if g["rep"] not in covered]
 
 
-def chips_for(cur_slug, siblings):
+def shelf_key_of(sv):
+    """Латинский ключ раздела: несомый файлом `key` или из таксономии по русскому имени.
+
+    ⛔ ОДНО место на весь модуль. Я успел повторить это выражение в четырёх (слаг, карта
+    разделов, контур, счётчик хвоста) — и собственный сторож это поймал. Правило в копиях
+    здесь уже расходилось не раз.
+    """
+    return sv.get("key") or SHELF_KEY.get(sv["shelf"])
+
+
+def shelf_slug(sv):
+    """Хвост адреса раздела. Приоритет — ключ, НЕСОМЫЙ файлом (`key`): в переводах имя
+    раздела локализовано, а `SHELF_KEY` смотрит по РУССКОМУ имени и от перевода
+    промахнётся, слепив слаг из локализованного текста — разный в каждом языке, а на
+    нелатинице и вовсе нечитаемый. Адрес раздела обязан совпадать во всех языках, иначе
+    hreflang связывает не те страницы.
+
+    ⛔ Была локальной функцией внутри полочного блока. Поднята на уровень модуля 14.08,
+    когда адрес раздела понадобился ещё и крошкам страниц ниже: правило адреса обязано
+    быть ОДНО — вторая копия в этом проекте раз за разом расходилась с первой.
+    """
+    return shelf_key_of(sv) or slug(sv["shelf"])
+
+
+def shelf_pages(facts, lang, geo):
+    """{ключ раздела: (имя, адрес)} — только те разделы, у которых страница БУДЕТ.
+
+    Нужно ДО сборки разборов: крошка разбора ведёт в свой раздел, а чипы «рядом по теме»
+    берутся из того же раздела. Условие существования страницы раздела здесь то же, что в
+    контуре ниже (`SHELF_MIN`).
+    """
+    out = {}
+    for sv in (facts or {}).get("shelves") or []:
+        if len(sv.get("items") or []) < SHELF_MIN:
+            continue
+        k = shelf_key_of(sv)
+        if k:
+            out[k] = (sv["shelf"], f"/{lang}/{geo}/s/{shelf_slug(sv)}/")
+    return out
+
+
+def chips_for(cur_slug, siblings, theme=None):
+    """«Рядом по теме» — из ТОГО ЖЕ раздела (канон §0.12).
+
+    ⛔ Было: шесть первых видов страны подряд, поэтому со страницы про сроки визы вели
+    ссылки на паромы и аренду авто. Правило в каноне стояло с 11.08 и не исполнялось.
+    Раздела у страницы нет (сборная метка, старый файл) → падаем на прежнее поведение,
+    иначе блок «рядом» просто исчез бы.
+    """
+    pool = [x for x in siblings if x["slug"] != cur_slug]
+    if theme:
+        same = [x for x in pool if x.get("theme") == theme]
+        if same:
+            pool = same
     return [
-        {"icon": icon(s["tema"]), "label": s["tema"], "url": s["url"], "soon": False}
-        for s in siblings
-        if s["slug"] != cur_slug
+        {"icon": icon(x["tema"]), "label": x["tema"], "url": x["url"], "soon": False}
+        for x in pool
     ][:6]
 
 
 def _facet_dir(lang):
     return f"{BUILT}/out_facet" if lang == "ru" else f"{BUILT}/out_facet_{lang}"
-
-
-def _ques_dir(lang):
-    return f"{BUILT}/out_questions" if lang == "ru" else f"{BUILT}/out_questions_{lang}"
 
 
 # ── ПЛИТКИ РАЗДЕЛОВ НА ХАБЕ ГЕО (канон §0.12: «хаб страны = плитки полок со счётчиком;
@@ -2501,8 +2563,13 @@ def view_theme(v, geo, lang):
     return k
 
 
-def theme_tiles(cards, lang, geo, urls):
+def theme_tiles(cards, lang, geo, urls, tail_n=None):
     """Плитки разделов для хаба гео. Возвращает (плитки, несгруппированное).
+
+    `tail_n` — {ключ раздела: сколько заметок хвоста на его странице}. Счётчик плитки
+    обязан отвечать за ВСЁ содержимое страницы: до 14.08 он считал только советы разборов,
+    поэтому плитка обещала «313 советов», а на странице было ещё 24 заметки хвоста —
+    человек видел одно число, а внутри лежало больше.
 
     `urls` — {ключ раздела: адрес его страницы}: плитка это ССЫЛКА, а не раскрытие, и
     вести ей некуда, если страницы раздела в этом гео нет. Так бывает: страница раздела
@@ -2549,7 +2616,9 @@ def theme_tiles(cards, lang, geo, urls):
         {
             "icon": THEME_ICON.get(k, "•"),
             "title": names[k],
-            "blurb": blurb(COPY[lang], "fact", sum(x["n"] for x in cs)),
+            "blurb": blurb(
+                COPY[lang], "fact", sum(x["n"] for x in cs) + (tail_n or {}).get(k, 0)
+            ),
             "url": urls[k],
         }
         for k, cs in order
@@ -2563,11 +2632,13 @@ def build_geo(geo, lang="ru"):
     # «где» для ru-строк («{tl} в Бразилии»); прочие языки — имя как есть
     namep = GEO_LOC.get(geo, f"в {name}") if lang == "ru" else name
     facts = load(f"{_facet_dir(lang)}/{geo}.json")
-    ques = load(f"{_ques_dir(lang)}/{geo}.json")
     n = 0
 
     def tl(t):
         return t.lower() if C["lower"] else t
+
+    # КОРЕНЬ A: карта разделов нужна ДО страниц-разборов — из неё крошка и чипы.
+    theme_page = shelf_pages(facts, lang, geo)
 
     # --- ФАКТ-ТЕМЫ (советы-список, ≥4 факта = страница) ---
     fact_tiles, fact_sibs = [], []
@@ -2589,7 +2660,36 @@ def build_geo(geo, lang="ru"):
             return "без адреса"
         if lang != "ru" and re.search("[а-яёА-ЯЁ]", v["zadacha"]):
             return "метка не перевелась"
+        # ⛔ БАРЬЕР ПО МЕТКЕ (канон §0.13). Метка вида = заголовок страницы, поэтому сборная
+        # метка («Прочее», «Общие советы…», имя раздела) страницей быть не может. Основное
+        # место отсева — выход карва (мухи там остаются в хвосте), но барьер нужен и здесь:
+        # в корпусе уже лежат 26 таких меток из 1 889, а старые файлы гео пересобираются не
+        # все и не сразу. Причина печатается общим счётчиком `dropped` ниже.
+        why = _tax.bad_label(v["zadacha"]) if lang == "ru" else None
+        if why:
+            return f"сборная метка ({why})"
         return None
+
+    # ⛔ АБЗАЦЫ ОТСЕЯННОГО ВИДА НЕ ИСЧЕЗАЮТ С САЙТА (замер 14.08 по `br`). Барьер по метке
+    # убирает страницу СРАЗУ, а мухи вернулись бы в хвост только на следующем прогоне карва
+    # — то есть за ключи и не сегодня. Замер: за 9 отсеянными метками `br` 79 абзацев, из
+    # них 63 лежат и на других страницах, а 16 — НИГДЕ БОЛЬШЕ. Поэтому кладём их в хвост
+    # своего раздела здесь же, в сборке: раздел у вида уже проставлен ртом `assign`.
+    rescue = {}  # ключ раздела → тексты отсеянных абзацев
+    homeless = 0  # отсеяно, а раздела нет вовсе → пристроить в сборке НЕЧЕМ
+    for v in fviews:
+        if not (_skip(v) or "").startswith("сборная метка"):
+            continue
+        k = view_theme(v, geo, lang)
+        if k:
+            rescue.setdefault(k, []).extend(
+                it["text"] for it in v["items"] if it.get("text")
+            )
+        else:
+            # ⚠️ У сборной метки не бывает раздела ровно потому, что рот по ней раздел
+            # выбрать не смог (замер 13.08: 5 таких из 10). Абзацы вернутся в хвост на
+            # следующем прогоне карва — это ключи. Потеря ВИДИМАЯ: печатаем число.
+            homeless += len([it for it in v["items"] if it.get("text")])
 
     dropped = [r for r in (_skip(v) for v in fviews) if r]
     if dropped:
@@ -2604,7 +2704,15 @@ def build_geo(geo, lang="ru"):
     for v in fviews:
         s = addr(v, "zadacha")
         fact_sibs.append(
-            {"tema": v["zadacha"], "slug": s, "url": f"/{lang}/{geo}/{s}/"}
+            {
+                "tema": v["zadacha"],
+                "slug": s,
+                "url": f"/{lang}/{geo}/{s}/",
+                # ⭐ КОРЕНЬ A: раздел доезжает до страниц НИЖЕ хаба. Канон §0.12 требует
+                # «блок рядом по теме ИЗ ТОЙ ЖЕ полки», а чипы собирались по всей стране
+                # подряд — то есть правило было записано и не исполнено.
+                "theme": view_theme(v, geo, lang),
+            }
         )
     for v in fviews:
         tema = v["zadacha"]
@@ -2627,8 +2735,10 @@ def build_geo(geo, lang="ru"):
             "meta_desc": C["fact_desc"].format(name=name, namep=namep, tl=tl(tema)),
             "h1": pick(C["FHEAD"], geo + s).format(t=cap(tema), g=name, gp=namep),
             "intro": C["fact_intro"].format(name=name, namep=namep, tl=tl(tema)),
-            "chips": chips_for(s, fact_sibs),
+            "chips": chips_for(s, fact_sibs, vkey),
         }
+        if vkey and vkey in theme_page:  # КОРЕНЬ A: крошка ведёт в свой раздел
+            page["shelf_name"], page["shelf_url"] = theme_page[vkey]
         if v.get("subshelves"):
             # ⭐ ТЕМА-ГИГАНТ ВЕТВИТСЯ так же, как полка (2026-08-07). До этого `subshelves`
             # читались ТОЛЬКО в полочной ветке, поэтому 561 фактовая страница оставалась
@@ -2688,75 +2798,14 @@ def build_geo(geo, lang="ru"):
             }
         )
 
-    # --- ВОПРОС-КОНТУР (хаб + темы под /<lang>/<geo>/q/) ---
-    q_ok = False
-    qgroups = [g for g in (ques or {}).get("groups", []) if len(g["questions"]) >= 4]
-    if qgroups:
-        q_ok = True
-        qgroups = [g for g in qgroups if addr(g, "tema")]  # безадресные — не страницы
-        q_sibs = [
-            {
-                "tema": g["tema"],
-                "slug": addr(g, "tema"),
-                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
-            }
-            for g in qgroups
-        ]
-        for g in qgroups:
-            s = addr(g, "tema")
-            page = {
-                "lang": lang,
-                "template": "qlist.html.j2",
-                "path": f"/{lang}/{geo}/q/{s}/",
-                "shared_tail": bool(g.get("key")),
-                "geo": geo,
-                "geo_name": name,
-                "intent_name": g["tema"],
-                "title": C["q_title"].format(name=name, tl=tl(g["tema"])),
-                "meta_desc": C["q_desc"].format(name=name, tl=tl(g["tema"])),
-                "h1": pick(C["QHEAD"], geo + s + "q").format(t=g["tema"]),
-                "intro": C["q_intro"],
-                "list_label": C["q_list_label"],
-                "questions": g["questions"],
-                "chips": [
-                    {
-                        "icon": icon(x["tema"]),
-                        "label": x["tema"],
-                        "url": x["url"],
-                        "soon": False,
-                    }
-                    for x in q_sibs
-                    if x["slug"] != s
-                ][:6],
-            }
-            write(f"{lang}_{geo}_q_{s}.json", page)
-            n += 1
-        qtiles = [
-            {
-                "icon": icon(g["tema"]),
-                "title": g["tema"],
-                "blurb": blurb(C, "q", len(g["questions"])),
-                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
-            }
-            for g in qgroups
-        ]
-        write(
-            f"{lang}_{geo}_q_hub.json",
-            {
-                "lang": lang,
-                "template": "index.html.j2",
-                "path": f"/{lang}/{geo}/q/",
-                "geo": geo,
-                "geo_name": name,
-                "title": C["qhub_title"].format(name=name),
-                "meta_desc": C["qhub_desc"].format(name=name),
-                "h1": C["qhub_h1"],
-                "intro": C["qhub_intro"],
-                "list_label": C["list_label_topics"],
-                "tiles": qtiles,
-            },
-        )
-        n += 1
+    # ⛔ ВОПРОС-КОНТУР `/q/` СНЕСЁН 19.08 (решение юзера: «убрать и забыть»).
+    # Он был третьим контуром в дереве и жил вне логики «страна → раздел → разбор»:
+    # свой источник данных (`out_questions`), своя навигация, свои мостики. Держался на
+    # надежде, что вырастет, и не вырос: 5 стран, 20 собираемых страниц, 12 выложенных.
+    # Основание фактом, а не вкусом: Search Console за три месяца — 0 показов и 0
+    # запросов на весь контур, при 550 показах у разборов.
+    # ⚠️ Данные `out_questions/` не удаляем: они ничего не стоят на диске, решение о них
+    # отдельное. Но СОБИРАТЬ из них страницы перестаём — иначе это ружьё на стене.
 
     # Разборы по разделам — для плиток НА СТРАНИЦЕ РАЗДЕЛА (ниже) и для плиток раздела на
     # хабе (в самом конце). Считаем ДО того, как `theme_tiles` разберёт карточки.
@@ -2797,30 +2846,23 @@ def build_geo(geo, lang="ru"):
     if shelves:
         s_ok = True
 
-        def _sk(sv):
-            """Ключ полки для URL. Приоритет — ключ, НЕСОМЫЙ файлом (`key`): в переводах
-            имя полки локализовано, а `SHELF_KEY` смотрит по РУССКОМУ имени и от перевода
-            промахнётся, слепив слаг из локализованного текста — разный в каждом языке, а
-            на нелатинских и вовсе нечитаемый. Адрес полки обязан совпадать во всех
-            языках, иначе hreflang связывает не те страницы."""
-            return sv.get("key") or SHELF_KEY.get(sv["shelf"]) or slug(sv["shelf"])
-
         sh_sibs = [
             {
                 "tema": sv["shelf"],
-                "slug": _sk(sv),
-                "url": f"/{lang}/{geo}/s/{_sk(sv)}/",
+                "slug": shelf_slug(sv),
+                "url": f"/{lang}/{geo}/s/{shelf_slug(sv)}/",
             }
             for sv in shelves
         ]
         for sv in shelves:
-            sk = _sk(sv)
+            sk = shelf_slug(sv)
             # ⭐ ШАГ 5: РАЗБОРЫ ЭТОГО РАЗДЕЛА — плитками СВЕРХУ страницы раздела. До этого
             # раздел показывал только свой хвост, а разборы висели плоским списком на хабе
             # страны (у `gr` 63 ссылки, у `any` 87). Своей страницы разделу не завожу —
             # это она и есть; новых адресов шаг не создаёт.
-            tkey = sv.get("key") or SHELF_KEY.get(sv["shelf"]) or ""
+            tkey = shelf_key_of(sv) or ""
             own = by_theme.get(tkey) or []
+            saved = rescue.pop(tkey, [])  # абзацы отсеянных меток этого раздела
             theme_urls[tkey] = f"/{lang}/{geo}/s/{sk}/"  # куда ведёт плитка на хабе
             page = {
                 "lang": lang,
@@ -2836,9 +2878,12 @@ def build_geo(geo, lang="ru"):
                 "meta_desc": C["shelf_desc"].format(
                     name=name, namep=namep, tl=tl(sv["shelf"])
                 ),
-                "h1": pick(C["FHEAD"], geo + sk).format(
-                    t=cap(sv["shelf"]), g=name, gp=namep
-                ),
+                # ⭐ КОРЕНЬ B: раздел объявляет себя разделом. Заголовок брался из пула
+                # заголовков РАЗБОРОВ («… : реальный опыт из чатов»), поэтому страница
+                # раздела читалась как обычная страница-ответ. Имя раздела и есть её
+                # заголовок; страну говорит крошка, поэтому падежи и новый копирайт на 14
+                # языков тут не нужны.
+                "h1": cap(sv["shelf"]),
                 "intro": C["shelf_intro"].format(
                     name=name, namep=namep, tl=tl(sv["shelf"])
                 ),
@@ -2880,7 +2925,7 @@ def build_geo(geo, lang="ru"):
                 n = n_before + len(subtiles)
                 # хаб полки: плитки веток + остаток (репы вне веток) аккордеоном внизу
                 page["template"] = "index.html.j2"
-                page["list_label"] = C["list_label_topics"]
+                page["list_label"] = C["list_label_pages"]
                 page["tiles"] = own + subtiles
                 if rest:
                     # ⛔ БЫЛО `rest[:30]` — пункты за тридцатым исчезали БЕЗ СЛЕДА и без
@@ -2897,52 +2942,48 @@ def build_geo(geo, lang="ru"):
                     page["faqs_label"] = C["shelf_list_label"]
             elif own:  # разборы сверху плитками, хвост раздела — ниже, как лежит
                 page["template"] = "index.html.j2"
-                page["list_label"] = C["list_label_topics"]
+                page["list_label"] = C["list_label_pages"]
                 page["tiles"] = own
                 page["faqs_label"] = C["shelf_list_label"]
                 if sv.get("groups"):
                     page["faqs"] = groups_to_faqs(sv, lang)
+                    if saved:  # спасённые абзацы — пунктами под аккордеоном
+                        page["questions"] = saved
                 else:  # хвост без дедупа: пунктами, чтобы заметки не пропали молча
-                    page["questions"] = [it["text"] for it in sv["items"]]
+                    page["questions"] = [it["text"] for it in sv["items"]] + saved
             elif sv.get("groups"):  # укладка как у фактов: аккордеон + счётчики + типы
                 page["template"] = "page.html.j2"
                 page["list_label"] = C["shelf_list_label"]
                 page["faqs"] = groups_to_faqs(sv, lang)
+                if saved:  # раздел без своих разборов, но с абзацами отсеянной метки
+                    page["questions"] = saved
             else:  # полка без дедупа → старый список (не должно случаться после dedup.py)
                 page["template"] = "qlist.html.j2"
                 page["list_label"] = C["shelf_list_label"]
-                page["questions"] = [it["text"] for it in sv["items"]]
+                page["questions"] = [it["text"] for it in sv["items"]] + saved
             write(f"{lang}_{geo}_s_{sk}.json", page)
             n += 1
-        stiles = [
-            {
-                "icon": icon(sv["shelf"]),
-                "title": sv["shelf"],
-                "blurb": blurb(C, "shelf", len(sv["items"])),
-                "url": f"/{lang}/{geo}/s/{_sk(sv)}/",
-            }
-            for sv in shelves
-        ]
-        write(
-            f"{lang}_{geo}_s_hub.json",
-            {
-                "lang": lang,
-                "template": "index.html.j2",
-                "path": f"/{lang}/{geo}/s/",
-                "geo": geo,
-                "geo_name": name,
-                "title": C["shub_title"].format(name=name),
-                "meta_desc": C["shub_desc"].format(name=name),
-                "h1": C["shub_h1"],
-                "intro": C["shub_intro"],
-                "list_label": C["list_label_topics"],
-                "tiles": stiles,
-            },
+        # ⛔ ХАБ РАЗДЕЛОВ `/s/` СНЕСЁН 19.08 (решение юзера: «дубль нам зачем»).
+        # После шага 5 список разделов живёт на хабе СТРАНЫ: те же плитки, те же
+        # счётчики, те же адреса. Второе оглавление тех же разделов ничего не
+        # добавляло, а стоило места в карте сайта и лишнего уровня в навигации.
+        # ⚠️ Страницы разделов `/s/<ключ>/` остаются — снесено только их оглавление.
+        # Старый адрес `/<язык>/<страна>/s/` уйдёт в редирект на хаб страны при
+        # следующей публикации: карта редиректов и так перегенерируется.
+
+    if rescue or homeless:  # не пристроено — сказать, а не проглотить
+        left = sum(len(v) for v in rescue.values())
+        print(
+            f"{geo}/{lang}: абзацев отсеянных меток не пристроено {left + homeless}"
+            + (f" (нет страницы раздела: {','.join(sorted(rescue))})" if rescue else "")
+            + (f", без раздела вовсе: {homeless}" if homeless else "")
+            + " — вернутся в хвост на следующем прогоне карва",
+            flush=True,
         )
-        n += 1
 
     # --- ГЕО-ХАБ (плитки разделов + мостики вопросов и разделов) ---
-    themed, loose = theme_tiles(fact_tiles, lang, geo, theme_urls)
+    tail_n = {(shelf_key_of(sv) or ""): len(sv.get("items") or []) for sv in shelves}
+    themed, loose = theme_tiles(fact_tiles, lang, geo, theme_urls, tail_n)
     tiles = list(fact_tiles) if themed is None else themed + loose
     if themed is not None:
         print(
@@ -2950,26 +2991,6 @@ def build_geo(geo, lang="ru"):
             f"на {len(fact_tiles)} адресов"
             + (f", карточками {len(loose)}" if loose else ""),
             flush=True,
-        )
-    if s_ok:
-        tiles.insert(
-            0,
-            {
-                "icon": "📚",
-                "title": C["bridge_shelf_title"],
-                "blurb": C["bridge_shelf_blurb"],
-                "url": f"/{lang}/{geo}/s/",
-            },
-        )
-    if q_ok:
-        tiles.insert(
-            0,
-            {
-                "icon": "❓",
-                "title": C["bridge_title"],
-                "blurb": C["bridge_blurb"],
-                "url": f"/{lang}/{geo}/q/",
-            },
         )
     # ⛔ НЕЧЕГО ПОКАЗАТЬ — НЕТ ХАБА (2026-08-12). Хаб писался безусловно, и гео с пустым
     # корпусом получало страницу из одной обвязки: 804 символа интро, CTA и подвала, ноль
@@ -2994,18 +3015,17 @@ def build_geo(geo, lang="ru"):
             "title": C["hub_title"].format(name=name),
             "meta_desc": C["hub_desc"].format(name=name),
             "h1": name,
+            # ⭐ ОДНО ПОЛЕ ПОИСКА (19.08): страны ищутся тем же индексом, что заголовки —
+            # хаб страны в нём и так есть. Флаг кладём здесь, где живёт справочник стран,
+            # а не в рендере: иначе знание о флагах разъедется по двум местам.
+            "search_title": f"{geo_flag(geo)} {name}".strip(),
             "intro": C["hub_intro"],
             "list_label": C["list_label_topics"],
             "tiles": tiles,
         },
     )
     n += 1
-    return (
-        n,
-        len(fact_tiles),
-        len(qgroups) if q_ok else 0,
-        len(shelves) if s_ok else 0,
-    )
+    return (n, len(fact_tiles), 0, len(shelves) if s_ok else 0)
 
 
 def langs_for(geo):
@@ -3021,7 +3041,8 @@ def build_home(lang, geos, counts=None):
     """Главная /<lang>/ — портал-вход: поиск + популярные (образный блёрб) + регионы.
     counts: {geo: число тем} для ранжирования «популярных» (из build_geo)."""
     HA = HOME_ABOUT[lang]
-    popular, regions, search_index = home_data(lang, geos, counts or {})
+    # `search_index` больше не пишем в страницу: поиск идёт одним файлом на язык.
+    popular, regions, _unused_index = home_data(lang, geos, counts or {})
     write(
         f"{lang}_home.json",
         {
@@ -3036,7 +3057,6 @@ def build_home(lang, geos, counts=None):
             "intro": HA["home_intro"],
             "popular": popular,
             "regions": regions,
-            "search_index": search_index,
         },
     )
 

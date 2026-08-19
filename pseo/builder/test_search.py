@@ -174,10 +174,14 @@ def test_field_on_every_page_and_index_not_inlined(tmp_path, monkeypatch):
         assert 'id="gq"' in html, f"{rel}: нет поля поиска"
         assert "/ru/search.json" in html, f"{rel}: не указан индекс"
         assert '"Сроки визы","/ru/' not in html, f"{rel}: индекс вшит в страницу"
+    # ⭐ 19.08 (решение юзера): поле ОДНО на весь сайт, и на главной оно то же самое —
+    # ищет и страны, и заголовки. Было два разных поля с двумя индексами.
     home = (out / "ru" / "index.html").read_text(encoding="utf-8")
-    assert (
-        'id="gq"' not in home
-    ), "на главной своё поле по странам — дубля быть не должно"
+    assert 'id="gq"' in home, "на главной нет общего поля"
+    assert 'id="q"' not in home.replace('id="gq"', ""), "осталось своё поле главной"
+    assert home.count('class="search') == 1, "на главной два поля"
+    # и индекс стран больше не вшивается в страницу
+    assert '"flag"' not in home and "search_index" not in home, "индекс стран вшит"
 
 
 def test_find_page_exists_and_carries_the_query(tmp_path, monkeypatch):

@@ -4,6 +4,9 @@
   <nav class="crumbs">
     <a href="/{{ t.html_lang }}/">{{ t.crumbs_home }}</a> /
     <a href="/{{ t.html_lang }}/{{ page.geo }}/">{{ page.geo_name }}</a> /
+    {%- if page.shelf_url %}
+    <a href="{{ page.shelf_url }}">{{ page.shelf_name }}</a> /
+    {%- endif %}
     <b>{{ page.intent_name }}</b>
   </nav>
 {% endblock %}

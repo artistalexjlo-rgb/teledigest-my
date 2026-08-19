@@ -98,6 +98,12 @@ MENU = {
         "Полки видам <гео>",
         ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-views"],
     ),
+    # ⭐ ОСЬ НАРЕЗКИ (канон §0.15): раздел КАЖДОЙ мухе. Без этого шага семьи для карва
+    # собираются по первому слову метки, и раздробленность возвращается каждым прогоном.
+    "flyshelf": (
+        "Раздел мухам <гео>",
+        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-flies"],
+    ),
     "reshelf": (
         "Пере-разложить полку <гео>",
         [
@@ -359,6 +365,8 @@ def pipeline_state():
         "no_shelf": [],
         "no_view_shelf": [],  # виды-страницы без полки (темы) → работа рта assign
         "no_view_shelf_n": 0,  # сколько таких видов всего — для честной подписи
+        "no_fly_shelf": [],  # гео, где у мух нет раздела (ось нарезки, канон §0.15)
+        "no_fly_shelf_n": 0,
         "stale_tax": [],  # есть полка, которой больше нет в таксономии → целевой режим
         "stale_tax_bounds": [],  # версия старая, но имена полок целы → только границы
         "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
@@ -381,6 +389,21 @@ def pipeline_state():
         _BRANCH_MIN = (
             10**9
         )  # не смогли прочитать порог → НЕ выдумываем, работы просто нет
+    # ⭐ Мухи без раздела считаем по СКЛАДУ РАЗМЕТКИ (`tags/`), а не по корпусу: раздел
+    # (канон §0.15) ставится МУХЕ, и работа шага измеряется именно там.
+    for f in sorted(glob.glob(f"{BRAIN}/tags/*.json")):
+        g = os.path.basename(f)[:-5]
+        if g.endswith("_fails"):
+            continue
+        try:
+            recs = json.load(open(f, encoding="utf-8"))
+        except Exception:
+            continue
+        n = len([r for r in recs if isinstance(r, dict) and not r.get("shelf_key")])
+        if n:
+            st["no_fly_shelf"].append(g)
+            st["no_fly_shelf_n"] += n
+
     try:
         files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
         st["geos"] = len(files)
@@ -1027,12 +1050,22 @@ def pipeline_steps(s):
             # (целевая пере-раскладка разобранной полки). Второе дешевле в восемь раз.
             "jobs": [("assign", g) for g in s["no_shelf"]]
             + [("reshelf", g) for g in s["stale_tax"]]
-            + [("assignv", g) for g in s["no_view_shelf"]],
+            + [("assignv", g) for g in s["no_view_shelf"]]
+            + [("flyshelf", g) for g in s["no_fly_shelf"]],
             "geos": [],
             "label": (
                 f"1. Полки — {len(s['no_shelf']) + len(s['stale_tax'])} гео хвост, "
-                f"{len(s['no_view_shelf'])} гео темы"
-                if (s["no_shelf"] or s["stale_tax"] or s["no_view_shelf"])
+                f"{len(s['no_view_shelf'])} гео темы, "
+                f"{len(s['no_fly_shelf'])} гео мухи"
+                # ⛔ Работа шага — ЛЮБАЯ из трёх, включая мух: без последнего условия
+                # подпись говорила «Хвост → полки», когда работа была только по мухам,
+                # и кнопка выглядела пустой при непустом задании.
+                if (
+                    s["no_shelf"]
+                    or s["stale_tax"]
+                    or s["no_view_shelf"]
+                    or s["no_fly_shelf"]
+                )
                 else "1. Хвост → полки"
             ),
             "note": (
