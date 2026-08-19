@@ -395,3 +395,35 @@ def test_section_page_html_has_tiles_and_tail(tmp_path, monkeypatch):
     html = pathlib.Path(render.build(src)).read_text(encoding="utf-8")
     assert "/ru/gr/visa-terms/" in html, "плитки разборов не отрисовались"
     assert "Заметка 0." in html, "заметки хвоста не отрисовались"
+
+
+def test_sections_hub_is_gone(tmp_path):
+    """Хаб разделов `/s/` снесён вместе с мостиком (решение юзера 19.08).
+
+    После шага 5 список разделов живёт на хабе СТРАНЫ: те же плитки, те же счётчики, те же
+    адреса. Второе оглавление ничего не добавляло. ⚠️ Страницы разделов остаются — снесено
+    только их оглавление, поэтому проверяем и то и другое: `/ru/gr/s/visa/` есть,
+    `/ru/gr/s/` нет, и ни одна ссылка на хабе на него не ведёт.
+    """
+    ru = {
+        "views": [
+            _view("Сроки визы", 9, "visa-terms", RU_NAME["visa"]),
+            _view("Паромы", 5, "ferries", RU_NAME["transport"]),
+        ],
+        "shelves": [
+            _shelf("visa", RU_NAME["visa"]),
+            _shelf("transport", RU_NAME["transport"]),
+        ],
+    }
+    hub, files = _build(tmp_path, "gr", corpora={"ru": ru})
+    paths = set(_by_path(files))
+    assert "/ru/gr/s/visa/" in paths, paths
+    assert "/ru/gr/s/" not in paths, "оглавление разделов снова собирается"
+    urls = [t.get("url", "") for t in hub["tiles"]]
+    assert "/ru/gr/s/" not in urls, urls
+    # и ни на одной собранной странице нет ссылки на него
+    for d in files.values():
+        for t in d.get("tiles") or []:
+            assert t.get("url") != "/ru/gr/s/", d.get("path")
+        for c in d.get("chips") or []:
+            assert c.get("url") != "/ru/gr/s/", d.get("path")

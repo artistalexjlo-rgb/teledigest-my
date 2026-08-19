@@ -2963,32 +2963,13 @@ def build_geo(geo, lang="ru"):
                 page["questions"] = [it["text"] for it in sv["items"]] + saved
             write(f"{lang}_{geo}_s_{sk}.json", page)
             n += 1
-        stiles = [
-            {
-                "icon": icon(sv["shelf"]),
-                "title": sv["shelf"],
-                "blurb": blurb(C, "shelf", len(sv["items"])),
-                "url": f"/{lang}/{geo}/s/{shelf_slug(sv)}/",
-            }
-            for sv in shelves
-        ]
-        write(
-            f"{lang}_{geo}_s_hub.json",
-            {
-                "lang": lang,
-                "template": "index.html.j2",
-                "path": f"/{lang}/{geo}/s/",
-                "geo": geo,
-                "geo_name": name,
-                "title": C["shub_title"].format(name=name),
-                "meta_desc": C["shub_desc"].format(name=name),
-                "h1": C["shub_h1"],
-                "intro": C["shub_intro"],
-                "list_label": C["list_label_topics"],
-                "tiles": stiles,
-            },
-        )
-        n += 1
+        # ⛔ ХАБ РАЗДЕЛОВ `/s/` СНЕСЁН 19.08 (решение юзера: «дубль нам зачем»).
+        # После шага 5 список разделов живёт на хабе СТРАНЫ: те же плитки, те же
+        # счётчики, те же адреса. Второе оглавление тех же разделов ничего не
+        # добавляло, а стоило места в карте сайта и лишнего уровня в навигации.
+        # ⚠️ Страницы разделов `/s/<ключ>/` остаются — снесено только их оглавление.
+        # Старый адрес `/<язык>/<страна>/s/` уйдёт в редирект на хаб страны при
+        # следующей публикации: карта редиректов и так перегенерируется.
 
     if rescue or homeless:  # не пристроено — сказать, а не проглотить
         left = sum(len(v) for v in rescue.values())
@@ -3010,16 +2991,6 @@ def build_geo(geo, lang="ru"):
             f"на {len(fact_tiles)} адресов"
             + (f", карточками {len(loose)}" if loose else ""),
             flush=True,
-        )
-    if s_ok:
-        tiles.insert(
-            0,
-            {
-                "icon": "📚",
-                "title": C["bridge_shelf_title"],
-                "blurb": C["bridge_shelf_blurb"],
-                "url": f"/{lang}/{geo}/s/",
-            },
         )
     # ⛔ НЕЧЕГО ПОКАЗАТЬ — НЕТ ХАБА (2026-08-12). Хаб писался безусловно, и гео с пустым
     # корпусом получало страницу из одной обвязки: 804 символа интро, CTA и подвала, ноль
