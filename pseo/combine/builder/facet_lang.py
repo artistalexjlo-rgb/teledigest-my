@@ -409,7 +409,11 @@ def stamp_keys(geo):
     """
     fn = f"{HERE}/out_facet/{geo}.json"
     d = json.load(open(fn, encoding="utf-8"))
-    views = [v for v in d.get("views_by_task") or [] if len(v.get("items") or []) >= 4]
+    views = [
+        v
+        for v in d.get("views_by_task") or []
+        if len(v.get("items") or []) >= _tax.PAGE_MIN
+    ]
     # (узел, поле-с-меткой): у вида метка в `zadacha`, у ветви — в `name`
     nodes = [(v, "zadacha") for v in views]
     for src in list(views) + list(d.get("shelves") or []):
@@ -452,7 +456,7 @@ def run(geo, lang):
         print(f"{geo}/{lang}: старый формат (без groups) — пересборка", flush=True)
     src = json.load(open(f"{HERE}/out_facet/{geo}.json", encoding="utf-8"))
     views = [
-        v for v in src["views_by_task"] if len(v["items"]) >= 4
+        v for v in src["views_by_task"] if len(v["items"]) >= _tax.PAGE_MIN
     ]  # только страничные
     # ⭐ ПОЛКИ ТОЖЕ ПЕРЕВОДИМ (2026-07-27). Раньше набор собирался ТОЛЬКО из страничных
     # видов, поэтому текстов хвоста в переводе не было и собрать полку было не из чего:
@@ -568,7 +572,7 @@ def run(geo, lang):
                     "uslovie": it.get("uslovie"),
                 }
             )
-        if len(items) >= 4:  # после отсева мог упасть ниже порога
+        if len(items) >= _tax.PAGE_MIN:  # после отсева мог упасть ниже порога
             # `src` — РУССКАЯ метка. Пишем, чтобы следующий прогон соединял узлы точно, а не
             # вложенностью составов: эвристика нужна лишь файлам прошлого поколения.
             tv = {"zadacha": lbl, "items": items, "src": v["zadacha"]}

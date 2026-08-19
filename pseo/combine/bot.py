@@ -422,7 +422,7 @@ def pipeline_state():
             vs = [
                 v
                 for v in d.get("views_by_task", [])
-                if len(v.get("groups") or v.get("items") or []) >= 4
+                if len(v.get("groups") or v.get("items") or []) >= _tax.PAGE_MIN
             ]
             st["views"] += len(vs)
             st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
@@ -470,7 +470,7 @@ def pipeline_state():
                 tail = len(d.get("prochee") or []) + sum(
                     1
                     for v in d.get("views_by_task", [])
-                    if len(v.get("items") or []) < 4
+                    if len(v.get("items") or []) < _tax.PAGE_MIN
                 )
                 if tail:
                     st["no_shelf"].append(geo)
@@ -498,7 +498,7 @@ def pipeline_state():
             nvs = [
                 v
                 for v in d.get("views_by_task", [])
-                if len(v.get("items") or []) >= 4 and not v.get("shelf")
+                if len(v.get("items") or []) >= _tax.PAGE_MIN and not v.get("shelf")
             ]
             if nvs:
                 st["no_view_shelf"].append(geo)

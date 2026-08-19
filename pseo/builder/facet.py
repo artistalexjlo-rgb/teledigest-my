@@ -417,7 +417,7 @@ def deals_for_pair(geo, shelf_key, fails=None):
     by_name = {n: k for k, n, _ in tax.SHELVES}
     mass = {}
     for v in page.get("views_by_task") or []:
-        if len(v.get("items") or []) < PAGE_MIN:
+        if len(v.get("items") or []) < tax.PAGE_MIN:
             continue
         if by_name.get(v.get("shelf") or "") != shelf_key:
             continue
@@ -711,7 +711,6 @@ def build_views_by_carve(tagged, fails=None):
             fams.setdefault(_first_word(z), set()).add(r["id"])
 
     views = {}
-    carved_fids = set()
     dropped = []  # сборные метки: отсев обязан быть ВИДЕН, а не молчалив
     # ⭐ ОСЬ = РАЗДЕЛ (канон §0.15). Раздел стоит у мухи (`shelf_key`, рот `assign`),
     # поэтому семья — «страна × раздел», а не первое слово метки.
@@ -769,15 +768,12 @@ def build_views_by_carve(tagged, fails=None):
             if not deals:
                 continue  # список не вышел → раздел в хвост, выдумывать дела нельзя
             for name, dfids in assign_to_deals(fids, by_id, deals, fails, skey).items():
-                if len(dfids) < 2:
-                    continue  # дело из одной мухи страницей не станет → в хвост
                 why = tax.bad_label(name)
                 if why:
                     dropped.append((name, len(dfids), why))
                     continue
                 for fid in dfids:
                     add(name, fid)
-                    carved_fids.add(fid)
     else:
         for w, fset in fams.items():
             fids = list(fset)
@@ -786,8 +782,6 @@ def build_views_by_carve(tagged, fails=None):
             for it in carve_family(
                 fids, by_id, fails, w
             ):  # плотная семья: carve по текстам
-                if len(it["ids"]) < 2:
-                    continue  # одиночный интент = тонкий абзац → в хвост, не 1-мушь-страница
                 # ⛔ СБОРНАЯ МЕТКА — БРАК НАРЕЗКИ, А НЕ ТЕМА (канон §0.13). Вид НЕ пишем:
                 # мухи остаются в хвосте и раскладываются по разделам обычным порядком.
                 why = tax.bad_label(it["name"])
@@ -796,7 +790,6 @@ def build_views_by_carve(tagged, fails=None):
                     continue
                 for fid in it["ids"]:
                     add(it["name"], fid)
-                    carved_fids.add(fid)
 
     # страховка: дедуп мух в карв-виде по id (одна муха могла попасть дважды на стыке семей)
     for name, items in views.items():
@@ -807,6 +800,20 @@ def build_views_by_carve(tagged, fails=None):
                 uniq.append(it)
         views[name] = uniq
 
+    # ⛔ ПРОСЕВШИЙ ВИД НЕ ОСТАЁТСЯ В КОРПУСЕ. После дедупа вид мог упасть ниже порога страницы,
+    # и тогда в файле гео лежала бы «вторая правда»: страницей он не станет (её гейт тот же
+    # порог), а вид есть — значит и счётчики пульта, и переводы считали бы работу, которой нет.
+    # Потеря НЕ молчаливая: печатаем, а мухи уходят в хвост предикатом ниже.
+    thin = [n for n, items in views.items() if len(items) < tax.PAGE_MIN]
+    for n in thin:
+        views.pop(n)
+    if thin:
+        print(
+            f"  видов просело ниже порога страницы {len(thin)} -> мухи в хвост: "
+            + "; ".join(repr(n) for n in thin[:5]),
+            flush=True,
+        )
+
     if dropped:
         print(
             f"  сборных меток отсеяно {len(dropped)} "
@@ -815,8 +822,12 @@ def build_views_by_carve(tagged, fails=None):
             flush=True,
         )
 
-    # ХВОСТ = мухи, не попавшие ни в один плотный карв-вид → раскладка по таксономии
-    tail_fids = [fid for fid in by_id if fid not in carved_fids]
+    # ⛔ ХВОСТ = мухи, не попавшие НИ НА ОДНУ СТРАНИЦУ. Раньше здесь стояло «не в ВИДЕ»
+    # (`carved_fids`), и через эту щель абзацы уходили с сайта: дело из 2-3 мух видом
+    # становилось, страницей — нет, а в хвост муха уже не шла. Порог тут НЕ применяем второй
+    # раз: просевшие виды сняты выше, значит в `views` остались только страничные.
+    on_page = {it["id"] for items in views.values() for it in items}
+    tail_fids = [fid for fid in by_id if fid not in on_page]
     shelves, prochee = assign_tail(tail_fids, by_id, fails)
     return views, shelves, prochee
 
@@ -1046,9 +1057,6 @@ def run(geo, limit=None):
     return new_n
 
 
-PAGE_MIN = 4  # гейт страницы (зеркало pages.py): вид <4 мух страницей не станет
-
-
 # ── ПОЛКА ВИДУ: тот же рот `assign`, что раскладывает хвост (заказ юзера 13.08) ──
 # Ось адресации у видов — формулировка метки задачи, и уровня темы у них не было: у Греции
 # 62 вида при 8 настоящих темах, а хаб вываливал 63 ссылки плоским списком. На этом поле
@@ -1081,7 +1089,7 @@ def assign_views(geo, fails=None):
     views = [
         (i, v)
         for i, v in enumerate(page.get("views_by_task") or [])
-        if len(v.get("items") or []) >= PAGE_MIN
+        if len(v.get("items") or []) >= tax.PAGE_MIN
     ]
     todo = [(i, v) for i, v in views if not v.get("shelf")]
     if not todo:
@@ -1147,7 +1155,7 @@ def run_assign_tail(geo):
     on_page = {
         it["id"]
         for v in page.get("views_by_task", [])
-        if len(v["items"]) >= PAGE_MIN
+        if len(v["items"]) >= tax.PAGE_MIN
         for it in v["items"]
     }
     tail = [fid for fid in by_id if fid not in on_page]
