@@ -86,3 +86,33 @@ def test_menu_calls_the_new_flag():
     assert any(a.endswith("facet.py") for a in argv), argv
     assert "--assign-flies" in argv, argv
     assert "{geo}" in argv, argv
+
+
+def test_control_button_takes_a_pair(monkeypatch):
+    """Кнопка КОНТРОЛЯ: «Дела раздела» берёт пару «гео:раздел» и зовёт точечный вход.
+
+    ⛔ Повод — забор 19.08: боевые рты запускает ЮЗЕР из пульта, где есть СТОП и отчёт в
+    чат. Я добавил только флаг командной строки, то есть контроль запускать было нечем.
+    Проверяем СМЫСЛ команды и разбор пары, а не позиции в списке.
+    """
+    assert "deals" in bot.MENU
+    argv = bot.MENU["deals"][1]
+    assert any(a.endswith("facet.py") for a in argv), argv
+    assert "--deals-only" in argv and "{geo}" in argv and "{shelf}" in argv, argv
+    # разбор пары «гео:раздел» — то же правило, что применит `start()`
+    geo, shelf = "br:finance".split(":", 1)
+    built = [a.replace("{geo}", geo).replace("{shelf}", shelf) for a in argv]
+    assert "br" in built and "finance" in built, built
+    assert "{geo}" not in " ".join(built) and "{shelf}" not in " ".join(built), built
+
+
+def test_pair_parsing_lives_before_the_stale_shelf_branch():
+    """Пара разбирается ДО общей логики `{shelf}`.
+
+    Иначе кнопка контроля пошла бы искать УСТАРЕВШУЮ полку (`stale_shelf`) и отказалась бы
+    работать на живой таксономии — а контроль нужен именно на ней.
+    """
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    i = src.index('if geo and ":" in geo:')
+    j = src.index('elif any("{shelf}" in a for a in argv):')
+    assert i < j, "разбор пары оказался после ветки про устаревшую полку"
