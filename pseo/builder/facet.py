@@ -399,6 +399,45 @@ DEAL_ASSIGN_SYS = (
 )
 
 
+def deals_for_pair(geo, shelf_key, fails=None):
+    """КОНТРОЛЬ: список дел ОДНОГО раздела одного гео — ровно ОДИН вызов рта.
+
+    Зачем отдельный вход: проход А в боевом прогоне идёт по всем разделам гео (замер сухого
+    прогона 19.08: 5–13 вызовов на гео), и «проверить метод на четырёх парах» без этого
+    входа означало бы 87 вызовов вместо четырёх.
+
+    Раздел мухам может быть ещё не проставлен (шаг `--assign-flies` не прогонялся), поэтому
+    метки берём из ВИДОВ этого раздела — того же материала, что увидит проход А в бою.
+    """
+    fn = f"out_facet/{geo}.json"
+    if not os.path.exists(fn):
+        print(f"{geo}: корпуса нет", flush=True)
+        return []
+    page = json.load(open(fn, encoding="utf-8"))
+    by_name = {n: k for k, n, _ in tax.SHELVES}
+    mass = {}
+    for v in page.get("views_by_task") or []:
+        if len(v.get("items") or []) < PAGE_MIN:
+            continue
+        if by_name.get(v.get("shelf") or "") != shelf_key:
+            continue
+        z = (v.get("zadacha") or "").strip()
+        if z:
+            mass[z] = mass.get(z, 0) + len(v["items"])
+    if not mass:
+        print(f"{geo}/{shelf_key}: меток нет — контролировать нечего", flush=True)
+        return []
+    print(
+        f"{geo}/{shelf_key}: меток {len(mass)}, абзацев {sum(mass.values())}",
+        flush=True,
+    )
+    deals = carve_deals(mass, fails, f"{geo}/{shelf_key}")
+    print(f"{geo}/{shelf_key}: ДЕЛ {len(deals)}", flush=True)
+    for d in deals:
+        print(f"    - {d}", flush=True)
+    return deals
+
+
 def assign_fly_shelves(geo, fails=None):
     """Раздел КАЖДОЙ размеченной мухе гео. Пишет `shelf_key` в `tags/<geo>.json`.
 
@@ -1191,10 +1230,15 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(
             "usage: facet.py <geo> [--limit N] [--assign-tail] [--assign-flies] "
+            "[--deals-only <ключ раздела>] "
             '[--assign-views] [--reassign-shelf "<полка>"] | facet.py --mature'
         )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--deals-only" in sys.argv:
+        # КОНТРОЛЬ метода: один вызов рта на одну пару «гео × раздел» (канон §0.15).
+        deals_for_pair(geo, sys.argv[sys.argv.index("--deals-only") + 1], [])
+        sys.exit(0)
     if "--assign-flies" in sys.argv:
         # шаг «раздел мухам» — ось нарезки (канон §0.15). Запускается ПУЛЬТОМ.
         assign_fly_shelves(geo, [])

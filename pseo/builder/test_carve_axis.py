@@ -246,3 +246,62 @@ def test_prompts_carry_the_rules():
     keys = [k for k, _n, _d in tax.SHELVES]
     for k in keys:
         assert k in facet.FLY_SHELF_SYS, f"раздел {k} не назван в промпте"
+
+
+def test_control_entry_costs_one_call(tmp_path, monkeypatch):
+    """Точечный вход для КОНТРОЛЯ: одна пара «гео × раздел» — РОВНО один вызов рта.
+
+    ⛔ Повод — сухой прогон 19.08. Я оценивал контроль метода в «4 вызова», а проход А в
+    боевом прогоне идёт по ВСЕМ разделам гео: замер дал 5–13 вызовов А и 6–31 вызов Б на
+    одно гео, 87 на четыре. Без этого входа «проверить метод на четырёх парах» означало бы
+    боевой прогон четырёх стран вместо четырёх вызовов.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "out_facet").mkdir()
+    visa = tax.SHELF_NAMES[[k for k, _n, _d in tax.SHELVES].index("visa")]
+    tr = tax.SHELF_NAMES[[k for k, _n, _d in tax.SHELVES].index("transport")]
+    import json as _json
+
+    def _v(z, n, shelf):
+        return {
+            "zadacha": z,
+            "shelf": shelf,
+            "items": [{"id": f"{z}{i}", "text": "Текст."} for i in range(n)],
+        }
+
+    (tmp_path / "out_facet" / "gr.json").write_text(
+        _json.dumps(
+            {
+                "geo": "gr",
+                "views_by_task": [
+                    _v("Сроки визы", 9, visa),
+                    _v("Отказы", 6, visa),
+                    _v("Паромы", 5, tr),  # ДРУГОЙ раздел — его трогать не должны
+                ],
+                "shelves": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    seen = []
+
+    def fake_deals(mass, fails=None, family=None):
+        seen.append((family, dict(mass)))
+        return ["Сроки и отказы"]
+
+    monkeypatch.setattr(facet, "carve_deals", fake_deals)
+    out = facet.deals_for_pair("gr", "visa", [])
+    assert out == ["Сроки и отказы"], out
+    assert len(seen) == 1, f"вызовов рта {len(seen)}, ожидался один"
+    family, mass = seen[0]
+    assert family == "gr/visa", family
+    assert set(mass) == {"Сроки визы", "Отказы"}, mass  # паромов тут быть не должно
+    assert mass["Сроки визы"] == 9, mass  # масса = абзацы, по ней рот и сводит
+
+
+def test_control_entry_is_in_cli():
+    """Контроль запускается командой, а не из моей головы: у facet есть флаг."""
+    src = (HERE / "facet.py").read_text(encoding="utf-8")
+    assert '"--deals-only" in sys.argv' in src, "флаг не разбирается"
+    assert "deals_for_pair(geo" in src, "флаг ничего не зовёт"
