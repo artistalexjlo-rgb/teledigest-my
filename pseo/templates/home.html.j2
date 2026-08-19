@@ -9,10 +9,6 @@
   <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.intro | safe }}</div></div>
   {%- endif %}
 
-  <div class="search">{{ oct(OCT_BOX, 10, 3) }}
-    <input id="q" placeholder="{{ t.home_search_ph }}" autocomplete="off" aria-label="{{ t.home_search_ph }}">
-  </div>
-  <div id="sugg"></div>
 
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
   {%- if cta %}
@@ -50,24 +46,4 @@
     {%- endfor %}
   </div>
   {%- endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-/* поиск по странам: подсказки → страница страны */
-(function(){
-  var IDX={{ page.search_index | tojson }};
-  var q=document.getElementById('q'), sg=document.getElementById('sugg');
-  if(!q) return;
-  q.addEventListener('input',function(){
-    var v=q.value.trim().toLowerCase(); if(!v){sg.style.display='none';return;}
-    var m=IDX.filter(function(c){return c.name.toLowerCase().indexOf(v)>=0}).slice(0,8);
-    sg.innerHTML = m.length
-      ? m.map(function(c){return '<a href="'+c.url+'">'+c.flag+' '+c.name+'</a>'}).join('')
-      : '<a class="nores">'+{{ t.home_search_none | tojson }}+'</a>';
-    sg.style.display='block';
-  });
-  document.addEventListener('click',function(e){if(!e.target.closest('.search')&&e.target.id!=='q')sg.style.display='none';});
-})();
-</script>
 {% endblock %}

@@ -263,7 +263,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         # иначе он обещал бы страницы, которые отсеялись (без адреса, метка не перевелась,
         # гео пустое) — то есть поиск вёл бы в 404. Служебные страницы (`noindex`: шлюз,
         # сама страница поиска) в индекс не идут.
-        title = page.get("intent_name") or page.get("h1")
+        title = page.get("search_title") or page.get("intent_name") or page.get("h1")
         if title and page.get("lang") and not page.get("noindex"):
             search.setdefault(page["lang"], []).append([title, page["path"]])
         if _indexable(page):

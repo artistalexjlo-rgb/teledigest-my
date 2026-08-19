@@ -68,7 +68,9 @@
       ⛔ Где поле НЕ рисуем: на главной у неё своё (поиск по странам), а на самой странице
       поиска поле стоит в содержимом и уже заполнено запросом. Первый заход рисовал два
       поля подряд — видно на превью сразу, тестами нет. #}
-  {%- if page.template not in ('home.html.j2', 'find.html.j2') %}
+  {#- ⭐ 19.08: поле стоит и на ГЛАВНОЙ — одно поле на весь сайт, ищет и страны, и
+      заголовки. Своё поле главной (по названиям стран, индекс инлайном) снято. #}
+  {%- if page.template != 'find.html.j2' %}
   <div class="search gsearch">{{ oct(OCT_BOX, 10, 3) }}
     <input id="gq" placeholder="{{ t.search_ph }}" autocomplete="off" aria-label="{{ t.search_ph }}"
            data-find="/{{ t.html_lang }}/find/" data-index="/{{ t.html_lang }}/search.json"

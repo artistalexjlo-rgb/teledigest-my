@@ -3015,6 +3015,10 @@ def build_geo(geo, lang="ru"):
             "title": C["hub_title"].format(name=name),
             "meta_desc": C["hub_desc"].format(name=name),
             "h1": name,
+            # ⭐ ОДНО ПОЛЕ ПОИСКА (19.08): страны ищутся тем же индексом, что заголовки —
+            # хаб страны в нём и так есть. Флаг кладём здесь, где живёт справочник стран,
+            # а не в рендере: иначе знание о флагах разъедется по двум местам.
+            "search_title": f"{geo_flag(geo)} {name}".strip(),
             "intro": C["hub_intro"],
             "list_label": C["list_label_topics"],
             "tiles": tiles,
@@ -3037,7 +3041,8 @@ def build_home(lang, geos, counts=None):
     """Главная /<lang>/ — портал-вход: поиск + популярные (образный блёрб) + регионы.
     counts: {geo: число тем} для ранжирования «популярных» (из build_geo)."""
     HA = HOME_ABOUT[lang]
-    popular, regions, search_index = home_data(lang, geos, counts or {})
+    # `search_index` больше не пишем в страницу: поиск идёт одним файлом на язык.
+    popular, regions, _unused_index = home_data(lang, geos, counts or {})
     write(
         f"{lang}_home.json",
         {
@@ -3052,7 +3057,6 @@ def build_home(lang, geos, counts=None):
             "intro": HA["home_intro"],
             "popular": popular,
             "regions": regions,
-            "search_index": search_index,
         },
     )
 
