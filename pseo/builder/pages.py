@@ -1,4 +1,4 @@
-"""pages.py — из BUILT-данных гео (out_facet[_<lang>]/<geo>.json + out_questions[_<lang>]/<geo>.json)
+"""pages.py — из BUILT-данных гео (out_facet[_<lang>]/<geo>.json)
 собирает portal-схему data/ (октагон-шаблон): гео-хаб + факт-тема-страницы + вопрос-хаб/темы.
 Оба контура, единообразно. Дизайн гарантирован шаблоном (page/qlist/index.html.j2).
 
@@ -2489,10 +2489,6 @@ def _facet_dir(lang):
     return f"{BUILT}/out_facet" if lang == "ru" else f"{BUILT}/out_facet_{lang}"
 
 
-def _ques_dir(lang):
-    return f"{BUILT}/out_questions" if lang == "ru" else f"{BUILT}/out_questions_{lang}"
-
-
 # ── ПЛИТКИ РАЗДЕЛОВ НА ХАБЕ ГЕО (канон §0.12: «хаб страны = плитки полок со счётчиком;
 #    адреса живут ВНУТРИ плитки, хаб их не перечисляет»).
 #    Замер до правила: `/ru/gr/` — 63 ссылки плоским списком, `/ru/any/` — 87. После
@@ -2636,7 +2632,6 @@ def build_geo(geo, lang="ru"):
     # «где» для ru-строк («{tl} в Бразилии»); прочие языки — имя как есть
     namep = GEO_LOC.get(geo, f"в {name}") if lang == "ru" else name
     facts = load(f"{_facet_dir(lang)}/{geo}.json")
-    ques = load(f"{_ques_dir(lang)}/{geo}.json")
     n = 0
 
     def tl(t):
@@ -2803,75 +2798,14 @@ def build_geo(geo, lang="ru"):
             }
         )
 
-    # --- ВОПРОС-КОНТУР (хаб + темы под /<lang>/<geo>/q/) ---
-    q_ok = False
-    qgroups = [g for g in (ques or {}).get("groups", []) if len(g["questions"]) >= 4]
-    if qgroups:
-        q_ok = True
-        qgroups = [g for g in qgroups if addr(g, "tema")]  # безадресные — не страницы
-        q_sibs = [
-            {
-                "tema": g["tema"],
-                "slug": addr(g, "tema"),
-                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
-            }
-            for g in qgroups
-        ]
-        for g in qgroups:
-            s = addr(g, "tema")
-            page = {
-                "lang": lang,
-                "template": "qlist.html.j2",
-                "path": f"/{lang}/{geo}/q/{s}/",
-                "shared_tail": bool(g.get("key")),
-                "geo": geo,
-                "geo_name": name,
-                "intent_name": g["tema"],
-                "title": C["q_title"].format(name=name, tl=tl(g["tema"])),
-                "meta_desc": C["q_desc"].format(name=name, tl=tl(g["tema"])),
-                "h1": pick(C["QHEAD"], geo + s + "q").format(t=g["tema"]),
-                "intro": C["q_intro"],
-                "list_label": C["q_list_label"],
-                "questions": g["questions"],
-                "chips": [
-                    {
-                        "icon": icon(x["tema"]),
-                        "label": x["tema"],
-                        "url": x["url"],
-                        "soon": False,
-                    }
-                    for x in q_sibs
-                    if x["slug"] != s
-                ][:6],
-            }
-            write(f"{lang}_{geo}_q_{s}.json", page)
-            n += 1
-        qtiles = [
-            {
-                "icon": icon(g["tema"]),
-                "title": g["tema"],
-                "blurb": blurb(C, "q", len(g["questions"])),
-                "url": f"/{lang}/{geo}/q/{addr(g, 'tema')}/",
-            }
-            for g in qgroups
-        ]
-        write(
-            f"{lang}_{geo}_q_hub.json",
-            {
-                "lang": lang,
-                "template": "index.html.j2",
-                "path": f"/{lang}/{geo}/q/",
-                "geo": geo,
-                "geo_name": name,
-                "title": C["qhub_title"].format(name=name),
-                "meta_desc": C["qhub_desc"].format(name=name),
-                "h1": C["qhub_h1"],
-                "intro": C["qhub_intro"],
-                "list_label": C["list_label_topics"],
-                "tiles": qtiles,
-            },
-        )
-        n += 1
+    # ⛔ ВОПРОС-КОНТУР `/q/` СНЕСЁН 19.08 (решение юзера: «убрать и забыть»).
+    # Он был третьим контуром в дереве и жил вне логики «страна → раздел → разбор»:
+    # свой источник данных (`out_questions`), своя навигация, свои мостики. Держался на
+    # надежде, что вырастет, и не вырос: 5 стран, 20 собираемых страниц, 12 выложенных.
+    # Основание фактом, а не вкусом: Search Console за три месяца — 0 показов и 0
+    # запросов на весь контур, при 550 показах у разборов.
+    # ⚠️ Данные `out_questions/` не удаляем: они ничего не стоят на диске, решение о них
+    # отдельное. Но СОБИРАТЬ из них страницы перестаём — иначе это ружьё на стене.
 
     # Разборы по разделам — для плиток НА СТРАНИЦЕ РАЗДЕЛА (ниже) и для плиток раздела на
     # хабе (в самом конце). Считаем ДО того, как `theme_tiles` разберёт карточки.
@@ -3087,16 +3021,6 @@ def build_geo(geo, lang="ru"):
                 "url": f"/{lang}/{geo}/s/",
             },
         )
-    if q_ok:
-        tiles.insert(
-            0,
-            {
-                "icon": "❓",
-                "title": C["bridge_title"],
-                "blurb": C["bridge_blurb"],
-                "url": f"/{lang}/{geo}/q/",
-            },
-        )
     # ⛔ НЕЧЕГО ПОКАЗАТЬ — НЕТ ХАБА (2026-08-12). Хаб писался безусловно, и гео с пустым
     # корпусом получало страницу из одной обвязки: 804 символа интро, CTA и подвала, ноль
     # ссылок внутрь. Замер по живому зеркалу: 33 таких хаба, у всех НОЛЬ видов и 1–8 мух на
@@ -3126,12 +3050,7 @@ def build_geo(geo, lang="ru"):
         },
     )
     n += 1
-    return (
-        n,
-        len(fact_tiles),
-        len(qgroups) if q_ok else 0,
-        len(shelves) if s_ok else 0,
-    )
+    return (n, len(fact_tiles), 0, len(shelves) if s_ok else 0)
 
 
 def langs_for(geo):

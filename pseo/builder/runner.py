@@ -106,16 +106,6 @@ def build_facet(geo, chunk):
     return (int(m.group(1)) if m else 0), (int(rem.group(1)) if rem else None)
 
 
-def build_questions(geo):
-    subprocess.run(
-        [PY, "questions_page.py", geo, "--limit", "120"],
-        cwd=HERE,
-        env={**os.environ, "LC_ALL": "C.UTF-8", "PYTHONIOENCODING": "utf-8"},
-        capture_output=True,
-        text=True,
-    )
-
-
 def main():
     while True:
         if os.path.exists(STOP):
@@ -132,8 +122,6 @@ def main():
             new_n, remaining = build_facet(geo, CHUNK)
             if new_n < 0:
                 break  # окно
-            if new_n > 0:
-                build_questions(geo)  # вопросы дёшевы, обновим срез
             if remaining == 0:  # stamp ТОЛЬКО по честному остатку (сбои мух ≠ исчерпан)
                 stamps[geo] = mx
                 save(STAMPS, stamps)

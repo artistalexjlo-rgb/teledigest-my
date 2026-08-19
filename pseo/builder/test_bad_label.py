@@ -398,3 +398,84 @@ def test_rescue_works_when_the_tail_has_dedup_groups(tmp_path):
         assert f"Спасаемый абзац номер {i}." in text, f"абзац {i} потерян на аккордеоне"
     assert "Заметка хвоста 0." in text, "свой хвост раздела пропал"
     assert "/ru/gr/visa-terms/" in text, "плитка уцелевшего разбора пропала со раздела"
+
+
+def test_question_contour_is_gone(tmp_path):
+    """Вопрос-контур `/q/` снесён (решение юзера 19.08: «убрать и забыть»).
+
+    Основание фактом: 0 показов и 0 запросов за три месяца по Search Console при 550
+    показах у разборов; 5 стран, 20 собираемых страниц, 12 выложенных. Держать третий
+    контур в дереве ради надежды — это ружьё на стене.
+    """
+    import json
+    import os
+
+    import pages as pg
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (tmp_path / "out_facet").mkdir()
+    (tmp_path / "out_questions").mkdir()
+    # данные вопросов НА МЕСТЕ — и всё равно ни одной страницы из них быть не должно
+    (tmp_path / "out_questions" / "gr.json").write_text(
+        json.dumps(
+            {
+                "geo": "gr",
+                "groups": [
+                    {
+                        "tema": "Вопросы про визы",
+                        "key": "visa-questions",
+                        "questions": [f"Вопрос {i}?" for i in range(6)],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    items = [{"id": f"i{i}", "text": f"Совет {i}. Подробность."} for i in range(9)]
+    (tmp_path / "out_facet" / "gr.json").write_text(
+        json.dumps(
+            {
+                "geo": "gr",
+                "views_by_task": [
+                    {
+                        "zadacha": "Сроки оформления визы",
+                        "key": "visa-terms",
+                        "items": items,
+                        "groups": [
+                            {"rep": x["id"], "ids": [x["id"]], "n": 1} for x in items
+                        ],
+                    }
+                ],
+                "shelves": [],
+                "prochee": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    built, data = pg.BUILT, pg.DATA
+    pg.BUILT, pg.DATA = str(tmp_path), str(out)
+    try:
+        pg.build_geo("gr", "ru")
+    finally:
+        pg.BUILT, pg.DATA = built, data
+    paths = {
+        json.loads((out / f).read_text(encoding="utf-8")).get("path")
+        for f in os.listdir(out)
+    }
+    assert "/ru/gr/visa-terms/" in paths, paths
+    assert not [p for p in paths if p and "/q/" in p], paths
+    hub = next(
+        json.loads((out / f).read_text(encoding="utf-8"))
+        for f in os.listdir(out)
+        if f.endswith("gr_hub.json")
+    )
+    urls = [t.get("url", "") for t in hub["tiles"]]
+    assert not [u for u in urls if u.endswith("/q/")], urls
+    src = (HERE / "pages.py").read_text(encoding="utf-8")
+    assert "_ques_dir" not in src, "остался читатель данных вопросов"
+    # ⛔ Проверяем ПОСТРОЕНИЕ адреса, а не упоминание: первая версия ловила `/q/` в моём
+    # же комментарии о сносе и краснела на верном коде.
+    assert "{geo}/q/" not in src, "контур ещё строит адреса вопросов"
