@@ -149,3 +149,41 @@ def test_stalled_geo_goes_first_in_the_queue(tmp_path, monkeypatch):
     assert any(
         x["geo"] == "gr" and x["broken"] for x in bot.facet_queue(st)
     ), bot.facet_queue(st)
+
+
+def test_probe_command_takes_a_pair_and_writes_nothing():
+    """Проба новой разметки (§0.19): «гео:сколько», точечный вход, ничего не пишет.
+
+    ⛔ Смысл пробы — решение глазом юзера ДО перепрогона корпуса (~1 050 вызовов). Если проба
+    начнёт писать в `tags/`, она перестанет быть пробой: испортит боевую разметку, и сравнивать
+    станет нечего. Поэтому проверяем и команду, и отсутствие записи в самой функции.
+    """
+    assert "probe" in bot.MENU
+    argv = bot.MENU["probe"][1]
+    assert any(a.endswith("facet.py") for a in argv), argv
+    assert "--probe" in argv and "{geo}" in argv and "{shelf}" in argv, argv
+    geo, n = "me:100".split(":", 1)
+    built = [a.replace("{geo}", geo).replace("{shelf}", n) for a in argv]
+    assert "me" in built and "100" in built, built
+
+    # ⛔ Читаем ОСНОВНОЕ дерево, а не копию пульта: копию синхронизируют вручную, и сторож,
+    # смотрящий в неё, зелен на правке оригинала — так эта мутация и прошла с первого раза.
+    src = (HERE.parent / "builder" / "facet.py").read_text(encoding="utf-8")
+    body = src[src.index("def probe_tags(") : src.index("def _row_to_rec(")]
+    for zapret in ("_atomic_json", 'open(fn, "w"', ".write("):
+        assert zapret not in body, f"проба пишет на диск: {zapret}"
+
+    # ⛔ Промпт обязан давать ЗАКРЫТЫЙ список тем и запрещать рубрику. Без списка рот сочинит
+    # свои темы, и плитки хаба у каждой страны станут разными — то, ради чего таксономия и есть.
+    import sys as _sys
+
+    # ⚠️ Импортируем из ОСНОВНОГО дерева: в копии пульта нет `country_codes`, её собирает
+    # образ. Дословность копии держит `test_image_has_render::test_duplicates_identical`.
+    _sys.path.insert(0, str(HERE.parent / "builder"))
+    import facet as _facet
+    import tail_taxonomy as _tax
+
+    prompt = _facet.probe_sys()
+    for k, _n, _d in _tax.SHELVES:
+        assert k in prompt, f"темы {k} нет в промпте пробы"
+    assert "ЗАПРЕЩЕНО" in prompt and "рубрик" in prompt, prompt[:200]
