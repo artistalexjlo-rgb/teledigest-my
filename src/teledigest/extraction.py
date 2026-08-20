@@ -44,6 +44,12 @@ from .extraction_db import (
     quota_increment,
     quota_state,
 )
+from .ipv4_only import force_ipv4
+
+# ⛔ IPv6 к Google с этого VPS — чёрная дыра: замер 19.08 дал IPv4 0.18 с против 8 с молчания
+# по IPv6, а в логе 15 повисаний по 60 с. Ставим фильтр ДО первого запроса. Правило одно, живёт
+# в `ipv4_only`; в pseo та же болезнь вылечена ещё в июле, сюда починку не переносили.
+force_ipv4()
 
 # System-prompt — дословно из Apps Script Code.gs:280-316.
 _SYSTEM_PROMPT = (
@@ -451,11 +457,16 @@ def process_file(
         log.info("extraction: %s → %s (attempt %d)", file_path.name, model, attempt + 1)
         api_resp, status = _gemini_generate_json(content, model, api_key)
 
-        # Счётчик инкрементим только при реальном использовании квоты.
-        # 200, 4xx/5xx — Google считает попытки тоже, но 429 = превышение,
-        # помечаем пару как exhausted.
+        # Счётчик инкрементим только при реальном использовании квоты: 200 и 4xx/5xx
+        # Google считает попытками тоже, а 429 = превышение → пару помечаем exhausted.
+        # ⛔ status == 0 значит запрос НЕ УШЁЛ (транспорт: имя не разрешилось, IPv6 повис).
+        # Квота Google не тронута — списывать нельзя. Раньше списывали всегда, хотя коммент
+        # утверждал обратное: 19.08 резолверы провайдера легли на десять минут, и каждая
+        # непосланная попытка съедала RPD на бумаге. Счётчик врал ровно там, где по нему
+        # принимают решение «ключи на сегодня кончились».
         kh = _key_hash(api_key)
-        quota_increment(kh, model)
+        if status:
+            quota_increment(kh, model)
         if status == 429:
             log.warning(
                 "extraction: 429 на (%s, %s…) — пара забанена до UTC-полуночи",

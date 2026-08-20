@@ -29,6 +29,11 @@ import asyncio
 import time as _time
 
 from .config import get_config, log
+from .ipv4_only import force_ipv4
+
+# ⛔ IPv6 к Google с этого VPS — чёрная дыра (замер 19.08). Эмбеддер ходит и SDK, и REST —
+# фильтр процессный, поэтому накрывает оба пути. Правило одно, живёт в `ipv4_only`.
+force_ipv4()
 
 _BRAIN_SYSTEM = """\
 You are an assistant bot for an expat community chat called "МОЗГ".
