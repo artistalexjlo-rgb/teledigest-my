@@ -150,8 +150,9 @@ def probe3_sys():
     spisok = "; ".join(f"{k} — {n}" for k, n, _d in tax.SHELVES)
     return f"""Ты РАЗМЕТЧИК готового совета, НЕ автор. Совет не переписывай и не сокращай.
 На вход JSON {{"0": "<совет>", ...}}. Разметь КАЖДЫЙ.
-Верни СТРОГО JSON: {{"rows": [[индекс, perevod, tema, podtema], ...]}}
-  индекс  — ключ совета из входа.
+Верни СТРОГО JSON: {{"rows": [{{"i": "<индекс>", "perevod": "…", "tema": "…", "podtema": "…"}}, ...]}}
+  Каждая муха — ОТДЕЛЬНЫЙ объект в rows: битая запись стоит одной мухи, а не всей пачки.
+  i       — ключ совета из входа.
   perevod — дословный перевод на русский: все факты, числа, названия, условия как есть.
   tema    — РОВНО ОДИН ключ из списка: {spisok}.
   podtema — 2–6 слов: зачем человек придёт за этим советом. Как запрос человека:
@@ -182,16 +183,21 @@ def probe3(geo, n):
             break
         chunk = flies[st : st + FACET_BATCH]
         idx = {str(k): lesson for k, (_fid, lesson) in enumerate(chunk)}
-        res = call(json.dumps(idx, ensure_ascii=False), probe3_sys(), consumer="facet")
+        res = call(
+            json.dumps(idx, ensure_ascii=False),
+            probe3_sys(),
+            consumer="facet",
+            salvage=("rows", "podtema"),
+        )
         rows = (res or {}).get("rows") or []
-        by_i = {
-            str(r[0]).strip(): r for r in rows if isinstance(r, (list, tuple)) and r
-        }
+        by_i = {str(r.get("i")).strip(): r for r in rows if isinstance(r, dict)}
         for k, (fid, lesson) in enumerate(chunk):
             row = by_i.get(str(k))
-            if not row or len(row) < PROBE3_FIELDS:
+            if not row or not row.get("podtema"):
                 continue
-            perevod, tema, pod = (str(x).strip() for x in row[1:4])
+            perevod = str(row.get("perevod") or "").strip()
+            tema = str(row.get("tema") or "").strip()
+            pod = str(row.get("podtema") or "").strip()
             if tema not in keys:
                 bad_tema += 1
             if pod.lower() in names:
@@ -244,21 +250,36 @@ def svod_tema(geo, tema):
     ⛔ НИЧЕГО НЕ ПИШЕТ. Цена — один вызов на тему. Проверяем то, на чём стоит весь тракт:
     умеет ли рот делить тему на страницы, когда видит её целиком, а не по мухе за раз.
     """
-    fn = f"tags/{geo}.json"
-    if not os.path.exists(fn):
-        print(f"{geo}: разметки нет", flush=True)
+    # ⭐ Пробный прогон шага 4 идёт по данным ПРОБЫ ШАГА 3, если они есть: там свежие тема и
+    # подтема новой схемы. Иначе берём боевую разметку — там тема лежит в `shelf_key`.
+    proba = f"tests/probe3_{geo}.json"
+    if os.path.exists(proba):
+        flies = [
+            r
+            for r in json.load(open(proba, encoding="utf-8"))
+            if r.get("tema") == tema and r.get("perevod")
+        ]
+        print(f"{geo}/{tema}: беру пробу шага 3 ({proba})", flush=True)
+    elif os.path.exists(f"tags/{geo}.json"):
+        flies = [
+            r
+            for r in json.load(open(f"tags/{geo}.json", encoding="utf-8"))
+            if r.get("shelf_key") == tema and r.get("perevod")
+        ]
+    else:
+        print(f"{geo}: ни пробы, ни разметки нет", flush=True)
         return
-    flies = [
-        r
-        for r in json.load(open(fn, encoding="utf-8"))
-        if r.get("shelf_key") == tema and r.get("perevod")
-    ]
     if not flies:
         print(f"{geo}/{tema}: мух нет", flush=True)
         return
     print(f"{geo}/{tema}: мух {len(flies)} -> один вызов", flush=True)
     idx = {r["id"]: r["perevod"] for r in flies}
-    res = call(json.dumps(idx, ensure_ascii=False), svod_sys(), consumer="carve")
+    res = call(
+        json.dumps(idx, ensure_ascii=False),
+        svod_sys(),
+        consumer="carve",
+        salvage=("stranicy", "ids"),
+    )
     pages = (res or {}).get("stranicy") or []
     ostatok = (res or {}).get("ostatok") or []
     if not pages:
