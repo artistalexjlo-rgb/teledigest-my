@@ -151,42 +151,41 @@ def test_stalled_geo_goes_first_in_the_queue(tmp_path, monkeypatch):
     ), bot.facet_queue(st)
 
 
-def test_probe_command_takes_a_pair_and_writes_nothing():
-    """Проба новой разметки (§0.19): «гео:сколько», точечный вход, ничего не пишет.
+def test_probe3_writes_only_into_tests_folder():
+    """Проба шага 3 (§0.19): муха → перевод + тема из 13 + подтема, результат в папку `tests`.
 
-    ⛔ Смысл пробы — решение глазом юзера ДО перепрогона корпуса (~1 050 вызовов). Если проба
-    начнёт писать в `tags/`, она перестанет быть пробой: испортит боевую разметку, и сравнивать
-    станет нечего. Поэтому проверяем и команду, и отсутствие записи в самой функции.
+    ⛔ Пишет ТОЛЬКО в `tests/` — это папка пробных прогонов новой схемы. Если проба тронет
+    боевую разметку `tags/`, корпус испортится, а сравнивать выход станет не с чем.
     """
     assert "probe" in bot.MENU
     argv = bot.MENU["probe"][1]
     assert any(a.endswith("facet.py") for a in argv), argv
     assert "--probe" in argv and "{geo}" in argv and "{shelf}" in argv, argv
-    geo, n = "me:100".split(":", 1)
-    built = [a.replace("{geo}", geo).replace("{shelf}", n) for a in argv]
-    assert "me" in built and "100" in built, built
 
-    # ⛔ Читаем ОСНОВНОЕ дерево, а не копию пульта: копию синхронизируют вручную, и сторож,
-    # смотрящий в неё, зелен на правке оригинала — так эта мутация и прошла с первого раза.
     src = (HERE.parent / "builder" / "facet.py").read_text(encoding="utf-8")
-    body = src[src.index("def probe_tags(") : src.index("def _row_to_rec(")]
-    for zapret in ("_atomic_json", 'open(fn, "w"', ".write("):
-        assert zapret not in body, f"проба пишет на диск: {zapret}"
+    body = src[src.index("def probe3(") : src.index("# ⭐ ПРОБА ОБОБЩЕНИЯ")]
+    # Проверяем ЗАПИСЬ, а не упоминания: слово «tags/» есть в докстринге и запретом быть не может.
+    assert 'os.makedirs("tests"' in body, "проба не создаёт папку прогонов"
+    assert 'fn = f"tests/probe3_{geo}.json"' in body, "проба пишет не в tests/"
+    assert 'with open(fn, "w"' in body, "проба пишет не через fn"
+    assert "_atomic_json" not in body, "проба пишет в корпус"
+    assert 'open(f"tags' not in body, "проба открывает боевую разметку на запись"
 
-    # ⛔ Промпт обязан давать ЗАКРЫТЫЙ список тем и запрещать рубрику. Без списка рот сочинит
-    # свои темы, и плитки хаба у каждой страны станут разными — то, ради чего таксономия и есть.
     import sys as _sys
 
-    # ⚠️ Импортируем из ОСНОВНОГО дерева: в копии пульта нет `country_codes`, её собирает
-    # образ. Дословность копии держит `test_image_has_render::test_duplicates_identical`.
     _sys.path.insert(0, str(HERE.parent / "builder"))
     import facet as _facet
     import tail_taxonomy as _tax
 
-    prompt = _facet.probe_sys()
+    prompt = _facet.probe3_sys()
     for k, _n, _d in _tax.SHELVES:
-        assert k in prompt, f"темы {k} нет в промпте пробы"
-    assert "ЗАПРЕЩЕНО" in prompt and "рубрик" in prompt, prompt[:200]
+        assert k in prompt, f"темы {k} нет в промпте"
+    for pole in ("perevod", "tema", "podtema"):
+        assert pole in prompt, f"поля {pole} нет в промпте"
+    # ⛔ Слово `perevod` есть и в описании формы ответа, поэтому проверяем ТРЕБОВАНИЕ: перевод
+    # обязан быть дословным. Без этого рот пересказывает, и факты из мухи теряются.
+    assert "дословный перевод" in prompt, prompt[:300]
+    assert "ЗАПРЕЩЕНО" in prompt, prompt[:200]
 
 
 def test_svod_command_takes_a_pair_and_writes_nothing():
@@ -204,7 +203,7 @@ def test_svod_command_takes_a_pair_and_writes_nothing():
     assert "me" in built and "transport" in built, built
 
     src = (HERE.parent / "builder" / "facet.py").read_text(encoding="utf-8")
-    body = src[src.index("def svod_tema(") : src.index("def probe_tags(")]
+    body = src[src.index("def svod_tema(") : src.index("def _row_to_rec(")]
     for zapret in ("_atomic_json", 'open(fn, "w"', ".write("):
         assert zapret not in body, f"проба пишет на диск: {zapret}"
     # ⛔ Правила вывода обязаны быть В ПРОМПТЕ: без них рот отдаст страницы любого размера и

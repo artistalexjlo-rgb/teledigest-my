@@ -137,22 +137,90 @@ FACET_BATCH_SYS = (
 )
 
 
-# ⭐ ПРОБА НОВОЙ РАЗМЕТКИ (канон §0.19). Просим у рта ДВА поля: тему из закрытых 13 и подтему.
-# Проба ничего не пишет на диск — только печатает старое рядом с новым, чтобы решение принимал
-# глаз юзера, а не мой счётчик.
-def probe_sys():
-    """Промпт пробы: тема из закрытого списка + подтема 2–6 слов."""
+# ⭐ ПРОБА ШАГА 3 (канон §0.19): муха → перевод + тема из 13 + подтема, ОДНИМ ответом.
+# Пишет результат в `tests/probe3_<гео>.json` — папка тестовых прогонов новой схемы. Боевую
+# разметку (`tags/`) не трогает: прогон пробный, его выход смотрят глазами.
+# Полей в строке ответа: индекс + перевод + тема + подтема. Имя нужно, чтобы это число не
+# выглядело порогом страницы — сторож владельца порога иначе краснеет на нём справедливо.
+PROBE3_FIELDS = 4
+
+
+def probe3_sys():
+    """Промпт шага 3: три поля одним ответом."""
     spisok = "; ".join(f"{k} — {n}" for k, n, _d in tax.SHELVES)
-    return f"""Ты РАЗМЕТЧИК готовых советов, НЕ автор. Совет не переписывай.
+    return f"""Ты РАЗМЕТЧИК готового совета, НЕ автор. Совет не переписывай и не сокращай.
 На вход JSON {{"0": "<совет>", ...}}. Разметь КАЖДЫЙ.
-Верни СТРОГО JSON: {{"rows": [[индекс, tema, podtema], ...]}}
+Верни СТРОГО JSON: {{"rows": [[индекс, perevod, tema, podtema], ...]}}
   индекс  — ключ совета из входа.
+  perevod — дословный перевод на русский: все факты, числа, названия, условия как есть.
   tema    — РОВНО ОДИН ключ из списка: {spisok}.
   podtema — 2–6 слов: зачем человек придёт за этим советом. Как запрос человека:
             "аренда автомобиля", "оплата такси", "поездка из аэропорта Тиват".
-            ⛔ ЗАПРЕЩЕНО повторять название темы («транспорт», «финансы», «документы»)
-            и давать широкое слово-рубрику — это тема, а не подтема.
+            ⛔ ЗАПРЕЩЕНО повторять название темы («транспорт», «финансы») и давать широкое
+            слово-рубрику — это тема, а не подтема.
 Только JSON, без пояснений."""
+
+
+def probe3(geo, n):
+    """Прогнать шаг 3 на N мухах гео и положить результат в `tests/`.
+
+    ⛔ Пишем ТОЛЬКО в `tests/` — это папка пробных прогонов новой схемы. Боевая разметка
+    `tags/` не трогается: если проба начнёт писать туда, сравнивать станет нечего, а корпус
+    испортится.
+    """
+    n = max(1, int(n))
+    flies = load_flies(geo, limit=n)
+    if not flies:
+        print(f"{geo}: мух нет", flush=True)
+        return
+    keys = {k for k, _n, _d in tax.SHELVES}
+    names = {n2.lower() for _k, n2, _d in tax.SHELVES} | {k.lower() for k in keys}
+    out, bad_tema, rubric = [], 0, 0
+    for st in range(0, len(flies), FACET_BATCH):
+        if os.path.exists("RUNNER_STOP"):
+            print(f"  стоп на {st}/{len(flies)}", flush=True)
+            break
+        chunk = flies[st : st + FACET_BATCH]
+        idx = {str(k): lesson for k, (_fid, lesson) in enumerate(chunk)}
+        res = call(json.dumps(idx, ensure_ascii=False), probe3_sys(), consumer="facet")
+        rows = (res or {}).get("rows") or []
+        by_i = {
+            str(r[0]).strip(): r for r in rows if isinstance(r, (list, tuple)) and r
+        }
+        for k, (fid, lesson) in enumerate(chunk):
+            row = by_i.get(str(k))
+            if not row or len(row) < PROBE3_FIELDS:
+                continue
+            perevod, tema, pod = (str(x).strip() for x in row[1:4])
+            if tema not in keys:
+                bad_tema += 1
+            if pod.lower() in names:
+                rubric += 1
+            out.append(
+                {
+                    "id": fid,
+                    "ishodnik": lesson,
+                    "perevod": perevod,
+                    "tema": tema,
+                    "podtema": pod,
+                }
+            )
+    if not out:
+        print(f"проба3 {geo}: рот не ответил", flush=True)
+        return
+    os.makedirs("tests", exist_ok=True)
+    fn = f"tests/probe3_{geo}.json"
+    with open(fn, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=1)
+    for r in out[:15]:
+        print(f"  [{r['tema']}] {r['podtema']} :: {r['perevod'][:70]}", flush=True)
+    temy = len({r["tema"] for r in out})
+    print(
+        f"проба3 {geo}: размечено {len(out)} из {len(flies)}, тем задействовано {temy}, "
+        f"тема вне списка {bad_tema}, подтем-рубрик {rubric}, подтем уникальных "
+        f"{len({r['podtema'].lower() for r in out})} -> {fn}",
+        flush=True,
+    )
 
 
 # ⭐ ПРОБА ОБОБЩЕНИЯ (шаг 4 канона §0.19). Рот видит ВСЮ тему сразу и сам режет её на страницы.
@@ -210,61 +278,6 @@ def svod_tema(geo, tema):
         f"свод {geo}/{tema}: страниц {len(pages)}, мух на странице "
         f"{sum(razmery) // max(1, len(razmery))} в среднем, "
         f"остаток {len(ostatok)}, дублей {dubli}, потеряно {len(lost)}",
-        flush=True,
-    )
-
-
-def probe_tags(geo, n):
-    """Прогнать НОВЫЙ промпт на уже размеченных мухах и показать старое рядом с новым.
-
-    ⛔ НИЧЕГО НЕ ПИШЕТ. Задача пробы — дать юзеру посмотреть глазами, годится ли новая разметка,
-    прежде чем платить за перепрогон корпуса (~1 050 вызовов).
-    """
-    fn = f"tags/{geo}.json"
-    if not os.path.exists(fn):
-        print(f"{geo}: разметки нет", flush=True)
-        return
-    flies = [r for r in json.load(open(fn, encoding="utf-8")) if r.get("perevod")]
-    flies = flies[: max(1, int(n))]
-    keys = {k for k, _n, _d in tax.SHELVES}
-    names = {k.lower() for k in keys} | {n.lower() for _k, n, _d in tax.SHELVES}
-    same = rubric = 0
-    podtemy, shown, done = set(), 0, 0
-    for st in range(0, len(flies), FACET_BATCH):
-        if os.path.exists("RUNNER_STOP"):
-            print(f"  стоп на {st}/{len(flies)}", flush=True)
-            break
-        chunk = flies[st : st + FACET_BATCH]
-        idx = {str(j): r["perevod"] for j, r in enumerate(chunk)}
-        res = call(json.dumps(idx, ensure_ascii=False), probe_sys(), consumer="facet")
-        rows = (res or {}).get("rows") or []
-        by_i = {
-            str(r[0]).strip(): r for r in rows if isinstance(r, (list, tuple)) and r
-        }
-        for j, r in enumerate(chunk):
-            row = by_i.get(str(j))
-            if not row or len(row) < 3:
-                continue
-            done += 1
-            tema, pod = str(row[1]).strip(), str(row[2]).strip()
-            old_t = r.get("shelf_key") or "-"
-            old_p = (r.get("zadachi") or ["-"])[0]
-            if tema == old_t:
-                same += 1
-            if pod.lower() in names:
-                rubric += 1
-            podtemy.add(pod.lower())
-            if shown < 15:
-                shown += 1
-                print(
-                    f"  тема {old_t} → {tema} | подтема {old_p!r} → {pod!r}", flush=True
-                )
-    if not done:
-        print(f"проба {geo}: рот не ответил", flush=True)
-        return
-    print(
-        f"проба {geo}: советов {done}, тема совпала со старой {same} ({same * 100 // done}%), "
-        f"подтем уникальных {len(podtemy)}, подтем-рубрик {rubric}",
         flush=True,
     )
 
@@ -1405,7 +1418,7 @@ if __name__ == "__main__":
         svod_tema(geo, sys.argv[sys.argv.index("--svod") + 1])
         raise SystemExit(0)
     if "--probe" in sys.argv:
-        probe_tags(geo, sys.argv[sys.argv.index("--probe") + 1])
+        probe3(geo, sys.argv[sys.argv.index("--probe") + 1])
         raise SystemExit(0)
     if "--deals-only" in sys.argv:
         # КОНТРОЛЬ метода: один вызов рта на одну пару «гео × раздел» (канон §0.15).
