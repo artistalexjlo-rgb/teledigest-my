@@ -77,3 +77,43 @@ def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     )
     st = bot.pipeline_state()
     assert "cz" in st["svod"], st["svod"]
+
+
+def test_menu_builds_on_a_live_state(monkeypatch):
+    """⛔ Меню обязано собираться на РЕАЛЬНОМ состоянии, а не падать на отсутствующем ключе.
+
+    Повод: после переделки тракта пульт написал «стартовое меню не отправилось: KeyError
+    'geos'» — строки по гео брались из ключа, которого у новых шагов нет. Проверяем сборкой
+    целиком, подменив только отправку в Telegram.
+    """
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "mark": [{"geo": "cz", "n": 191}],
+            "mark_n": 191,
+            "svod": ["cz"],
+            "geos": 1,
+            "views": 12,
+            "langs": [],
+        },
+    )
+    bot.send_menu(None)
+    assert sent, "меню не отправлено"
+    text = str(sent[-1][1])
+    assert "cz" in text and "191" in text, text
+
+
+def test_optional_argument_is_dropped_without_a_pair():
+    """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
+
+    ⛔ Повод: раньше на месте этой ветки стоял поиск устаревшей полки, и `mark cz` получал в
+    ответ «полок из старой таксономии нет» вместо прогона.
+    """
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert (
+        'argv = [a for a in argv if "{shelf}" not in a]' in src
+    ), "аргумент не выкидывается"
+    assert "stale_shelf" not in src, "вернулась ветка про устаревшую полку"
