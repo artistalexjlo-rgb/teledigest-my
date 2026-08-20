@@ -137,6 +137,79 @@ FACET_BATCH_SYS = (
 )
 
 
+# ⭐ ПРОБА НОВОЙ РАЗМЕТКИ (канон §0.19). Просим у рта ДВА поля: тему из закрытых 13 и подтему.
+# Проба ничего не пишет на диск — только печатает старое рядом с новым, чтобы решение принимал
+# глаз юзера, а не мой счётчик.
+def probe_sys():
+    """Промпт пробы: тема из закрытого списка + подтема 2–6 слов."""
+    spisok = "; ".join(f"{k} — {n}" for k, n, _d in tax.SHELVES)
+    return f"""Ты РАЗМЕТЧИК готовых советов, НЕ автор. Совет не переписывай.
+На вход JSON {{"0": "<совет>", ...}}. Разметь КАЖДЫЙ.
+Верни СТРОГО JSON: {{"rows": [[индекс, tema, podtema], ...]}}
+  индекс  — ключ совета из входа.
+  tema    — РОВНО ОДИН ключ из списка: {spisok}.
+  podtema — 2–6 слов: зачем человек придёт за этим советом. Как запрос человека:
+            "аренда автомобиля", "оплата такси", "поездка из аэропорта Тиват".
+            ⛔ ЗАПРЕЩЕНО повторять название темы («транспорт», «финансы», «документы»)
+            и давать широкое слово-рубрику — это тема, а не подтема.
+Только JSON, без пояснений."""
+
+
+def probe_tags(geo, n):
+    """Прогнать НОВЫЙ промпт на уже размеченных мухах и показать старое рядом с новым.
+
+    ⛔ НИЧЕГО НЕ ПИШЕТ. Задача пробы — дать юзеру посмотреть глазами, годится ли новая разметка,
+    прежде чем платить за перепрогон корпуса (~1 050 вызовов).
+    """
+    fn = f"tags/{geo}.json"
+    if not os.path.exists(fn):
+        print(f"{geo}: разметки нет", flush=True)
+        return
+    flies = [r for r in json.load(open(fn, encoding="utf-8")) if r.get("perevod")]
+    flies = flies[: max(1, int(n))]
+    keys = {k for k, _n, _d in tax.SHELVES}
+    names = {k.lower() for k in keys} | {n.lower() for _k, n, _d in tax.SHELVES}
+    same = rubric = 0
+    podtemy, shown, done = set(), 0, 0
+    for st in range(0, len(flies), FACET_BATCH):
+        if os.path.exists("RUNNER_STOP"):
+            print(f"  стоп на {st}/{len(flies)}", flush=True)
+            break
+        chunk = flies[st : st + FACET_BATCH]
+        idx = {str(j): r["perevod"] for j, r in enumerate(chunk)}
+        res = call(json.dumps(idx, ensure_ascii=False), probe_sys(), consumer="facet")
+        rows = (res or {}).get("rows") or []
+        by_i = {
+            str(r[0]).strip(): r for r in rows if isinstance(r, (list, tuple)) and r
+        }
+        for j, r in enumerate(chunk):
+            row = by_i.get(str(j))
+            if not row or len(row) < 3:
+                continue
+            done += 1
+            tema, pod = str(row[1]).strip(), str(row[2]).strip()
+            old_t = r.get("shelf_key") or "-"
+            old_p = (r.get("zadachi") or ["-"])[0]
+            if tema == old_t:
+                same += 1
+            if pod.lower() in names:
+                rubric += 1
+            podtemy.add(pod.lower())
+            if shown < 15:
+                shown += 1
+                print(
+                    f"  тема {old_t} → {tema} | подтема {old_p!r} → {pod!r}", flush=True
+                )
+    if not done:
+        print(f"проба {geo}: рот не ответил", flush=True)
+        return
+    print(
+        f"проба {geo}: советов {done}, тема совпала со старой {same} ({same * 100 // done}%), "
+        f"подтем уникальных {len(podtemy)}, подтем-рубрик {rubric}",
+        flush=True,
+    )
+
+
 def _row_to_rec(fid, row):
     """Строка таблицы → запись мухи. None, если строка не годится (муха идёт в дед-леттер).
 
@@ -1269,6 +1342,9 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--probe" in sys.argv:
+        probe_tags(geo, sys.argv[sys.argv.index("--probe") + 1])
+        raise SystemExit(0)
     if "--deals-only" in sys.argv:
         # КОНТРОЛЬ метода: один вызов рта на одну пару «гео × раздел» (канон §0.15).
         deals_for_pair(geo, sys.argv[sys.argv.index("--deals-only") + 1], [])
