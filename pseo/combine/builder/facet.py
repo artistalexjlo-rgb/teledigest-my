@@ -496,6 +496,17 @@ def assign_fly_shelves(geo, fails=None):
     return done
 
 
+def _queue(fails, step, family, flies):
+    """Записать НЕСДЕЛАННОЕ в файл гео — это и есть очередь (канон §0.17).
+
+    ⛔ Не отчёт: эту запись читает пульт (`pipeline_state` → шаг 0, «сперва брак») и ставит
+    такое гео первым на перепрогон. Форма ОДНА для всех звеньев — `step`, `family`, `flies`:
+    читатели берут `flies` и `family`, и на чужой форме молча показывали «0 мух» и «?».
+    """
+    if fails is not None:
+        fails.append({"step": step, "family": family, "flies": flies})
+
+
 def carve_deals(labels_with_mass, fails=None, family=None):
     """Проход А: метки раздела → ЗАКРЫТЫЙ список дел.
 
@@ -775,9 +786,12 @@ def build_views_by_carve(tagged, fails=None):
                 # (§0.17) → раздел остаётся работой шага, в хвост его не размещаем.
                 if not answered:
                     stalled.update(fids)
+                    _queue(fails, "deals", skey, len(fids))
                 continue
             assigned, stalled_here = assign_to_deals(fids, by_id, deals, fails, skey)
-            stalled.update(stalled_here)
+            if stalled_here:
+                stalled.update(stalled_here)
+                _queue(fails, "deal_assign", skey, len(stalled_here))
             for name, dfids in assigned.items():
                 why = tax.bad_label(name)
                 if why:
@@ -1058,7 +1072,8 @@ def run(geo, limit=None):
         f"сущностей-кросс {len(page['entity_index'])} → out_facet/{geo}.json remaining=0"
         + (
             f"\n⚠️ НЕУДАЧ: {len(run_fails)} — carve не разобрал "
-            f"{sum(f['flies'] for f in run_fails)} мух ({', '.join(f['family'] for f in run_fails[:3])}). "
+            f"{sum(f.get('flies', 0) for f in run_fails)} мух "
+            f"({', '.join(str(f.get('family') or '?') for f in run_fails[:3])}). "
             f"Гео собрано ОТКАТОМ, нужен перепрогон."
             if run_fails
             else ""

@@ -75,7 +75,9 @@ def _corpus(
     monkeypatch.setattr(facet, "carve_deals", fake_deals)
     monkeypatch.setattr(facet, "assign_to_deals", fake_assign)
     monkeypatch.setattr(facet, "assign_tail", fake_tail)
-    views, shelves, prochee = facet.build_views_by_carve(flies, fails=[])
+    fails = []
+    views, shelves, prochee = facet.build_views_by_carve(flies, fails=fails)
+    seen["fails"] = fails
     return views, shelves, prochee, seen
 
 
@@ -251,6 +253,41 @@ def test_pass_a_that_did_not_arrive_does_not_dump_the_section(tmp_path, monkeypa
     assert (
         seen["tail"] == []
     ), f"раздел уехал в хвост, хотя рот не ответил: {seen['tail']}"
+
+
+def test_stalled_batch_is_written_as_queue_for_the_pult(tmp_path, monkeypatch):
+    """§0.17: застрявшее записывается в файл гео ОДНОЙ формой — это очередь, а не отчёт.
+
+    ⛔ Именно эту запись читает пульт (`pipeline_state` → шаг 0, «сперва брак») и ставит гео
+    на перепрогон. Нет записи — гео выглядит сделанным, и упавшее не встаёт заново никогда.
+    Поля `flies` и `family` обязательны: читатели берут их, и на чужой форме пульт молча
+    показывал «0 мух» и «?».
+    """
+    _v, _s, _p, seen = _corpus(
+        monkeypatch, tmp_path, VISA, deals=["Сроки и рассмотрение"], stall=True
+    )
+    assert seen["fails"], "застряло, а очередь пустая"
+    rec = seen["fails"][0]
+    assert rec["flies"] == len(VISA), rec
+    assert rec["family"] == "visa", rec
+
+
+def test_number_from_the_rot_does_not_kill_the_batch(tmp_path, monkeypatch):
+    """Рот отдал номер ЧИСЛОМ, без кавычек — пачка обязана разобраться, а не упасть.
+
+    ⛔ Промпт просит номер в кавычках (`"<номер дела или 0>"`), и код верил этому буквально:
+    `(m.get(...) or "").strip()`. На числе это AttributeError — падал весь прогон гео вместе
+    с уже оплаченными вызовами. Здесь зовём САМ разбор, а не подменяем его: остальные сторожа
+    подменяют проход Б целиком и эту строку не трогают.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        facet, "call", lambda *a, **k: {"map": {"0": 1, "1": "1", "2": 0, "3": "9"}}
+    )
+    by_id = {f["id"]: f for f in VISA}
+    out, stalled = facet.assign_to_deals(["v1", "v2", "v3", "v4"], by_id, ["Дело"])
+    assert out == {"Дело": ["v1", "v2"]}, out  # число и строка равноправны
+    assert stalled == [], stalled  # рот ответил — это не «не доехало»
 
 
 def test_single_fly_deal_is_not_a_page(tmp_path, monkeypatch):
