@@ -26,7 +26,6 @@ import sqlite3
 import sys
 
 import numpy as np
-
 import tail_taxonomy as _tax
 
 VEC_DB = os.environ.get("LOCAL_VEC_DB", "/root/embed_ab/local_vec.db")
