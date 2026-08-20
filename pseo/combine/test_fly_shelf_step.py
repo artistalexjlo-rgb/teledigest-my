@@ -187,3 +187,34 @@ def test_probe_command_takes_a_pair_and_writes_nothing():
     for k, _n, _d in _tax.SHELVES:
         assert k in prompt, f"темы {k} нет в промпте пробы"
     assert "ЗАПРЕЩЕНО" in prompt and "рубрик" in prompt, prompt[:200]
+
+
+def test_svod_command_takes_a_pair_and_writes_nothing():
+    """Проба обобщения (шаг 4 §0.19): «гео:тема», один вызов, ничего не пишет.
+
+    ⛔ На этом шаге стоит весь тракт: страницы делает только он. Проба нужна, чтобы посмотреть
+    его выход ДО перепрогона корпуса. Если она начнёт писать — испортит боевую разметку.
+    """
+    assert "svod" in bot.MENU
+    argv = bot.MENU["svod"][1]
+    assert any(a.endswith("facet.py") for a in argv), argv
+    assert "--svod" in argv and "{geo}" in argv and "{shelf}" in argv, argv
+    geo, tema = "me:transport".split(":", 1)
+    built = [a.replace("{geo}", geo).replace("{shelf}", tema) for a in argv]
+    assert "me" in built and "transport" in built, built
+
+    src = (HERE.parent / "builder" / "facet.py").read_text(encoding="utf-8")
+    body = src[src.index("def svod_tema(") : src.index("def probe_tags(")]
+    for zapret in ("_atomic_json", 'open(fn, "w"', ".write("):
+        assert zapret not in body, f"проба пишет на диск: {zapret}"
+    # ⛔ Правила вывода обязаны быть В ПРОМПТЕ: без них рот отдаст страницы любого размера и
+    # мухи начнут дублироваться по страницам.
+    import sys as _sys
+
+    _sys.path.insert(0, str(HERE.parent / "builder"))
+    import facet as _facet
+
+    prompt = _facet.svod_sys()
+    assert "от 4 до 15" in prompt, prompt[:200]
+    assert "ровно в одном месте" in prompt, prompt[:200]
+    assert "ЗАПРЕЩЕНЫ" in prompt, prompt[:200]

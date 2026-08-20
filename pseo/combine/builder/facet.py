@@ -155,6 +155,65 @@ def probe_sys():
 Только JSON, без пояснений."""
 
 
+# ⭐ ПРОБА ОБОБЩЕНИЯ (шаг 4 канона §0.19). Рот видит ВСЮ тему сразу и сам режет её на страницы.
+# Проба ничего не пишет: печатает страницы с массами, чтобы решение принимал глаз юзера.
+def svod_sys():
+    """Промпт обобщения: вся тема → страницы по 4–15 мух."""
+    return """Ниже мухи ОДНОЙ темы гида по стране: {"<id>": "<текст мухи>", ...}.
+Раздели их на СТРАНИЦЫ. Страница — один запрос человека, на который эти мухи отвечают.
+ПРАВИЛА:
+  - на странице от 4 до 15 мух; что не собралось — в "ostatok";
+  - КАЖДЫЙ id ровно в одном месте: либо на странице, либо в остатке;
+  - имя страницы 2–6 слов, как запрос человека: "аренда автомобиля", "оплата такси";
+  - ⛔ ЗАПРЕЩЕНЫ имена-рубрики («транспорт», «прочее», «общие советы») и имя темы;
+  - "kratko" — ответ на запрос страницы, 30–50 слов, только из этих мух.
+СТРОГО JSON: {"stranicy": [{"imya": "...", "ids": ["..."], "kratko": "..."}], "ostatok": ["..."]}"""
+
+
+def svod_tema(geo, tema):
+    """Отдать роту ВСЮ тему одним вызовом и показать, какие страницы он нарезал.
+
+    ⛔ НИЧЕГО НЕ ПИШЕТ. Цена — один вызов на тему. Проверяем то, на чём стоит весь тракт:
+    умеет ли рот делить тему на страницы, когда видит её целиком, а не по мухе за раз.
+    """
+    fn = f"tags/{geo}.json"
+    if not os.path.exists(fn):
+        print(f"{geo}: разметки нет", flush=True)
+        return
+    flies = [
+        r
+        for r in json.load(open(fn, encoding="utf-8"))
+        if r.get("shelf_key") == tema and r.get("perevod")
+    ]
+    if not flies:
+        print(f"{geo}/{tema}: мух нет", flush=True)
+        return
+    print(f"{geo}/{tema}: мух {len(flies)} -> один вызов", flush=True)
+    idx = {r["id"]: r["perevod"] for r in flies}
+    res = call(json.dumps(idx, ensure_ascii=False), svod_sys(), consumer="carve")
+    pages = (res or {}).get("stranicy") or []
+    ostatok = (res or {}).get("ostatok") or []
+    if not pages:
+        print(f"{geo}/{tema}: рот страниц не дал", flush=True)
+        return
+    seen, dubli = set(), 0
+    for pg in pages:
+        ids = [i for i in (pg.get("ids") or []) if i in idx]
+        for i in ids:
+            if i in seen:
+                dubli += 1
+            seen.add(i)
+        print(f"  {len(ids):3d} мух | {pg.get('imya', '?')}", flush=True)
+    lost = [i for i in idx if i not in seen and i not in ostatok]
+    razmery = [len([i for i in (p.get("ids") or []) if i in idx]) for p in pages]
+    print(
+        f"свод {geo}/{tema}: страниц {len(pages)}, мух на странице "
+        f"{sum(razmery) // max(1, len(razmery))} в среднем, "
+        f"остаток {len(ostatok)}, дублей {dubli}, потеряно {len(lost)}",
+        flush=True,
+    )
+
+
 def probe_tags(geo, n):
     """Прогнать НОВЫЙ промпт на уже размеченных мухах и показать старое рядом с новым.
 
@@ -1342,6 +1401,9 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     geo = sys.argv[1]
+    if "--svod" in sys.argv:
+        svod_tema(geo, sys.argv[sys.argv.index("--svod") + 1])
+        raise SystemExit(0)
     if "--probe" in sys.argv:
         probe_tags(geo, sys.argv[sys.argv.index("--probe") + 1])
         raise SystemExit(0)
