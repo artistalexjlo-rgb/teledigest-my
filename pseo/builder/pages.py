@@ -2645,7 +2645,7 @@ def build_geo(geo, lang="ru"):
     fviews = sorted(
         (facts or {}).get("views_by_task", []), key=lambda v: -len(v["items"])
     )
-    fviews = [v for v in fviews if len(v["items"]) >= 4]
+    fviews = [v for v in fviews if len(v["items"]) >= _tax.PAGE_MIN]
 
     # (отсев непереведённых меток переехал в `_skip` — одно место на обе причины)
     # ⛔ Безадресные виды выбрасываем ЗДЕСЬ, до сиблингов: иначе в «похожие темы» уехали

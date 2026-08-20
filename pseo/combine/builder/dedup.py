@@ -26,13 +26,13 @@ import sqlite3
 import sys
 
 import numpy as np
+import tail_taxonomy as _tax
 
 VEC_DB = os.environ.get("LOCAL_VEC_DB", "/root/embed_ab/local_vec.db")
 OUT = "out_facet"
 THR = (
     0.86  # порог avg-link (контроль 2026-07-19); не крутить без нового контроля глазами
 )
-PAGE_MIN = 4  # kratko только видам-страницам (гейт страниц в pages.py тот же)
 KRATKO_TOP = (
     12  # сколько топ-абзацев кормим выжимке (окно соска ~16.6К ток — с запасом)
 )
@@ -306,7 +306,7 @@ def run(geo, kratko=False):
     n_need = sum(
         1
         for v in views
-        if len(v.get("items") or []) >= PAGE_MIN and not v.get("kratko")
+        if len(v.get("items") or []) >= _tax.PAGE_MIN and not v.get("kratko")
     )
     if kratko and n_need:
         print(f"{geo}: нужно kratko: {n_need}", flush=True)
@@ -336,7 +336,7 @@ def run(geo, kratko=False):
                 # Сбой ветвления метку НЕ ставит (он в run_fails) — там перепрогон нужен.
                 if not run_fails or run_fails[-1].get("shelf") != v.get("zadacha"):
                     v["branch_tried"] = True
-        if kratko and len(v["items"]) >= PAGE_MIN and not v.get("kratko"):
+        if kratko and len(v["items"]) >= _tax.PAGE_MIN and not v.get("kratko"):
             if _stopped():
                 _atomic_json(fn, d)  # сохранить ДО выхода: вызовы не в трубу
                 print(f"{geo}: остановлен, сохранено kratko +{n_k}", flush=True)

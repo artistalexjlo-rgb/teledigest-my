@@ -125,19 +125,89 @@ def test_pass_b_gets_only_the_closed_list(tmp_path, monkeypatch):
     assert set(fids) == {f["id"] for f in VISA}, fids
 
 
-def test_deal_becomes_a_view_and_rest_goes_to_tail(tmp_path, monkeypatch):
-    """Дело от двух мух становится видом; неприсвоенные мухи уходят в хвост, а не теряются."""
+def test_deal_becomes_a_view_only_at_the_page_threshold(tmp_path, monkeypatch):
+    """Дело становится видом, ТОЛЬКО дотянув до порога страницы; тонкое дело — в хвост.
+
+    ⛔ ЭТОТ СТОРОЖ БЫЛ НАПИСАН НАВЫВОРОТ (19.08, мной же): он требовал, чтобы дело из ДВУХ мух
+    стало видом. Страницей такой вид не станет никогда — `pages.py` режет по `PAGE_MIN`, — а
+    мухи считались «нарезанными» и в хвост не попадали: абзацы уходили С САЙТА. Пока сторож
+    стоял так, верная починка выглядела регрессом. Решение о странице ОДНО и живёт у владельца
+    числа (`tail_taxonomy.PAGE_MIN`).
+    """
+    deals = ["Сроки и рассмотрение", "Документы и деньги"]
+    views, _s, _p, seen = _corpus(
+        monkeypatch,
+        tmp_path,
+        VISA,
+        deals=deals,
+        mapping={
+            "v1": deals[0],
+            "v2": deals[0],
+            "v3": deals[0],
+            "v4": deals[0],  # четыре мухи — дотянуло до страницы
+            "v5": deals[1],
+            "v6": deals[1],  # две — не дотянуло
+        },
+    )
+    assert list(views) == [deals[0]], list(views)
+    assert {i["id"] for i in views[deals[0]]} == {"v1", "v2", "v3", "v4"}
+    # ⛔ Ни одна муха тонкого дела не пропала: обе в хвосте, а не «нарезаны и забыты».
+    assert set(seen["tail"]) == {"v5", "v6"}, seen["tail"]
+    assert (
+        tax.PAGE_MIN == 4
+    ), "фикстура написана под порог 4 — сменился порог, правь фикстуру"
+
+
+def test_page_threshold_comes_from_the_owner_at_runtime(tmp_path, monkeypatch):
+    """Порог берётся у ВЛАДЕЛЬЦА живьём: подменили его значение — состав видов поехал.
+
+    ⛔ Это то, чего не докажет ни один греп: файл может ссылаться на владельца, а решать по
+    своей копии, снятой в момент импорта. Подменяем 4 → 3 и требуем, чтобы дело из ТРЁХ мух
+    стало видом. Мутация «вернуть псевдоним PAGE_MIN = tax.PAGE_MIN и решать по нему» краснеет.
+    """
+    monkeypatch.setattr(tax, "PAGE_MIN", 3)
     deals = ["Сроки и рассмотрение"]
     views, _s, _p, seen = _corpus(
         monkeypatch,
         tmp_path,
         VISA,
         deals=deals,
-        mapping={"v1": deals[0], "v3": deals[0]},
+        mapping={"v1": deals[0], "v2": deals[0], "v3": deals[0]},
     )
-    assert list(views) == deals, list(views)
-    assert {i["id"] for i in views[deals[0]]} == {"v1", "v3"}
-    assert set(seen["tail"]) == {"v2", "v4", "v5", "v6"}, seen["tail"]
+    assert list(views) == deals, "порог владельца не дошёл до нарезки"
+    assert {i["id"] for i in views[deals[0]]} == {"v1", "v2", "v3"}
+    assert set(seen["tail"]) == {"v4", "v5", "v6"}, seen["tail"]
+
+
+def test_view_that_shrank_below_the_threshold_sends_its_flies_to_tail(
+    tmp_path, monkeypatch
+):
+    """Вид, ПРОСЕВШИЙ ниже порога после дедупа мух, страницей не считается — мухи в хвост.
+
+    ⛔ Зачем это отдельно от гейта. Гейт смотрит на размер дела ДО дедупа, а «страховка: дедуп
+    мух в карв-виде по id» (одна муха попадает дважды на стыке семей) может увести вид ниже
+    порога ПОСЛЕ него. Проверяем именно предикат хвоста: он обязан считать по СТРАНИЦЕ, а не
+    по факту «муха где-то в виде лежит». Мутация «считать любой вид страницей» краснеет здесь.
+    """
+    deals = ["Сроки и рассмотрение"]
+    # рот отдал одну и ту же муху четыре раза: дело выглядит толстым, а мух в нём одна
+    monkeypatch.setattr(
+        facet, "assign_to_deals", lambda *a, **k: {deals[0]: ["v1", "v1", "v1", "v1"]}
+    )
+    monkeypatch.setattr(facet, "carve_deals", lambda *a, **k: list(deals))
+    tail = {}
+    monkeypatch.setattr(
+        facet,
+        "assign_tail",
+        lambda fids, by_id, fails=None: (tail.setdefault("ids", list(fids)), [])
+        and ({}, []),
+    )
+    monkeypatch.chdir(tmp_path)
+    views, _s, _p = facet.build_views_by_carve(VISA, fails=[])
+    assert views == {}, f"просевший вид остался страницей: {views}"
+    assert (
+        "v1" in tail["ids"]
+    ), "муха просевшего вида не попала в хвост — абзацы потеряны"
 
 
 def test_single_fly_deal_is_not_a_page(tmp_path, monkeypatch):
@@ -155,15 +225,17 @@ def test_single_fly_deal_is_not_a_page(tmp_path, monkeypatch):
 
 def test_grab_bag_deal_name_is_rejected(tmp_path, monkeypatch):
     """Сборное имя дела не проходит и на этом этапе (канон §0.13): «Прочее» страницей не станет."""
+    # ⛔ Мух РОВНО столько, чтобы дело дотянуло до порога страницы: иначе сторож остался бы
+    # зелёным из-за порога, а не из-за барьера имени, и мутация «снять барьер» не покраснела.
     views, _s, _p, seen = _corpus(
         monkeypatch,
         tmp_path,
         VISA,
         deals=["Прочее"],
-        mapping={"v1": "Прочее", "v2": "Прочее"},
+        mapping={"v1": "Прочее", "v2": "Прочее", "v3": "Прочее", "v4": "Прочее"},
     )
     assert views == {}, views
-    assert {"v1", "v2"} <= set(seen["tail"]), seen["tail"]
+    assert {"v1", "v2", "v3", "v4"} <= set(seen["tail"]), seen["tail"]
 
 
 def test_no_deals_means_section_goes_to_tail(tmp_path, monkeypatch):
