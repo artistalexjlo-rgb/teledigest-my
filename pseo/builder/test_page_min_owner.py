@@ -86,7 +86,10 @@ def test_readers_actually_ask_the_owner():
         if p == OWNER or not p.exists():
             continue
         txt = p.read_text(encoding="utf-8")
-        if "views_by_task" not in txt:  # файл про страницы вообще не рассуждает
+        # ⛔ Спрашивать владельца обязан тот, кто РЕШАЕТ, а не тот, кто считает. Признак
+        # решения — сравнение размера (`len(...) >= …`). Пульт после перехода на тракт §0.19
+        # только считает готовое, и требовать от него порог было бы придиркой.
+        if not re.search(r"len\([^)]*(?:items|groups)[^)]*\)\s*[<>]=?", txt):
             continue
         if not re.search(r"\b(?:tax|_tax)\.PAGE_MIN\b", txt):
             silent.append(p.name)

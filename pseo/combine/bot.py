@@ -78,68 +78,26 @@ def stale_shelf(geo):
     return None
 
 
+# ⭐ МЕНЮ ТРАКТА «ТЕМА И ПОДТЕМА» (канон §0.19). Старые кнопки (facet+carve, хвост→полки,
+# полки видам, раздел мухам, пере-раскладка, дела, пробы) сняты вместе с их шагами: место
+# страницы решалось трижды, теперь один раз в разметке.
 MENU = {
-    "kratko": (
-        "Kratko (дожим)",
-        ["python", "-u", f"{BUILDER}/dedup.py", "--all", "--kratko"],
+    # ШАГ 3. Разметка: муха → перевод + тема из 13 + подтема. Пачка 25, добирает неразмеченных.
+    # «гео» или «гео:сколько» — второе для пробного куска.
+    "mark": (
+        "Разметка <гео[:сколько]>",
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--mark", "{shelf}"],
     ),
-    "translate": ("Переводы (очередь)", ["python", "-u", f"{BUILDER}/lang_runner.py"]),
-    "facet": ("Facet+carve <гео>", ["python", "-u", f"{BUILDER}/facet.py", "{geo}"]),
-    "assign": (
-        "Хвост→полки <гео>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-tail"],
-    ),
-    # Целевая пере-раскладка ОДНОЙ полки: при смене набора полок смысл меняется у неё, и
-    # гонять весь хвост незачем. Полный проход по всем гео — потолок 1440 обращений,
-    # целевой — 180. Имя полки подставляет шаг.
-    # Полка (тема) КАЖДОМУ виду-странице — тем же ртом `assign`, что раскладывает хвост.
-    # Отдельного способа нет и не надо: одна таксономия, один рот, один учёт ключей.
-    "assignv": (
-        "Полки видам <гео>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-views"],
-    ),
-    # ⭐ ОСЬ НАРЕЗКИ (канон §0.15): раздел КАЖДОЙ мухе. Без этого шага семьи для карва
-    # собираются по первому слову метки, и раздробленность возвращается каждым прогоном.
-    "flyshelf": (
-        "Раздел мухам <гео>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--assign-flies"],
-    ),
-    "reshelf": (
-        "Пере-разложить полку <гео>",
-        [
-            "python",
-            "-u",
-            f"{BUILDER}/facet.py",
-            "{geo}",
-            "--reassign-shelf",
-            "{shelf}",
-        ],
-    ),
-    # ⭐ ПРОБА ОБОБЩЕНИЯ (шаг 4 канона §0.19): «гео:тема», например `svod me:transport`.
-    # Один вызов: рот видит всю тему целиком и режет её на страницы. Ничего не пишет.
+    # ШАГ 4. Списки: мухи темы → списки с именами → страницы и остаток. Пачка 90.
     "svod": (
-        "Проба обобщения <гео:тема>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--svod", "{shelf}"],
+        "Списки <гео>",
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--svod"],
     ),
-    # ⭐ ПРОБА НОВОЙ РАЗМЕТКИ (канон §0.19): «гео:сколько», например `probe me:100`.
-    # Ничего не пишет — печатает старую разметку рядом с новой, чтобы решение принимал глаз
-    # юзера, а не счётчик. Цена: сколько мух / 25 вызовов (сотня = четыре).
-    "probe": (
-        "Проба разметки <гео:сколько>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--probe", "{shelf}"],
-    ),
-    # ⭐ КОНТРОЛЬ МЕТОДА (канон §0.15): список дел ОДНОГО раздела одного гео — РОВНО один
-    # вызов рта. Пара приходит как «гео:раздел» (`br:finance`).
-    # Зачем кнопка: боевые рты запускает юзер из пульта — тут СТОП и отчёт в чат. Замер
-    # сухого прогона 19.08: полный проход А по гео это 5–13 вызовов, поэтому контроль без
-    # точечной кнопки превратился бы в боевой прогон четырёх стран (87 вызовов).
-    "deals": (
-        "Дела раздела <гео:раздел>",
-        ["python", "-u", f"{BUILDER}/facet.py", "{geo}", "--deals-only", "{shelf}"],
-    ),
-    # АДРЕСА страниц. Место в тракте жёсткое: ПОСЛЕ ветвления (ветви тоже получают адрес,
-    # а рождает их dedup) и ДО переводов (перевод несёт `key` из русского файла; нет
-    # ключа — языки соберутся без адресов, а нелатинские почти пустыми).
+    # ШАГ 5. Сборка и рендер всего дерева — код, ключей не тратит.
+    "build": ("Сборка сайта", ["python", "-u", f"{BUILDER}/../render.py", "--all"]),
+    # ШАГ 6. Переводы на 13 языков.
+    "translate": ("Переводы (очередь)", ["python", "-u", f"{BUILDER}/lang_runner.py"]),
+    # АДРЕСА страниц: ДО переводов (перевод несёт `key` из русского файла).
     "stamp": (
         "Адреса страниц <гео>",
         ["python", "-u", f"{BUILDER}/facet_lang.py", "--stamp-keys", "{geo}"],
@@ -371,346 +329,134 @@ _RUBRICS = {
 
 
 def pipeline_state():
-    """ЧТО СЕЙЧАС ПРОСРОЧЕНО — считается из данных, не из моей памяти.
+    """ЧТО НЕ СДЕЛАНО по тракту «тема и подтема» (§0.19) — считается из данных, не из памяти.
 
-    Порядок тракта: мухи → facet(+carve) → assign(хвост→полки) → kratko(короткий
-    ответ) → translate(языки) → ship(с десктопа). Каждый шаг кормит следующий,
-    поэтому чинить надо в этом порядке — иначе переводы поедут без kratko.
+    Порядок: разметка (мухи → перевод, тема, подтема) → списки (мухи темы → страницы) →
+    адреса → сборка → переводы. Работа шага = НЕСДЕЛАННОЕ, поэтому шаг с ✅ и есть готовый.
     """
     import glob
+    import sys as _sys
 
-    st = {
-        "geos": 0,
-        "views": 0,
-        "no_kratko": 0,
-        "no_branch": 0,  # страницы-гиганты без ветвления — та же работа шага 2
-        "no_shelf": [],
-        "no_view_shelf": [],  # виды-страницы без полки (темы) → работа рта assign
-        "no_view_shelf_n": 0,  # сколько таких видов всего — для честной подписи
-        "no_fly_shelf": [],  # гео, где у мух нет раздела (ось нарезки, канон §0.15)
-        "no_fly_shelf_n": 0,
-        "stale_tax": [],  # есть полка, которой больше нет в таксономии → целевой режим
-        "stale_tax_bounds": [],  # версия старая, но имена полок целы → только границы
-        "no_addr": [],  # гео, где есть узлы без адреса (`key`) → ждут штамповки
-        "no_addr_n": 0,  # сколько таких узлов всего — для честной подписи шага
-        "langs": [],
-        "failed": [],
-        "pending_facet": [],  # гео с новыми (непротегованными) мухами → ждут facet
-    }
-    # Порог ветвления — из dedup, единственного владельца правила. Литералом нельзя:
-    # ровно так DEAD_AT разъехался тройками по трём файлам.
+    st = {"mark": [], "mark_n": 0, "svod": [], "geos": 0, "views": 0, "langs": []}
+    if BUILDER not in _sys.path:
+        _sys.path.insert(0, BUILDER)
     try:
-        import sys as _sys
+        import facet as _facet
+    except Exception as e:  # без билдера состояние не посчитать — честно скажем
+        st["error"] = str(e)
+        return st
 
-        if BUILDER not in _sys.path:
-            _sys.path.insert(0, BUILDER)
-        import dedup as _dedup
-
-        _BRANCH_MIN = _dedup.BRANCH_MIN
-    except Exception:
-        _BRANCH_MIN = (
-            10**9
-        )  # не смогли прочитать порог → НЕ выдумываем, работы просто нет
-    # ⭐ Мухи без раздела считаем по СКЛАДУ РАЗМЕТКИ (`tags/`), а не по корпусу: раздел
-    # (канон §0.15) ставится МУХЕ, и работа шага измеряется именно там.
-    for f in sorted(glob.glob(f"{BRAIN}/tags/*.json")):
-        g = os.path.basename(f)[:-5]
-        if g.endswith("_fails"):
+    # ── что уже размечено, по гео ──────────────────────────────────────────────────────
+    tagged = {}
+    for fn in sorted(glob.glob(f"{BRAIN}/tags/*.json")):
+        geo = os.path.basename(fn)[:-5]
+        if geo.endswith("_fails"):  # файл сбоев — не гео
             continue
         try:
-            recs = json.load(open(f, encoding="utf-8"))
+            tagged[geo] = {r["id"] for r in json.load(open(fn, encoding="utf-8"))}
+        except Exception:
+            tagged[geo] = set()
+
+    # ── мухи в базе минус размеченные = работа шага разметки ───────────────────────────
+    try:
+        m = sqlite3.connect(f"file:{_facet.DB}?mode=ro", uri=True, timeout=30)
+        rows = m.execute(
+            "SELECT country, id, ai_lesson FROM extracted_patterns "
+            "WHERE country IS NOT NULL AND ai_lesson IS NOT NULL AND length(ai_lesson)>?",
+            (_facet.MIN_LEN,),
+        ).fetchall()
+        m.close()
+        by_geo = {}
+        for country, fid, lesson in rows:
+            if _facet.is_junk(lesson):
+                continue
+            for g in _facet.geo_codes(country):
+                by_geo.setdefault(g, set()).add(fid)
+        for g, ids in sorted(by_geo.items(), key=lambda kv: -len(kv[1])):
+            left = len(ids - tagged.get(g, set()))
+            if left:
+                st["mark"].append({"geo": g, "n": left})
+                st["mark_n"] += left
+    except Exception as e:
+        st["error"] = f"база мух недоступна: {e}"
+
+    # ── списки: разметка есть, а корпус старше её или отсутствует ──────────────────────
+    for geo, ids in sorted(tagged.items()):
+        if not ids:
+            continue
+        corpus = f"{BRAIN}/out_facet/{geo}.json"
+        tags_fn = f"{BRAIN}/tags/{geo}.json"
+        if not os.path.exists(corpus) or os.path.getmtime(corpus) < os.path.getmtime(
+            tags_fn
+        ):
+            st["svod"].append(geo)
+
+    # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
+    for fn in sorted(glob.glob(f"{BRAIN}/out_facet/*.json")):
+        try:
+            d = json.load(open(fn, encoding="utf-8"))
         except Exception:
             continue
-        n = len([r for r in recs if isinstance(r, dict) and not r.get("shelf_key")])
-        if n:
-            st["no_fly_shelf"].append(g)
-            st["no_fly_shelf_n"] += n
-
-    try:
-        files = sorted(glob.glob(f"{BRAIN}/out_facet/*.json"))
-        st["geos"] = len(files)
-        for f in files:
-            geo = os.path.basename(f)[:-5]
-            d = json.load(open(f, encoding="utf-8"))
-            vs = [
-                v
-                for v in d.get("views_by_task", [])
-                if len(v.get("groups") or v.get("items") or []) >= _tax.PAGE_MIN
-            ]
-            st["views"] += len(vs)
-            st["no_kratko"] += sum(1 for v in vs if not v.get("kratko"))
-            # ⭐ АДРЕСА (2026-08-08). Считаем ВЫПОЛНИМОЕ: узел без `key`, которому ключ
-            # можно проштамповать. Ключ нужен и видам, и ветвям — у ветви свой адрес
-            # под-страницы. Без него `pages.py` берёт слаг локализованной метки, а на
-            # нелатинице (zh ja ko ar hi th) от метки не остаётся НИ ОДНОГО символа:
-            # страница просто не собирается. Замер 08.08 на живом ar/gr — 56 видов из 59
-            # пропущено. Раньше штамповка не звалась вообще: ни шага, ни кнопки.
-            need_addr = sum(1 for v in vs if not v.get("key")) + sum(
-                1
-                for c in (d.get("views_by_task", []), d.get("shelves", []))
-                for x in c
-                for sub in (x.get("subshelves") or [])
-                if not sub.get("key")
-            )
-            if need_addr:
-                st["no_addr"].append(geo)
-                st["no_addr_n"] += need_addr
-            # ⭐ ВЕТВЛЕНИЕ — ТОЖЕ РАБОТА ШАГА 2 (2026-08-07). `dedup.py` делает две вещи:
-            # короткие ответы И ветвление страниц-гигантов, а метрика смотрела только на
-            # первую. Итог: шаг показывал ✅ при 95 недоделанных страницах, кнопка не
-            # срабатывала (у шага ноль работ), «ВСЁ ПО ПОРЯДКУ» его пропускало. Третий за
-            # сутки случай одной болезни: шаг считает не ту работу.
-            # Порог берём из dedup, а не литералом — иначе разъедется, как разъезжался
-            # DEAD_AT тройками по коду.
-            st["no_branch"] += sum(
-                1
-                for v in d.get("views_by_task", [])
-                if len(v.get("groups") or v.get("items") or []) > _BRANCH_MIN
-                and not v.get("subshelves")
-                and not v.get("branch_tried")  # пробовали → вышло цельно → сделано
-            ) + sum(
-                1
-                for sh in d.get("shelves", [])
-                if len(sh.get("groups") or sh.get("items") or []) > _BRANCH_MIN
-                and not sh.get("subshelves")
-                and not sh.get("branch_tried")
-            )
-            # ⭐ ШАГ 1: гео недоделано, только если ЕСТЬ ЧТО раскладывать. Раньше условием
-            # было «полок нет» — и гео `nl` (ОДНА муха всего, 0 видов, 0 полок, муха ушла в
-            # `прочее`) висело вечно: полке сложиться не из чего и не станет.
-            # Хвост = `прочее` + виды мельче страничного гейта.
-            if not (d.get("shelves") or []):
-                tail = len(d.get("prochee") or []) + sum(
-                    1
-                    for v in d.get("views_by_task", [])
-                    if len(v.get("items") or []) < _tax.PAGE_MIN
-                )
-                if tail:
-                    st["no_shelf"].append(geo)
-            # ⭐ ШАГ 1, ВТОРАЯ ПРИЧИНА (2026-08-13): полки ЕСТЬ, но разложены по УСТАРЕВШЕЙ
-            # таксономии. Раньше счётчик мерил только НАЛИЧИЕ полок — и после смены набора
-            # 82 гео выглядели готовыми, пока пляжи лежали в полке «Работа, учёба, быт».
-            # Версия таксономии пишется в файл гео самим facet, читать её — бесплатно.
-            elif d.get("taxonomy_version") != _TAX_VERSION:
-                # ⚠️ РАБОТА ЦЕЛЕВОГО РЕЖИМА — только полки, которой в таксономии больше нет.
-                # Замер 13.08: из 89 гео со старой версией разобранная полка есть у 60, а у
-                # 29 все имена целы (сменились лишь границы). Если считать работой всё
-                # расхождение версии, цикл спотыкается на каждом из этих 29 — так и вышло на
-                # первом же прогоне (`ae`).
-                names = [s0.get("shelf") for s0 in d.get("shelves") or []]
-                if any(n and n not in _TAX_NAMES for n in names):
-                    st["stale_tax"].append(geo)
-                else:
-                    st["stale_tax_bounds"].append(geo)
-            # ⭐ ПОЛКА У ВИДА (2026-08-13). ⛔ Блок стоит ПОСЛЕ цепочки if/elif про полки: сперва
-            # я вставил его в середину, и `elif` про версию привязался к НЕМУ — из-за
-            # чего `stale_tax` перестал наполняться совсем. Поймали сторожа, не глаза.
-            # Уровня темы у фактовых страниц не было вовсе:
-            # хаб вываливал плоский список (63 ссылки у gr, 87 у any). Полку даёт тот же рот
-            # assign; работа шага = виды-страницы, у которых поля ещё нет.
-            nvs = [
-                v
-                for v in d.get("views_by_task", [])
-                if len(v.get("items") or []) >= _tax.PAGE_MIN and not v.get("shelf")
-            ]
-            if nvs:
-                st["no_view_shelf"].append(geo)
-                st["no_view_shelf_n"] += len(nvs)
-            # НЕУДАЧИ прогона (facet.py пишет их в файл гео): carve не разобрал семью →
-            # гео собрано откатом, тематической нарезки не было. Это НЕ вычисляемое
-            # состояние — это факт, записанный в момент сбоя. Гео ждёт перепрогона.
-            if d.get("fails"):
-                st["failed"].append(
-                    {
-                        "geo": geo,
-                        "n": len(d["fails"]),
-                        "flies": sum(f.get("flies", 0) for f in d["fails"]),
-                        "what": ", ".join(
-                            str(f.get("family") or "?") for f in d["fails"][:3]
-                        ),
-                    }
-                )
-            elif vs:
-                # СТАРЫЕ ДАННЫЕ без метки fails (собраны до записи сбоев): распознаём откат
-                # ЭВРИСТИКОЙ. Признак — имена видов = ОБЩИЕ РУБРИКИ (facet-фолбэк называет
-                # вид первой задачей мухи; carve дал бы конкретный подпункт). ≥60% рубричных
-                # = carve откатился, гео простыня-ком. Порог разделяет: сломанные 77-100%,
-                # целые ~3% (факт 07-23). Как только гео пройдёт новый facet — метка fails
-                # заменит эвристику.
-                rub = sum(1 for v in vs if v.get("zadacha") in _RUBRICS)
-                if rub / len(vs) >= 0.6:
-                    st["failed"].append(
-                        {
-                            "geo": geo,
-                            "n": rub,
-                            "flies": sum(len(v.get("items") or []) for v in vs),
-                            "what": f"откат carve ({rub}/{len(vs)} видов = рубрики)",
-                        }
-                    )
-        # НОВЫЕ МУХИ, ждущие разметки: extracted_patterns минус теги/дед-леттер. Считаем
-        # тем же источником и фильтром, что facet.load_flies (импорт facet, НЕ дублируем
-        # DB/MIN_LEN/is_junk — иначе дрейф). Теги читаем по абсолютному пути (facet пишет их
-        # в {BRAIN}/tags при cwd=BRAIN), поэтому cwd пульта роли не играет.
-        try:  # СВОЙ try: сбой чтения базы мух НЕ должен глушить всю карточку
-            import sys as _sys
-
-            if BUILDER not in _sys.path:
-                _sys.path.insert(0, BUILDER)
-            import facet as _facet
-
-            m = sqlite3.connect(f"file:{_facet.DB}?mode=ro", uri=True, timeout=30)
-            rows = m.execute(
-                "SELECT country, id, ai_lesson FROM extracted_patterns "
-                "WHERE country IS NOT NULL AND ai_lesson IS NOT NULL "
-                "AND length(ai_lesson)>?",
-                (_facet.MIN_LEN,),
-            ).fetchall()
-            m.close()
-            by_geo = {}
-            for country, fid, lesson in rows:
-                if not _facet.is_junk(lesson):
-                    by_geo.setdefault(country, []).append(fid)
-            for geo, fids in by_geo.items():
-                done = set()
-                tf = f"{BRAIN}/tags/{geo}.json"
-                if os.path.exists(tf):
-                    try:
-                        done = {r["id"] for r in json.load(open(tf, encoding="utf-8"))}
-                    except Exception:
-                        pass
-                dead = set()  # дед-леттер: непереваримые мухи (facet бросил >=3 раз)
-                try:
-                    with open(f"{BRAIN}/tags/{geo}_fails.json", encoding="utf-8") as fh:
-                        fl = json.load(fh)
-                    # ⛔ БЫЛО `int(k)` — id мухи это HEX-строка («9497936e4990e9f9…»),
-                    # int() на ней падает, исключение съедалось общим except, и множество
-                    # мёртвых оставалось ПУСТЫМ ВСЕГДА. Замер 27.07: висело 26 мух, все 26
-                    # мёртвые, живых ноль — пульт звал на них по кругу, facet честно ничего
-                    # не делал. Порог из facet.DEAD_AT, а не литералом 3.
-                    dead = {k for k, c in fl.items() if c >= _facet.DEAD_AT}
-                except Exception:
-                    pass
-                n = sum(1 for fid in fids if fid not in done and fid not in dead)
-                if n:
-                    st["pending_facet"].append({"geo": geo, "n": n})
-            st["pending_facet"].sort(key=lambda x: -x["n"])
-        except Exception as e:
-            st["pending_facet_err"] = f"{type(e).__name__}: {e}"
-
-        for lang in LANGS:
-            d = f"{BRAIN}/out_facet_{lang}"
-            have = glob.glob(f"{d}/*.json")
-            stale = sum(
-                1
-                for p in have
-                if os.path.getmtime(p)
-                < os.path.getmtime(f"{BRAIN}/out_facet/{os.path.basename(p)}")
-            )
-            miss = st["geos"] - len(have)
-            if miss or stale:
-                st["langs"].append((lang, miss, stale))
-    except Exception as e:
-        st["error"] = f"{type(e).__name__}: {e}"
+        st["geos"] += 1
+        st["views"] += len(d.get("views_by_task") or [])
     return st
 
 
 def state_card():
-    """Карточка состояния + подсказка «что дожать СЕЙЧАС» (первый непустой шаг)."""
+    """Карточка состояния: что есть и что просрочено. Без выводов, только числа."""
     s = pipeline_state()
     if s.get("error"):
-        return f"⚠️ не смог прочитать данные: {s['error']}", None
-    lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц-видов"]
-    todo = []
-    # 0) НОВЫЕ МУХИ → facet ПЕРВЫМ: разметка — начало тракта. Пока в базе есть
-    # непротегованные мухи, kratko/переводы рано (соберутся без них). Пульт теперь
-    # ВИДИТ их из базы, а не по мёртвой подписи кнопки.
-    if s["pending_facet"]:
-        tot = sum(x["n"] for x in s["pending_facet"])
-        worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["pending_facet"][:6])
-        lines.append(
-            f"0) новые мухи ждут разметки: {len(s['pending_facet'])} гео, {tot} мух — {worst}"
-        )
-        todo.append("facet")
-    # НЕУДАЧИ — это не «недоделка», а БРАК. Гео собрано откатом (carve не
-    # разобрал), тематической нарезки в нём нет. Чинить раньше остальных шагов —
-    # иначе kratko/переводы лягут поверх непорезанного кома.
-    if s["failed"]:
-        worst = ", ".join(f"{x['geo']}({x['flies']} мух)" for x in s["failed"][:5])
-        lines.append(
-            f"⚠️ НЕУДАЧИ прошлых прогонов: {len(s['failed'])} гео — {worst}\n"
-            f"   carve не разобрал → собрано откатом, нужен перепрогон"
-        )
-        todo.append("failed")
-    if s["no_shelf"] or s["stale_tax"] or s["stale_tax_bounds"] or s["no_view_shelf"]:
-        parts = []
-        if s["no_shelf"]:
-            parts.append(f"не разложен: {len(s['no_shelf'])} гео")
-        if s["stale_tax"]:
-            parts.append(f"старая таксономия: {len(s['stale_tax'])} гео")
-        if s["no_view_shelf"]:
-            parts.append(
-                f"виды без темы: {s['no_view_shelf_n']} на {len(s['no_view_shelf'])} гео"
-            )
-        if s["stale_tax_bounds"]:
-            parts.append(
-                f"уточнились только границы: {len(s['stale_tax_bounds'])} гео "
-                f"(целевым не сделать, нужна полная раскладка)"
-            )
-        lines.append("1) хвост→полки — " + ", ".join(parts))
-        todo.append("assign")
-    else:
-        lines.append("1) хвост→полки: ✅ все гео")
-    if s["no_kratko"] or s["no_branch"]:
-        lines.append(
-            "2) шаг dedup: "
-            + ", ".join(
-                x
-                for x in (
-                    (
-                        f"{s['no_kratko']} видов без короткого ответа"
-                        if s["no_kratko"]
-                        else ""
-                    ),
-                    (
-                        f"{s['no_branch']} страниц-гигантов без ветвления"
-                        if s["no_branch"]
-                        else ""
-                    ),
-                )
-                if x
-            )
-        )
-        todo.append("kratko")
-    else:
-        lines.append("2) короткие ответы и ветвление: ✅")
-    if s["no_addr"]:
-        lines.append(
-            f"3) адреса страниц: {len(s['no_addr'])} гео, {s['no_addr_n']} узлов без ключа"
-            " — на нелатинице эти страницы не собираются"
-        )
-        todo.append("stamp")
-    else:
-        lines.append("3) адреса страниц: ✅ у всех узлов")
-    if s["langs"]:
-        worst = ", ".join(
-            f"{lang}(нет {m}, устар {st_})" for lang, m, st_ in s["langs"][:5]
-        )
-        lines.append(f"4) переводы: {len(s['langs'])} языков не готовы — {worst}")
-        todo.append("translate")
-    else:
-        lines.append("4) переводы: ✅ все языки свежие")
-    # ⛔ «СЕЙЧАС НАДО» берём из pipeline_steps, а не из своего todo: раньше это была
-    # ТРЕТЬЯ независимая копия порядка (карточка / меню / цикл), и расходились они молча.
-    nxt = next((st for st in pipeline_steps(s) if st["jobs"]), None)
-    lines.append(
-        "\n➡️ СЕЙЧАС НАДО: "
-        + (nxt["label"] if nxt else "ничего — можно шипить (ship с десктопа)")
-    )
-    lines.append(
-        "порядок жёсткий: разметка → хвост→полки → kratko → переводы → ship.\n"
-        "переводы ПОСЛЕ kratko, иначе языки останутся без коротких ответов."
-    )
-    return "\n".join(lines), todo
+        return f"⚠️ {s['error']}", None
+    lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц"]
+    if s["mark"]:
+        worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["mark"][:6])
+        lines.append(f"1) разметка: {len(s['mark'])} гео, {s['mark_n']} мух — {worst}")
+    if s["svod"]:
+        lines.append(f"2) списки: {len(s['svod'])} гео — {', '.join(s['svod'][:6])}")
+    if not s["mark"] and not s["svod"]:
+        lines.append("всё разобрано: можно собирать сайт")
+    return chr(10).join(lines), None
+
+
+def pipeline_steps(s):
+    """Шаги В ПОРЯДКЕ ИСПОЛНЕНИЯ: [{kind, jobs, label}]. Пустой jobs = делать нечего."""
+    return [
+        {
+            "kind": "mark",
+            "jobs": [("mark", x["geo"]) for x in s["mark"]],
+            "label": (
+                f"1. Разметка — {len(s['mark'])} гео, {s['mark_n']} мух"
+                if s["mark"]
+                else "1. Разметка"
+            ),
+            "note": "",
+        },
+        {
+            "kind": "svod",
+            "jobs": [("svod", g) for g in s["svod"]],
+            "label": (
+                f"2. Списки — {len(s['svod'])} гео" if s["svod"] else "2. Списки"
+            ),
+            "note": "",
+        },
+        {
+            "kind": "build",
+            "jobs": [("build", None)] if s["geos"] else [],
+            "label": f"3. Сборка сайта — {s['views']} страниц",
+            "note": "",
+        },
+        {
+            "kind": "translate",
+            "jobs": [],
+            "label": "4. Переводы",
+            "note": "запускать после сборки",
+        },
+    ]
+
+
+def facet_queue(s):
+    """Гео шага разметки в порядке исполнения — для строк-кнопок под шагом."""
+    return [{"geo": x["geo"], "n": x["n"], "broken": False} for x in s["mark"]]
 
 
 class Job:
@@ -1026,129 +772,6 @@ class Job:
                     f"ключи: макс {kmax}/440 | 429 за час: {n429}\nрты дня: {m}",
                     stop_btn=True,
                 )
-
-
-def facet_queue(s):
-    """Гео шага 0 В ПОРЯДКЕ ИСПОЛНЕНИЯ: сперва БРАК прошлых прогонов, потом новые мухи.
-
-    ⛔ Брак — НЕ отдельная ступень тракта. Это тот же рот facet по другому списку гео:
-    он не после разметки и не перед хвостом, он И ЕСТЬ разметка. Поэтому один шаг.
-    Доделываем сломанное прежде, чем брать новое — если порядок надо обратный, меняются
-    местами два цикла ниже, больше ничего.
-    """
-    out, seen = [], set()
-    for x in s["failed"]:
-        out.append({"geo": x["geo"], "n": x["flies"], "broken": True})
-        seen.add(x["geo"])
-    for x in s["pending_facet"]:
-        if (
-            x["geo"] not in seen
-        ):  # гео и сломано, и с новыми мухами — один заход чинит оба
-            out.append({"geo": x["geo"], "n": x["n"], "broken": False})
-    return out
-
-
-def pipeline_steps(s):
-    """⭐ ЕДИНЫЙ ПОРЯДОК ТРАКТА — источник правды И для меню, И для полного цикла.
-
-    ⛔ Раньше это были ДВА независимых списка, и они разъехались: меню рисовало шаг 0
-    (разметку) и ставило на него стрелку, а `start_cycle` собирал цепочку только из
-    assign/kratko/translate. То есть кнопка «ПОЛНЫЙ ЦИКЛ по порядку» молча пропускала
-    разметку и гнала kratko с переводами поверх непротегованных мух — ровно против
-    правила «facet первым», записанного в state_card тремя экранами выше. Пока список
-    один, разъехаться нечему.
-
-    Возвращает шаги В ПОРЯДКЕ ИСПОЛНЕНИЯ: [{kind, jobs, label, geos}], где jobs —
-    плоский список (рот, гео) для цепочки. Пустой jobs = шагу делать нечего.
-    """
-    fq = facet_queue(s)
-    n_broken = sum(1 for x in fq if x["broken"])
-    n_flies = sum(x["n"] for x in fq)
-    return [
-        {
-            "kind": "facet",
-            "jobs": [("facet", x["geo"]) for x in fq],
-            "geos": fq,
-            "label": (
-                f"0. Разметка — {len(fq)} гео, {n_flies} мух" if fq else "0. Разметка"
-            ),
-            "note": f"сперва брак: {n_broken} гео" if n_broken else "",
-        },
-        {
-            "kind": "assign",
-            # Работа шага = и «полок нет» (полная раскладка), и «полки по старой версии»
-            # (целевая пере-раскладка разобранной полки). Второе дешевле в восемь раз.
-            "jobs": [("assign", g) for g in s["no_shelf"]]
-            + [("reshelf", g) for g in s["stale_tax"]]
-            + [("assignv", g) for g in s["no_view_shelf"]]
-            + [("flyshelf", g) for g in s["no_fly_shelf"]],
-            "geos": [],
-            "label": (
-                f"1. Полки — {len(s['no_shelf']) + len(s['stale_tax'])} гео хвост, "
-                f"{len(s['no_view_shelf'])} гео темы, "
-                f"{len(s['no_fly_shelf'])} гео мухи"
-                # ⛔ Работа шага — ЛЮБАЯ из трёх, включая мух: без последнего условия
-                # подпись говорила «Хвост → полки», когда работа была только по мухам,
-                # и кнопка выглядела пустой при непустом задании.
-                if (
-                    s["no_shelf"]
-                    or s["stale_tax"]
-                    or s["no_view_shelf"]
-                    or s["no_fly_shelf"]
-                )
-                else "1. Хвост → полки"
-            ),
-            "note": (
-                f"ещё {len(s['stale_tax_bounds'])} гео с уточнёнными границами — "
-                f"только полной раскладкой"
-                if s["stale_tax_bounds"]
-                else ""
-            ),
-        },
-        {
-            "kind": "kratko",
-            # РАБОТА ШАГА 2 = что делает dedup: короткие ответы И ветвление гигантов.
-            # Считать только kratko значило показывать ✅ при 95 нетронутых страницах.
-            "jobs": ([("kratko", None)] if (s["no_kratko"] or s["no_branch"]) else []),
-            "geos": [],
-            "label": (
-                "2. Kratko — "
-                + ", ".join(
-                    x
-                    for x in (
-                        f"{s['no_kratko']} видов без ответа" if s["no_kratko"] else "",
-                        f"{s['no_branch']} на ветвление" if s["no_branch"] else "",
-                    )
-                    if x
-                )
-                if (s["no_kratko"] or s["no_branch"])
-                else "2. Kratko"
-            ),
-            "note": "",
-        },
-        {
-            "kind": "stamp",
-            "jobs": [("stamp", g) for g in s["no_addr"]],
-            "geos": [],
-            "label": (
-                f"3. Адреса страниц — {len(s['no_addr'])} гео, {s['no_addr_n']} узлов"
-                if s["no_addr"]
-                else "3. Адреса страниц"
-            ),
-            "note": "до переводов: язык несёт адрес из русского файла",
-        },
-        {
-            "kind": "translate",
-            "jobs": [("translate", None)] if s["langs"] else [],
-            "geos": [],
-            "label": (
-                f"4. Переводы — {len(s['langs'])} языков"
-                if s["langs"]
-                else "4. Переводы"
-            ),
-            "note": "",
-        },
-    ]
 
 
 def send_menu(job):

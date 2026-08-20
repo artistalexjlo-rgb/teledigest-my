@@ -56,20 +56,10 @@ def test_call_actually_uses_salvage():
     assert "return {salvage[0]: recs}" in body, "спасённое не возвращается"
 
 
-def test_probe_and_svod_ask_for_salvage():
-    """Оба рта новой схемы обязаны просить спасение: у них ответ на всю пачку сразу."""
-    src = (HERE / "facet.py").read_text(encoding="utf-8")
-    p3 = src[src.index("def probe3(") : src.index("# ⭐ ПРОБА ОБОБЩЕНИЯ")]
-    assert 'salvage=("rows", "podtema")' in p3, "шаг 3 не просит спасения"
-    sv = src[src.index("def svod_tema(") : src.index("def _row_to_rec(")]
-    assert 'salvage=("stranicy", "ids")' in sv, "шаг 4 не просит спасения"
-
-
-def test_svod_prefers_the_probe_data():
-    """Пробный шаг 4 идёт по данным пробы шага 3 — иначе он мерит старую схему."""
-    src = (HERE / "facet.py").read_text(encoding="utf-8")
-    sv = src[src.index("def svod_tema(") : src.index("def _row_to_rec(")]
-    assert 'f"tests/probe3_{geo}.json"' in sv, "шаг 4 не смотрит в пробу"
-    assert sv.index("tests/probe3_") < sv.index(
-        "tags/"
-    ), "боевая разметка стоит раньше пробы"
+def test_tract_steps_ask_for_salvage():
+    """Оба рта тракта обязаны просить спасение: ответ приходит на всю пачку сразу."""
+    src = (HERE / "tract.py").read_text(encoding="utf-8")
+    mk = src[src.index("def mark(") : src.index("def svod(")]
+    assert 'salvage=("rows", "podtema")' in mk, "разметка не просит спасения"
+    sv = src[src.index("def svod(") :]
+    assert 'salvage=("spiski", "ids")' in sv, "списки не просят спасения"
