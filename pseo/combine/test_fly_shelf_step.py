@@ -116,3 +116,36 @@ def test_pair_parsing_lives_before_the_stale_shelf_branch():
     i = src.index('if geo and ":" in geo:')
     j = src.index('elif any("{shelf}" in a for a in argv):')
     assert i < j, "разбор пары оказался после ветки про устаревшую полку"
+
+
+def test_stalled_geo_goes_first_in_the_queue(tmp_path, monkeypatch):
+    """Вторая половина канона §0.17: запись о несделанном обязана ПОДНЯТЬ гео в очередь.
+
+    ⛔ Пара к сторожу в билдере (`test_stalled_batch_is_written_as_queue_for_the_pult`): там
+    проверено, что запись появляется, здесь — что пульт по ней ставит гео на перепрогон и
+    называет ЧИСЛО мух. Без этой половины запись есть, а очередь пустая, и упавшее не встаёт.
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    d = tmp_path / "out_facet"
+    d.mkdir(exist_ok=True)
+    (d / "gr.json").write_text(
+        json.dumps(
+            {
+                "geo": "gr",
+                "views_by_task": [],
+                "shelves": [],
+                "fails": [{"step": "deal_assign", "family": "visa", "flies": 7}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    st = bot.pipeline_state()
+    hit = [x for x in st["failed"] if x["geo"] == "gr"]
+    assert hit, st["failed"]
+    assert hit[0]["flies"] == 7, hit[0]
+    assert "visa" in hit[0]["what"], hit[0]
+    # и эта работа обязана попасть в шаг 0, а не остаться числом в состоянии
+    assert any(
+        x["geo"] == "gr" and x["broken"] for x in bot.facet_queue(st)
+    ), bot.facet_queue(st)

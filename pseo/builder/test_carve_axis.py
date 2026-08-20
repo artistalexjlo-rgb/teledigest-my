@@ -35,23 +35,38 @@ def _fly(fid, shelf_key, zadachi, text=None):
     }
 
 
-def _corpus(monkeypatch, tmp_path, flies, deals=None, mapping=None, tail=None):
-    """Прогнать сборку видов, подменив рты. deals — ответ прохода А, mapping — прохода Б."""
+def _corpus(
+    monkeypatch,
+    tmp_path,
+    flies,
+    deals=None,
+    mapping=None,
+    tail=None,
+    answered=True,
+    stall=False,
+):
+    """Прогнать сборку видов, подменив рты. deals — ответ прохода А, mapping — прохода Б.
+
+    `answered=False` — проход А не доехал (429/транспорт/СТОП). `stall=True` — не доехал
+    проход Б. Канон §0.17: такие мухи не размещаются нигде и остаются работой шага.
+    """
     monkeypatch.chdir(tmp_path)
     seen = {}
 
     def fake_deals(mass, fails=None, family=None):
         seen.setdefault("A", []).append((family, dict(mass)))
-        return list(deals or [])
+        return list(deals or []), answered
 
     def fake_assign(fids, by_id, dl, fails=None, family=None):
         seen.setdefault("B", []).append((family, list(fids), list(dl)))
+        if stall:
+            return {}, list(fids)
         out = {}
         for fid in fids:
             name = (mapping or {}).get(fid)
             if name:
                 out.setdefault(name, []).append(fid)
-        return out
+        return out, []
 
     def fake_tail(fids, by_id, fails=None):
         seen["tail"] = list(fids)
@@ -60,7 +75,9 @@ def _corpus(monkeypatch, tmp_path, flies, deals=None, mapping=None, tail=None):
     monkeypatch.setattr(facet, "carve_deals", fake_deals)
     monkeypatch.setattr(facet, "assign_to_deals", fake_assign)
     monkeypatch.setattr(facet, "assign_tail", fake_tail)
-    views, shelves, prochee = facet.build_views_by_carve(flies, fails=[])
+    fails = []
+    views, shelves, prochee = facet.build_views_by_carve(flies, fails=fails)
+    seen["fails"] = fails
     return views, shelves, prochee, seen
 
 
@@ -192,9 +209,11 @@ def test_view_that_shrank_below_the_threshold_sends_its_flies_to_tail(
     deals = ["Сроки и рассмотрение"]
     # рот отдал одну и ту же муху четыре раза: дело выглядит толстым, а мух в нём одна
     monkeypatch.setattr(
-        facet, "assign_to_deals", lambda *a, **k: {deals[0]: ["v1", "v1", "v1", "v1"]}
+        facet,
+        "assign_to_deals",
+        lambda *a, **k: ({deals[0]: ["v1", "v1", "v1", "v1"]}, []),
     )
-    monkeypatch.setattr(facet, "carve_deals", lambda *a, **k: list(deals))
+    monkeypatch.setattr(facet, "carve_deals", lambda *a, **k: (list(deals), True))
     tail = {}
     monkeypatch.setattr(
         facet,
@@ -208,6 +227,67 @@ def test_view_that_shrank_below_the_threshold_sends_its_flies_to_tail(
     assert (
         "v1" in tail["ids"]
     ), "муха просевшего вида не попала в хвост — абзацы потеряны"
+
+
+def test_batch_that_did_not_arrive_leaves_flies_as_work(tmp_path, monkeypatch):
+    """§0.17: пачка прохода Б не доехала → мухи НЕ размещаются нигде.
+
+    ⛔ Раньше они уезжали в хвост, а хвост — это размещение, то есть заявление «с мухой
+    разобрались». После него шаг считает гео сделанным, и упавшее заново не встаёт.
+    """
+    views, _s, _p, seen = _corpus(
+        monkeypatch, tmp_path, VISA, deals=["Сроки и рассмотрение"], stall=True
+    )
+    assert views == {}, views
+    assert seen["tail"] == [], f"застрявшие мухи уехали в хвост: {seen['tail']}"
+
+
+def test_pass_a_that_did_not_arrive_does_not_dump_the_section(tmp_path, monkeypatch):
+    """§0.17 для прохода А: рот не ответил → раздел остаётся работой, а не едет в хвост.
+
+    Обратный случай проверяет `test_no_deals_means_section_goes_to_tail`: рот ОТВЕТИЛ, годных
+    имён нет — тогда хвост законен. Различать эти два случая и есть всё правило.
+    """
+    views, _s, _p, seen = _corpus(monkeypatch, tmp_path, VISA, deals=[], answered=False)
+    assert views == {}, views
+    assert (
+        seen["tail"] == []
+    ), f"раздел уехал в хвост, хотя рот не ответил: {seen['tail']}"
+
+
+def test_stalled_batch_is_written_as_queue_for_the_pult(tmp_path, monkeypatch):
+    """§0.17: застрявшее записывается в файл гео ОДНОЙ формой — это очередь, а не отчёт.
+
+    ⛔ Именно эту запись читает пульт (`pipeline_state` → шаг 0, «сперва брак») и ставит гео
+    на перепрогон. Нет записи — гео выглядит сделанным, и упавшее не встаёт заново никогда.
+    Поля `flies` и `family` обязательны: читатели берут их, и на чужой форме пульт молча
+    показывал «0 мух» и «?».
+    """
+    _v, _s, _p, seen = _corpus(
+        monkeypatch, tmp_path, VISA, deals=["Сроки и рассмотрение"], stall=True
+    )
+    assert seen["fails"], "застряло, а очередь пустая"
+    rec = seen["fails"][0]
+    assert rec["flies"] == len(VISA), rec
+    assert rec["family"] == "visa", rec
+
+
+def test_number_from_the_rot_does_not_kill_the_batch(tmp_path, monkeypatch):
+    """Рот отдал номер ЧИСЛОМ, без кавычек — пачка обязана разобраться, а не упасть.
+
+    ⛔ Промпт просит номер в кавычках (`"<номер дела или 0>"`), и код верил этому буквально:
+    `(m.get(...) or "").strip()`. На числе это AttributeError — падал весь прогон гео вместе
+    с уже оплаченными вызовами. Здесь зовём САМ разбор, а не подменяем его: остальные сторожа
+    подменяют проход Б целиком и эту строку не трогают.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        facet, "call", lambda *a, **k: {"map": {"0": 1, "1": "1", "2": 0, "3": "9"}}
+    )
+    by_id = {f["id"]: f for f in VISA}
+    out, stalled = facet.assign_to_deals(["v1", "v2", "v3", "v4"], by_id, ["Дело"])
+    assert out == {"Дело": ["v1", "v2"]}, out  # число и строка равноправны
+    assert stalled == [], stalled  # рот ответил — это не «не доехало»
 
 
 def test_single_fly_deal_is_not_a_page(tmp_path, monkeypatch):
@@ -360,7 +440,7 @@ def test_control_entry_costs_one_call(tmp_path, monkeypatch):
 
     def fake_deals(mass, fails=None, family=None):
         seen.append((family, dict(mass)))
-        return ["Сроки и отказы"]
+        return ["Сроки и отказы"], True
 
     monkeypatch.setattr(facet, "carve_deals", fake_deals)
     out = facet.deals_for_pair("gr", "visa", [])

@@ -431,7 +431,7 @@ def deals_for_pair(geo, shelf_key, fails=None):
         f"{geo}/{shelf_key}: меток {len(mass)}, абзацев {sum(mass.values())}",
         flush=True,
     )
-    deals = carve_deals(mass, fails, f"{geo}/{shelf_key}")
+    deals, _answered = carve_deals(mass, fails, f"{geo}/{shelf_key}")
     print(f"{geo}/{shelf_key}: ДЕЛ {len(deals)}", flush=True)
     for d in deals:
         print(f"    - {d}", flush=True)
@@ -496,11 +496,24 @@ def assign_fly_shelves(geo, fails=None):
     return done
 
 
+def _queue(fails, step, family, flies):
+    """Записать НЕСДЕЛАННОЕ в файл гео — это и есть очередь (канон §0.17).
+
+    ⛔ Не отчёт: эту запись читает пульт (`pipeline_state` → шаг 0, «сперва брак») и ставит
+    такое гео первым на перепрогон. Форма ОДНА для всех звеньев — `step`, `family`, `flies`:
+    читатели берут `flies` и `family`, и на чужой форме молча показывали «0 мух» и «?».
+    """
+    if fails is not None:
+        fails.append({"step": step, "family": family, "flies": flies})
+
+
 def carve_deals(labels_with_mass, fails=None, family=None):
     """Проход А: метки раздела → ЗАКРЫТЫЙ список дел.
 
-    Возвращает список имён; пустой список означает «рот не дал списка» — тогда раздел
-    целиком уходит в хвост, и это честнее выдуманных дел.
+    Возвращает (имена, ответил_ли_рот). Канон §0.17: пустой список при `answered=True` —
+    рот ответил, годных имён нет, раздел законно уходит в хвост. При `answered=False` пачка
+    не доехала (429, транспорт, СТОП), и раздел обязан остаться РАБОТОЙ ШАГА, а не уехать в
+    хвост: хвост — это размещение, то есть заявление «с мухой разобрались».
     """
     top = sorted(labels_with_mass.items(), key=lambda kv: -kv[1])[:DEALS_LABELS]
     left = len(labels_with_mass) - len(top)
@@ -517,21 +530,25 @@ def carve_deals(labels_with_mass, fails=None, family=None):
             continue
         if d not in good:
             good.append(d)
-    if not good and fails is not None:
-        fails.append({"step": "deals", "geo": family})
-    return good
+    return good, res is not None
 
 
 def assign_to_deals(fids, by_id, deals, fails=None, family=None):
-    """Проход Б: мухи раздела → дела ИЗ ЗАКРЫТОГО списка. Возвращает {имя дела: [id мух]}.
+    """Проход Б: мухи раздела → дела ИЗ ЗАКРЫТОГО списка.
 
-    Муха, которой ни одно дело не подошло (ответ "0") или чей номер вне списка, остаётся
-    неприсвоенной — уйдёт в хвост.
+    Возвращает ({имя дела: [id мух]}, застрявшие). Канон §0.17:
+    - муха, которой дело не подошло (ответ "0") или чей номер вне списка, остаётся
+      неприсвоенной и уйдёт в хвост — рот её видел и не взял;
+    - мухи ПАЧКИ, которая не доехала (или оборвана СТОПом), попадают в «застрявшие»: они не
+      размещаются нигде и остаются работой шага до следующего прохода.
     """
-    out = {}
+    out, stalled = {}, []
     for st in range(0, len(fids), CARVE_BATCH):
         if os.path.exists("RUNNER_STOP"):
             print(f"    стоп между пачками на {st}/{len(fids)}", flush=True)
+            stalled.extend(
+                fids[st:]
+            )  # необработанный остаток — работа, а не размещение
             break
         chunk = fids[st : st + CARVE_BATCH]
         head = "\n".join(f"{i + 1}: {d}" for i, d in enumerate(deals))
@@ -543,20 +560,16 @@ def assign_to_deals(fids, by_id, deals, fails=None, family=None):
         )
         m = (res or {}).get("map") or {}
         if not m:
-            if fails is not None:
-                fails.append(
-                    {
-                        "step": "deal_assign",
-                        "geo": family,
-                        "batch": st // CARVE_BATCH + 1,
-                    }
-                )
+            stalled.extend(chunk)  # пачка не доехала — мухи остаются работой шага
             continue
         for j, fid in enumerate(chunk):
-            v = (m.get(str(j)) or "").strip()
+            # ⛔ `str(...)`: промпт просит номер В КАВЫЧКАХ, а рты кавычки роняют и отдают
+            # число. На `(… or "").strip()` это был AttributeError, то есть падение всего
+            # прогона гео вместе с уже оплаченными вызовами.
+            v = str(m.get(str(j)) or "").strip()
             if v.isdigit() and 1 <= int(v) <= len(deals):
                 out.setdefault(deals[int(v) - 1], []).append(fid)
-    return out
+    return out, stalled
 
 
 def _first_word(z):
@@ -712,6 +725,9 @@ def build_views_by_carve(tagged, fails=None):
 
     views = {}
     dropped = []  # сборные метки: отсев обязан быть ВИДЕН, а не молчалив
+    # ⛔ §0.17: мухи, чья пачка не доехала (429, транспорт, СТОП). Они НЕ идут ни на страницу,
+    # ни в хвост — остаются работой шага, иначе упавшее выглядит размещённым и заново не встаёт.
+    stalled = set()
     # ⭐ ОСЬ = РАЗДЕЛ (канон §0.15). Раздел стоит у мухи (`shelf_key`, рот `assign`),
     # поэтому семья — «страна × раздел», а не первое слово метки.
     # ⚠️ ПЕРЕХОД: если раздела нет НИ У ОДНОЙ мухи (гео ещё не прогонялось новым шагом),
@@ -760,14 +776,23 @@ def build_views_by_carve(tagged, fails=None):
                         mass[z] = mass.get(z, 0) + 1
             if not mass:
                 continue
-            deals = carve_deals(mass, fails, f"{skey}")
+            deals, answered = carve_deals(mass, fails, f"{skey}")
             print(
                 f"  раздел {skey}: мух {len(fids)}, меток {len(mass)} -> дел {len(deals)}",
                 flush=True,
             )
             if not deals:
-                continue  # список не вышел → раздел в хвост, выдумывать дела нельзя
-            for name, dfids in assign_to_deals(fids, by_id, deals, fails, skey).items():
+                # Рот ответил, а годных имён нет → раздел законно в хвост. Пачка не доехала
+                # (§0.17) → раздел остаётся работой шага, в хвост его не размещаем.
+                if not answered:
+                    stalled.update(fids)
+                    _queue(fails, "deals", skey, len(fids))
+                continue
+            assigned, stalled_here = assign_to_deals(fids, by_id, deals, fails, skey)
+            if stalled_here:
+                stalled.update(stalled_here)
+                _queue(fails, "deal_assign", skey, len(stalled_here))
+            for name, dfids in assigned.items():
                 why = tax.bad_label(name)
                 if why:
                     dropped.append((name, len(dfids), why))
@@ -827,7 +852,7 @@ def build_views_by_carve(tagged, fails=None):
     # становилось, страницей — нет, а в хвост муха уже не шла. Порог тут НЕ применяем второй
     # раз: просевшие виды сняты выше, значит в `views` остались только страничные.
     on_page = {it["id"] for items in views.values() for it in items}
-    tail_fids = [fid for fid in by_id if fid not in on_page]
+    tail_fids = [fid for fid in by_id if fid not in on_page and fid not in stalled]
     shelves, prochee = assign_tail(tail_fids, by_id, fails)
     return views, shelves, prochee
 
@@ -1047,7 +1072,8 @@ def run(geo, limit=None):
         f"сущностей-кросс {len(page['entity_index'])} → out_facet/{geo}.json remaining=0"
         + (
             f"\n⚠️ НЕУДАЧ: {len(run_fails)} — carve не разобрал "
-            f"{sum(f['flies'] for f in run_fails)} мух ({', '.join(f['family'] for f in run_fails[:3])}). "
+            f"{sum(f.get('flies', 0) for f in run_fails)} мух "
+            f"({', '.join(str(f.get('family') or '?') for f in run_fails[:3])}). "
             f"Гео собрано ОТКАТОМ, нужен перепрогон."
             if run_fails
             else ""
