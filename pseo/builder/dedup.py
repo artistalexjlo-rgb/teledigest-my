@@ -117,6 +117,52 @@ def avg_link(sim, thr):
     return cls
 
 
+def groups_all(ids, vv, thr):
+    """Схлопывание почти-копий на БОЛЬШОМ множестве (гео целиком, до разметки).
+
+    Возвращает список списков id: [[rep-кандидаты…], …]. Мухи без вектора не судим —
+    каждая идёт своей группой.
+
+    ⭐ ПОЧЕМУ НЕ ЗОВЁМ `avg_link` НА ВСЁМ СРАЗУ. Он перебирает все пары кластеров на каждом
+    слиянии: на виде из 30 мух это незаметно, на гео из 765 — порядка 10^7 переборов, часы.
+    Здесь сначала бьём множество на КОМПОНЕНТЫ по рёбрам «похожи не меньше порога», и
+    average-link считаем ВНУТРИ компоненты. Это не приближение, а тот же результат: средняя
+    связь не выше максимальной, поэтому две группы без единого ребра ≥ порога слиться не
+    могут. Компоненты на рабочем пороге мелкие, и перебор внутри них дёшев.
+    """
+    have = [i for i in ids if i in vv]
+    if len(have) < 2:
+        return [[i] for i in ids]
+    m = np.stack([vv[i] for i in have])
+    sim = m @ m.T
+    parent = list(range(len(have)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in zip(*np.where(np.triu(sim >= thr, k=1))):
+        ra, rb = find(int(a)), find(int(b))
+        if ra != rb:
+            parent[ra] = rb
+    comps = {}
+    for i in range(len(have)):
+        comps.setdefault(find(i), []).append(i)
+
+    out = []
+    for comp in comps.values():
+        if len(comp) == 1:
+            out.append([have[comp[0]]])
+            continue
+        sub = sim[np.ix_(comp, comp)]
+        for c in avg_link(sub, thr):
+            out.append([have[comp[i]] for i in c])
+    out += [[i] for i in ids if i not in vv]
+    return out
+
+
 def group_view(view, vv):
     """Вид → groups: [{rep, ids, n}], сортировка n↓ потом длина rep-текста↓.
     Репрезентант = самый богатый (длинный) текст группы. Мухи без вектора —

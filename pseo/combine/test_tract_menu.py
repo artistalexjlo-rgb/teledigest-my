@@ -47,14 +47,18 @@ def test_old_steps_are_gone():
 
 
 def test_steps_go_in_tract_order():
-    """Вертикаль меню = порядок тракта: разметка → списки → сборка → переводы."""
+    """Вертикаль меню = порядок тракта: схлопывание → разметка → списки → сборка → переводы.
+
+    Схлопывание стоит ПЕРВЫМ не для красоты: размечать оно даёт представителей, и после
+    разметки его звать поздно — рту уже заплачено за каждую почти-копию.
+    """
     kinds = [
         st["kind"]
         for st in bot.pipeline_steps(
             {"mark": [], "mark_n": 0, "svod": [], "geos": 0, "views": 0}
         )
     ]
-    assert kinds == ["mark", "svod", "build", "translate"], kinds
+    assert kinds == ["sgusti", "mark", "svod", "build", "translate"], kinds
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):

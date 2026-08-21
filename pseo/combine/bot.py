@@ -63,6 +63,14 @@ _TAX_NAMES = set(_tax.SHELF_NAMES)
 
 
 MENU = {
+    # ШАГ 2. Схлопывание почти-копий — ключей НЕ тратит (вектора готовые, от свипера).
+    # Пишет протокол `tests/dedup/<гео>.txt`: кто остаётся и кого проглотил. Числа в отчёт
+    # идут строкой, протокол — файлом: счётчик «схлопнуто N» не отличает настоящий повтор
+    # от съеденного содержимого, а ровно на этом порог 0.86 и прокололся.
+    "sgusti": (
+        "Схлопывание <гео>",
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--sgusti"],
+    ),
     # ШАГ 3. Разметка: муха → перевод + тема из 13 + подтема. Пачка 25, добирает неразмеченных.
     # «гео» или «гео:сколько» — второе для пробного куска.
     "mark": (
@@ -336,7 +344,15 @@ def pipeline_state():
     import glob
     import sys as _sys
 
-    st = {"mark": [], "mark_n": 0, "svod": [], "geos": 0, "views": 0, "langs": []}
+    st = {
+        "sgusti": [],
+        "mark": [],
+        "mark_n": 0,
+        "svod": [],
+        "geos": 0,
+        "views": 0,
+        "langs": [],
+    }
     if BUILDER not in _sys.path:
         _sys.path.insert(0, BUILDER)
     try:
@@ -379,6 +395,12 @@ def pipeline_state():
     except Exception as e:
         st["error"] = f"база мух недоступна: {e}"
 
+    # ── схлопывание: у гео есть мухи, а протокола схлопывания ещё нет ─────────────────
+    # Работа шага = «что МОЖНО сделать»: гео, которое ждёт разметки и не схлопнуто.
+    for x in st["mark"]:
+        if not os.path.exists(f"{BRAIN}/{TESTS}/dedup/{x['geo']}.json"):
+            st["sgusti"].append(x["geo"])
+
     # ── списки: разметка есть, а корпус старше её или отсутствует ──────────────────────
     for geo, ids in sorted(tagged.items()):
         if not ids:
@@ -419,14 +441,21 @@ def state_card():
 
 def pipeline_steps(s):
     """Шаги В ПОРЯДКЕ ИСПОЛНЕНИЯ: [{kind, jobs, label}]. Пустой jobs = делать нечего."""
+    sg = s.get("sgusti") or []
     return [
+        {
+            "kind": "sgusti",
+            "jobs": [("sgusti", g) for g in sg],
+            "label": (f"1. Схлопывание — {len(sg)} гео" if sg else "1. Схлопывание"),
+            "note": "ключей не тратит; смотреть протокол tests/dedup/<гео>.txt",
+        },
         {
             "kind": "mark",
             "jobs": [("mark", x["geo"]) for x in s["mark"]],
             "label": (
-                f"1. Разметка — {len(s['mark'])} гео, {s['mark_n']} мух"
+                f"2. Разметка — {len(s['mark'])} гео, {s['mark_n']} мух"
                 if s["mark"]
-                else "1. Разметка"
+                else "2. Разметка"
             ),
             "note": "",
         },
@@ -434,20 +463,20 @@ def pipeline_steps(s):
             "kind": "svod",
             "jobs": [("svod", g) for g in s["svod"]],
             "label": (
-                f"2. Списки — {len(s['svod'])} гео" if s["svod"] else "2. Списки"
+                f"3. Списки — {len(s['svod'])} гео" if s["svod"] else "3. Списки"
             ),
             "note": "",
         },
         {
             "kind": "build",
             "jobs": [("build", None)] if s["geos"] else [],
-            "label": f"3. Сборка сайта — {s['views']} страниц",
+            "label": f"4. Сборка сайта — {s['views']} страниц",
             "note": "",
         },
         {
             "kind": "translate",
             "jobs": [],
-            "label": "4. Переводы",
+            "label": "5. Переводы",
             "note": "запускать после сборки",
         },
     ]
