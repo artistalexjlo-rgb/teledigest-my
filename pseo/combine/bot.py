@@ -59,28 +59,6 @@ _TAX_VERSION = _tax.VERSION
 _TAX_NAMES = set(_tax.SHELF_NAMES)
 
 
-def stale_shelf(geo):
-    """Полка гео, которой в ТЕКУЩЕЙ таксономии больше нет — её и надо пере-разложить.
-
-    Имя берётся из ДАННЫХ, а не из константы: переименовали или разобрали полку — пульт
-    узнает об этом сам. Ничего не нашлось (сменились только границы, имена целы) — значит
-    целевым режимом делать нечего, нужна полная раскладка, и об этом честно говорим.
-    """
-    try:
-        with open(f"{BRAIN}/out_facet/{geo}.json", encoding="utf-8") as fh:
-            d = json.load(fh)
-    except Exception:
-        return None
-    known = set(_tax.SHELF_NAMES)
-    for sh in d.get("shelves") or []:
-        if sh.get("shelf") and sh["shelf"] not in known:
-            return sh["shelf"]
-    return None
-
-
-# ⭐ МЕНЮ ТРАКТА «ТЕМА И ПОДТЕМА» (канон §0.19). Старые кнопки (facet+carve, хвост→полки,
-# полки видам, раздел мухам, пере-раскладка, дела, пробы) сняты вместе с их шагами: место
-# страницы решалось трижды, теперь один раз в разметке.
 MENU = {
     # ШАГ 3. Разметка: муха → перевод + тема из 13 + подтема. Пачка 25, добирает неразмеченных.
     # «гео» или «гео:сколько» — второе для пробного куска.
@@ -456,7 +434,7 @@ def pipeline_steps(s):
 
 def facet_queue(s):
     """Гео шага разметки в порядке исполнения — для строк-кнопок под шагом."""
-    return [{"geo": x["geo"], "n": x["n"], "broken": False} for x in s["mark"]]
+    return [{"geo": x["geo"], "n": x["n"]} for x in s["mark"]]
 
 
 class Job:
@@ -486,24 +464,18 @@ class Job:
                 return
             if not _chain:
                 self.chain = []  # ручной запуск отменяет недобеганную цепочку
-            # ⭐ Пара «гео:раздел» для контроля: раздел приходит в том же значении, что
-            # гео. Разбираем ДО общей подстановки, иначе `{shelf}` пошёл бы искать
-            # устаревшую полку и кнопка отказалась бы работать на живой таксономии.
-            shelf_arg = None
+            # Пара «гео:аргумент» (например `mark cz:50`) — второе значение необязательное.
+            # ⛔ Нет пары — аргумент просто ВЫКИДЫВАЕМ из команды. Раньше здесь стоял поиск
+            # устаревшей полки, и `mark cz` уходил в него: пульт отвечал «полок из старой
+            # таксономии нет» вместо запуска. Ветка умерла вместе со своей кнопкой.
+            arg = None
             if geo and ":" in geo:
-                geo, shelf_arg = geo.split(":", 1)
+                geo, arg = geo.split(":", 1)
             argv = [a.replace("{geo}", geo or "") for a in MENU[kind][1]]
-            if shelf_arg:
-                argv = [a.replace("{shelf}", shelf_arg) for a in argv]
-            elif any("{shelf}" in a for a in argv):
-                sh = stale_shelf(geo)
-                if not sh:
-                    say(
-                        f"{geo}: полок из старой таксономии нет — целевым режимом нечего "
-                        f"делать, нужна полная раскладка (кнопка «Хвост→полки»)."
-                    )
-                    return
-                argv = [a.replace("{shelf}", sh) for a in argv]
+            if arg:
+                argv = [a.replace("{shelf}", arg) for a in argv]
+            else:
+                argv = [a for a in argv if "{shelf}" not in a]
             for f in STOP_FLAGS:  # прошлый стоп не должен глушить новый заказ
                 if os.path.exists(f):
                     os.remove(f)
@@ -811,13 +783,14 @@ def send_menu(job):
         )
         if st["note"]:
             rows.append([{"text": f"　　　└ {st['note']}", "callback_data": "menu"}])
-        for x in st["geos"][:8]:  # точечно по гео — ПОД своим шагом, а не над ним
+        # ⛔ Строки по гео берём из очереди шага, а не из ключа `geos` у шага: шаги нового
+        # тракта его не носят, и стартовое меню падало на KeyError.
+        for x in (facet_queue(s) if st["kind"] == "mark" else [])[:8]:
             rows.append(
                 [
                     {
-                        "text": "　　　└ %s — %d мух%s"
-                        % (x["geo"], x["n"], " 🔧 брак" if x["broken"] else ""),
-                        "callback_data": f"run:facet:{x['geo']}",
+                        "text": "　　　└ %s — %d мух" % (x["geo"], x["n"]),
+                        "callback_data": f"run:mark:{x['geo']}",
                     }
                 ]
             )
