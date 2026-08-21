@@ -77,13 +77,16 @@ MENU = {
     # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `pages.py`
     # превращает корпус в страницы, `render.py` рендерит уже готовые. 21.08 кнопка звала один
     # рендер, и прогон дал `rendered=0` — собирать было нечего.
+    # ⛔ Каталоги задаются ПЕРЕМЕННЫМИ, а не `cd`: `pages.py` читает корпус из `BUILT_DIR`,
+    # `render.py` пишет дерево в `PSEO_OUT`. Проверено прогоном 21.08 — с одним `cd` сборка
+    # брала бы боевой корпус вместо тестового.
     "build": (
         "Сборка сайта (тест)",
         [
             "bash",
             "-lc",
-            f"cd {BRAIN}/{TESTS} && python -u {BUILDER}/pages.py --all "
-            f"&& python -u {BUILDER}/../render.py --all",
+            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/pages.py --all "
+            f"&& PSEO_OUT={BRAIN}/{TESTS}/out python -u {BUILDER}/../render.py --all",
         ],
     ),
     # ШАГ 6. Переводы на 13 языков.

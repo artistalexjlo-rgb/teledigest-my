@@ -131,7 +131,10 @@ def test_build_assembles_pages_before_rendering():
     cmd = " ".join(bot.MENU["build"][1])
     assert "pages.py" in cmd and "render.py" in cmd, cmd
     assert cmd.index("pages.py") < cmd.index("render.py"), cmd
-    assert "/tests" in cmd, f"сборка идёт не в тестовом каталоге: {cmd}"
+    # ⛔ Каталог задаётся ПЕРЕМЕННЫМИ: `pages.py` читает корпус из BUILT_DIR, `render.py`
+    # пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено прогоном.
+    assert "BUILT_DIR=" in cmd and "/tests" in cmd, cmd
+    assert "PSEO_OUT=" in cmd and "/tests/out" in cmd, cmd
 
 
 def test_state_counts_the_test_folder():
