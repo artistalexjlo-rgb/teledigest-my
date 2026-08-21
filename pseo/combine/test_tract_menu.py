@@ -135,6 +135,13 @@ def test_build_assembles_pages_before_rendering():
     # пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено прогоном.
     assert "BUILT_DIR=" in cmd and "/tests" in cmd, cmd
     assert "PSEO_OUT=" in cmd and "/tests/out" in cmd, cmd
+    # ⛔ И середина тракта — собранные страницы — тоже в `tests/`, ОБЕИМ половинам. Без
+    # `PSEO_DATA` они ложились в `/app/data` внутри образа: вне маунта, вне тестовой папки
+    # и насмерть при редеплое.
+    halves = cmd.split("&&")
+    assert len(halves) == 2, cmd
+    for half in halves:
+        assert "PSEO_DATA=" in half and "/tests/data" in half, half
 
 
 def test_state_counts_the_test_folder():

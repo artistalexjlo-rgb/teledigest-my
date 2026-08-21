@@ -31,6 +31,10 @@ from config.site import SITE  # noqa: E402
 # пустой `/app/out` и рапортовал «готово 0» при собранном сайте. Одно знание — одно место.
 # PSEO_OUT нужен именно пульту: писать сразу в маунт, а не копировать после рендера.
 OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (BASE / "out"))
+# ⭐ И ЕДИНСТВЕННОЕ определение каталога СОБРАННЫХ СТРАНИЦ. `pages.py` в него пишет,
+# рендер из него читает — переменная одна на обоих, иначе испытательный прогон собрал бы
+# сайт из боевого корпуса, а тестовый остался бы лежать нетронутым.
+DATA = pathlib.Path(os.environ.get("PSEO_DATA") or (BASE / "data"))
 
 _env = Environment(
     loader=FileSystemLoader(str(BASE / "templates")),
@@ -176,11 +180,12 @@ def index_paths(data_dir=None) -> set[str]:
     """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы.
 
     `data_dir` нужен сторожу: подменять `BASE` нельзя — от него же берутся i18n, шаблоны
-    и ассеты, и тест ломался бы на них, а не проверял правило.
+    и ассеты, и тест ломался бы на них, а не проверял правило. Боевой и испытательный
+    прогоны каталог не передают — берут `DATA` (`PSEO_DATA`).
     """
     global _PATHS
     _PATHS = set()
-    for jf in pathlib.Path(data_dir or (BASE / "data")).glob("*.json"):
+    for jf in pathlib.Path(data_dir or DATA).glob("*.json"):
         try:
             p = json.loads(jf.read_text(encoding="utf-8")).get("path")
         except Exception:
@@ -244,9 +249,9 @@ def _indexable(page: dict) -> bool:
 def build_all(lastmod: str = "", data_dir=None) -> dict:
     """Рендерит все data/*.json, пишет sitemap.xml (только indexable) + robots.txt.
     lastmod — ISO-дата для <lastmod> (freshness-сигнал); пустая → без тега.
-    data_dir — только для сторожей (боевой прогон берёт `BASE/data`).
+    data_dir — только для сторожей (прогон берёт `DATA`, см. `PSEO_DATA`).
     Возвращает {rendered, indexed, skipped_noindex, assets, search_titles}."""
-    data_dir = pathlib.Path(data_dir or (BASE / "data"))
+    data_dir = pathlib.Path(data_dir or DATA)
     index_paths(
         data_dir
     )  # ДО рендера: hreflang опирается на собранное, а не на догадку

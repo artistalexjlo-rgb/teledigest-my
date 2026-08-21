@@ -78,15 +78,20 @@ MENU = {
     # превращает корпус в страницы, `render.py` рендерит уже готовые. 21.08 кнопка звала один
     # рендер, и прогон дал `rendered=0` — собирать было нечего.
     # ⛔ Каталоги задаются ПЕРЕМЕННЫМИ, а не `cd`: `pages.py` читает корпус из `BUILT_DIR`,
-    # `render.py` пишет дерево в `PSEO_OUT`. Проверено прогоном 21.08 — с одним `cd` сборка
-    # брала бы боевой корпус вместо тестового.
+    # обе половины кладут/берут страницы в `PSEO_DATA`, `render.py` пишет дерево в `PSEO_OUT`.
+    # Проверено прогоном 21.08 — с одним `cd` сборка брала бы боевой корпус вместо тестового.
+    # ⛔ `PSEO_DATA` нужен ОБЕИМ половинам: без него середина тракта (собранные страницы)
+    # оставалась внутри образа (`/app/data`) — вне маунта и вне `tests/`, и пропадала при
+    # редеплое, а посмотреть на неё снаружи было нечем.
     "build": (
         "Сборка сайта (тест)",
         [
             "bash",
             "-lc",
-            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/pages.py --all "
-            f"&& PSEO_OUT={BRAIN}/{TESTS}/out python -u {BUILDER}/../render.py --all",
+            f"BUILT_DIR={BRAIN}/{TESTS} PSEO_DATA={BRAIN}/{TESTS}/data "
+            f"python -u {BUILDER}/pages.py --all "
+            f"&& PSEO_DATA={BRAIN}/{TESTS}/data PSEO_OUT={BRAIN}/{TESTS}/out "
+            f"python -u {BUILDER}/../render.py --all",
         ],
     ),
     # ШАГ 6. Переводы на 13 языков.
