@@ -41,6 +41,9 @@ MAX_PHASE_TRIES = int(os.environ.get("COMBINE_PHASE_TRIES", "3"))
 LIVE_EVERY = int(
     os.environ.get("COMBINE_LIVE_EVERY", "25")
 )  # сек между правками живой строки
+# ⛔ Прогоны новой схемы живут в своей папке (заказ юзера 20.08). Боевые `tags/` и
+# `out_facet/` пульт не трогает, пока схема не принята.
+TESTS = "tests"
 JOBS_DB = os.path.join(BRAIN, "combine_jobs.db")
 KB_DB = os.path.join(BRAIN, "keybroker.db")
 # два флага: facet-рты чтут RUNNER_STOP, lang_runner — LANG_RUNNER_STOP
@@ -71,8 +74,18 @@ MENU = {
         "Списки <гео>",
         ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--svod"],
     ),
-    # ШАГ 5. Сборка и рендер всего дерева — код, ключей не тратит.
-    "build": ("Сборка сайта", ["python", "-u", f"{BUILDER}/../render.py", "--all"]),
+    # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `pages.py`
+    # превращает корпус в страницы, `render.py` рендерит уже готовые. 21.08 кнопка звала один
+    # рендер, и прогон дал `rendered=0` — собирать было нечего.
+    "build": (
+        "Сборка сайта (тест)",
+        [
+            "bash",
+            "-lc",
+            f"cd {BRAIN}/{TESTS} && python -u {BUILDER}/pages.py --all "
+            f"&& python -u {BUILDER}/../render.py --all",
+        ],
+    ),
     # ШАГ 6. Переводы на 13 языков.
     "translate": ("Переводы (очередь)", ["python", "-u", f"{BUILDER}/lang_runner.py"]),
     # АДРЕСА страниц: ДО переводов (перевод несёт `key` из русского файла).
@@ -326,7 +339,7 @@ def pipeline_state():
 
     # ── что уже размечено, по гео ──────────────────────────────────────────────────────
     tagged = {}
-    for fn in sorted(glob.glob(f"{BRAIN}/tags/*.json")):
+    for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/tags/*.json")):
         geo = os.path.basename(fn)[:-5]
         if geo.endswith("_fails"):  # файл сбоев — не гео
             continue
@@ -362,15 +375,15 @@ def pipeline_state():
     for geo, ids in sorted(tagged.items()):
         if not ids:
             continue
-        corpus = f"{BRAIN}/out_facet/{geo}.json"
-        tags_fn = f"{BRAIN}/tags/{geo}.json"
+        corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
+        tags_fn = f"{BRAIN}/{TESTS}/tags/{geo}.json"
         if not os.path.exists(corpus) or os.path.getmtime(corpus) < os.path.getmtime(
             tags_fn
         ):
             st["svod"].append(geo)
 
     # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
-    for fn in sorted(glob.glob(f"{BRAIN}/out_facet/*.json")):
+    for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet/*.json")):
         try:
             d = json.load(open(fn, encoding="utf-8"))
         except Exception:

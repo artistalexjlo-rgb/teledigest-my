@@ -46,13 +46,6 @@ def test_old_steps_are_gone():
     assert not lишние, f"старые кнопки на месте: {sorted(lишние)}"
 
 
-def test_build_step_costs_no_keys():
-    """Сборка — код, а не рот: зовёт рендер, а не билдерский рот."""
-    argv = bot.MENU["build"][1]
-    assert any(a.endswith("render.py") for a in argv), argv
-    assert "--all" in argv, argv
-
-
 def test_steps_go_in_tract_order():
     """Вертикаль меню = порядок тракта: разметка → списки → сборка → переводы."""
     kinds = [
@@ -70,8 +63,8 @@ def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     ⛔ Иначе шаг покажет ✅ на несобранном гео, и упавшее заново не встанет (канон §0.17).
     """
     monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
-    (tmp_path / "tags").mkdir()
-    (tmp_path / "tags" / "cz.json").write_text(
+    (tmp_path / "tests" / "tags").mkdir(parents=True)
+    (tmp_path / "tests" / "tags" / "cz.json").write_text(
         '[{"id": "a", "perevod": "текст", "tema": "transport", "podtema": "аренда"}]',
         encoding="utf-8",
     )
@@ -117,3 +110,32 @@ def test_optional_argument_is_dropped_without_a_pair():
         'argv = [a for a in argv if "{shelf}" not in a]' in src
     ), "аргумент не выкидывается"
     assert "stale_shelf" not in src, "вернулась ветка про устаревшую полку"
+
+
+def test_tract_writes_only_into_tests():
+    """⛔ Прогоны новой схемы живут в `tests/` и только там (заказ юзера 20.08).
+
+    Повод: 21.08 разметка ушла в боевую `tags/`, смешав 146 старых записей с 42 новыми, а свод
+    переписал боевой корпус Чехии. Каталог обязан решаться ОДНОЙ константой.
+    """
+    src = (HERE.parent / "builder" / "tract.py").read_text(encoding="utf-8")
+    assert 'TESTS = "tests"' in src, "каталог прогонов не задан константой"
+    for line in src.splitlines():
+        code = line.split("#", 1)[0]
+        if 'f"tags/' in code or 'f"out_facet/' in code:
+            raise AssertionError(f"тракт пишет в боевую папку: {line.strip()}")
+
+
+def test_build_assembles_pages_before_rendering():
+    """Сборка = страницы, потом рендер. Один рендер даёт `rendered=0` — это уже случалось."""
+    cmd = " ".join(bot.MENU["build"][1])
+    assert "pages.py" in cmd and "render.py" in cmd, cmd
+    assert cmd.index("pages.py") < cmd.index("render.py"), cmd
+    assert "/tests" in cmd, f"сборка идёт не в тестовом каталоге: {cmd}"
+
+
+def test_state_counts_the_test_folder():
+    """Состояние считает по тестовой разметке, иначе шаги покажут боевые числа."""
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert 'TESTS = "tests"' in src
+    assert "{BRAIN}/{TESTS}/tags/" in src, "состояние читает боевые теги"

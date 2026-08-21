@@ -1,8 +1,13 @@
 """ТРАКТ «ТЕМА И ПОДТЕМА» (канон §0.19) — шаги 3 и 4 взамен старой нарезки.
 
-Шаг 3 РАЗМЕТКА: муха → перевод + тема (одна из 13) + подтема. Пачка 25, пишет `tags/<гео>.json`.
-Шаг 4 СПИСКИ:   мухи темы → списки с именами. Пачка 90, пишет `out_facet/<гео>.json` в том
-                виде, который уже понимает сборка: `views_by_task` и `shelves` (остаток).
+Шаг 3 РАЗМЕТКА: муха → перевод + тема (одна из 13) + подтема. Пачка 25.
+Шаг 4 СПИСКИ:   мухи темы → списки с именами. Пачка 90; корпус в том виде, который уже
+                понимает сборка: `views_by_task` и `shelves` (остаток).
+
+⛔ ВСЁ ПИШЕТСЯ В `tests/` И ТОЛЬКО ТУДА (заказ юзера 20.08: прогоны новой схемы — в тестовую
+папку). Боевые `tags/` и `out_facet/` не трогаются, пока схема не принята: 21.08 я направил
+разметку в боевую папку, там смешались 146 старых записей с 42 новыми, а свод переписал боевой
+корпус Чехии. Каталог задан ОДНОЙ константой ниже — второго места, где это решается, нет.
 
 ⛔ Числа списков у рта НЕ спрашиваем и вилок не задаём — их место в коде. Порог страницы один
 на весь тракт (`tail_taxonomy.PAGE_MIN`).
@@ -20,6 +25,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tail_taxonomy as tax  # noqa: E402
 from facet import load_flies  # noqa: E402
 from keybroker import call  # noqa: E402
+
+# ⛔ ЕДИНСТВЕННОЕ место, где решается «куда пишем». Боевые каталоги рядом (`tags/`,
+# `out_facet/`) — их новый тракт не касается.
+TESTS = "tests"
 
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
 SVOD_BATCH = 90  # мух в запрос списков: та же пачка, что у прочих ртов тракта
@@ -57,7 +66,7 @@ SVOD_SYS = (
 
 def mark(geo, limit=None):
     """Шаг 3: разметить мух гео. Добирает только неразмеченных."""
-    fn = f"tags/{geo}.json"
+    fn = f"{TESTS}/tags/{geo}.json"
     done = json.load(open(fn, encoding="utf-8")) if os.path.exists(fn) else []
     have = {r["id"] for r in done}
     flies = [f for f in load_flies(geo) if f[0] not in have]
@@ -97,6 +106,7 @@ def mark(geo, limit=None):
                     "podtema": str(r.get("podtema")).strip(),
                 }
             )
+        os.makedirs(f"{TESTS}/tags", exist_ok=True)
         with open(fn, "w", encoding="utf-8") as fh:  # чекпоинт: СТОП не съест сделанное
             json.dump(done, fh, ensure_ascii=False)
         print(f"  {min(st + MARK_BATCH, len(flies))}/{len(flies)}", flush=True)
@@ -105,7 +115,7 @@ def mark(geo, limit=None):
 
 def svod(geo):
     """Шаг 4: мухи темы → списки → страницы и остаток. Пишет корпус для сборки."""
-    fn = f"tags/{geo}.json"
+    fn = f"{TESTS}/tags/{geo}.json"
     if not os.path.exists(fn):
         print(f"{geo}: разметки нет", flush=True)
         return
@@ -157,13 +167,13 @@ def svod(geo):
             f"{sum(1 for v in views if v['shelf'] == shelf_name)}, остаток {len(ostatok)}",
             flush=True,
         )
-    os.makedirs("out_facet", exist_ok=True)
+    os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
     out = {"geo": geo, "views_by_task": views, "shelves": shelves, "prochee": []}
-    with open(f"out_facet/{geo}.json", "w", encoding="utf-8") as fh:
+    with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False)
     print(
         f"свод {geo}: страниц {len(views)}, тем с остатком {len(shelves)} "
-        f"-> out_facet/{geo}.json",
+        f"-> {TESTS}/out_facet/{geo}.json",
         flush=True,
     )
 
