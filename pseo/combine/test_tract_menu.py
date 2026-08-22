@@ -168,6 +168,39 @@ def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
     assert bot.test_geo() == ""
 
 
+def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
+    """Страна пробы меняется КНОПКОЙ: строка в меню + список стран под ней.
+
+    Набирать `/geo gr` руками — значит помнить команду и код страны; пульт весь на кнопках,
+    и этот выбор не исключение.
+    """
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    bot.set_test_geo("gr")
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "all_geos": [{"geo": "br", "n": 3011}, {"geo": "gr", "n": 765}],
+            "sgusti": ["gr"],
+            "mark": [{"geo": "gr", "n": 765}],
+            "mark_n": 765,
+            "svod": [],
+            "geos": 0,
+            "views": 0,
+            "langs": [],
+        },
+    )
+    bot.send_menu(None)
+    assert "geo:pick" in str(sent[-1][1]), sent[-1][1]
+
+    bot.send_geo_picker()
+    picker = str(sent[-1][1])
+    assert "geo:br" in picker and "geo:gr" in picker, picker
+    assert "geo:-" in picker, "нет кнопки «весь корпус»"
+
+
 def test_optional_argument_is_dropped_without_a_pair():
     """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
 

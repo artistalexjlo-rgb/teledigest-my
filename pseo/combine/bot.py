@@ -368,6 +368,7 @@ def pipeline_state():
     import sys as _sys
 
     st = {
+        "all_geos": [],
         "sgusti": [],
         "mark": [],
         "mark_n": 0,
@@ -412,7 +413,10 @@ def pipeline_state():
                 by_geo.setdefault(g, set()).add(fid)
         only = test_geo()
         for g, ids in sorted(by_geo.items(), key=lambda kv: -len(kv[1])):
-            if only and g != only:  # проба идёт по одной стране — остальные не считаем
+            # Полный список — для кнопки выбора страны пробы; работа шагов ниже считается
+            # ТОЛЬКО по выбранной. Один проход по базе, два разных ответа.
+            st["all_geos"].append({"geo": g, "n": len(ids)})
+            if only and g != only:
                 continue
             left = len(ids - tagged.get(g, set()))
             if left:
@@ -847,7 +851,17 @@ def send_menu(job):
     s = pipeline_state()
     steps = pipeline_steps(s)
     total = sum(len(st["jobs"]) for st in steps)
-    rows = []
+    # ⛔ Страна пробы меняется КНОПКОЙ, а не набором команды: пульт — это кнопки, набирать
+    # `/geo gr` руками значит помнить и код страны, и саму команду.
+    geo_now = test_geo()
+    rows = [
+        [
+            {
+                "text": f"🎯 проба: {geo_now or 'весь корпус'} — сменить",
+                "callback_data": "geo:pick",
+            }
+        ]
+    ]
     if total:
         rows.append(
             [
@@ -887,6 +901,31 @@ def send_menu(job):
             )
     tg("sendMessage", chat_id=CHAT, text=card, reply_markup={"inline_keyboard": rows})
     log("меню отправлено | шагов:", total, "| первый:", first)
+
+
+def send_geo_picker():
+    """Список стран для пробы: самые крупные сверху, плюс «весь корпус».
+
+    Числа те же, что у шага разметки, — из одного прохода по базе, а не из второй копии.
+    """
+    s = pipeline_state()
+    rows = [[{"text": "весь корпус (снять пробу)", "callback_data": "geo:-"}]]
+    for x in (s.get("all_geos") or [])[:14]:
+        rows.append(
+            [
+                {
+                    "text": "%s — %d мух" % (x["geo"], x["n"]),
+                    "callback_data": f"geo:{x['geo']}",
+                }
+            ]
+        )
+    rows.append([{"text": "◀ назад в меню", "callback_data": "menu"}])
+    tg(
+        "sendMessage",
+        chat_id=CHAT,
+        text="страна пробы:",
+        reply_markup={"inline_keyboard": rows},
+    )
 
 
 def start_cycle(job):
@@ -968,6 +1007,11 @@ def main():
                 if data == "stop":
                     job.stop()
                 elif data == "menu":
+                    send_menu(job)
+                elif data == "geo:pick":
+                    send_geo_picker()
+                elif data.startswith("geo:"):
+                    set_test_geo(data.split(":", 1)[1])
                     send_menu(job)
                 elif data == "run:cycle":
                     start_cycle(job)
