@@ -419,7 +419,11 @@ def pipeline_state():
             st["all_geos"].append({"geo": g, "n": len(ids)})
             if only and g != only:
                 continue
-            left = len(ids - tagged.get(g, set()))
+            # ⛔ РАБОТУ ШАГА СЧИТАЕТ САМ ШАГ. Своя арифметика («мухи минус размеченные»)
+            # была второй копией правила и отстала, как только в тракт добавился фильтр
+            # представителей: Греция после полной разметки 751 из 751 висела с «14 мух».
+            # Идём в базу ОДИН раз (выше), а решает по этим id — тракт.
+            left = len(_tract.undone(g, list(ids), base=BRAIN))
             if left:
                 st["mark"].append({"geo": g, "n": left})
                 st["mark_n"] += left

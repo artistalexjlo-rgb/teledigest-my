@@ -249,6 +249,20 @@ def test_one_bad_button_does_not_kill_the_pult():
     assert "except Exception" in tail, tail
 
 
+def test_pult_asks_the_tract_what_is_undone():
+    """Работу шага считает САМ ШАГ — у пульта своей арифметики нет.
+
+    Повод (22.08, Греция): правило «кого возьмёт разметка» жило дважды — в тракте и своей
+    формулой в пульте. В тракт добавился фильтр представителей, пульт про него не узнал, и
+    после полной разметки 751 из 751 шаг висел с «14 мух». Сторож требует ОДНОГО места.
+    """
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert "_tract.undone(" in src, "пульт не спрашивает тракт о работе шага"
+    assert (
+        "ids - tagged.get(" not in src
+    ), "в пульте осталась своя формула работы разметки"
+
+
 def test_optional_argument_is_dropped_without_a_pair():
     """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
 

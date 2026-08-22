@@ -133,6 +133,39 @@ def sgusti(geo):
     print(f"  протокол глазами -> {proto}", flush=True)
 
 
+def undone(geo, ids, base=""):
+    """Из мух гео — те, которые шаг разметки РЕАЛЬНО возьмёт. ОДНО место, где это решается.
+
+    ⛔ ЗАЧЕМ ОТДЕЛЬНОЙ ФУНКЦИЕЙ. Правило «кого берёт разметка» жило дважды: здесь и своей
+    арифметикой в пульте («мухи гео минус размеченные»). Пока правила совпадали, копия не
+    мешала; 22.08 сюда добавился фильтр представителей — и пульт про него не узнал: Греция
+    после полной разметки 751 из 751 висела с «14 мух» и звала шаг вхолостую. Теперь пульт
+    зовёт ЭТУ функцию, и разойтись им нечем.
+
+    `ids` даёт вызывающий (у пульта они уже прочитаны одним проходом по базе) — второго
+    похода в базу функция не делает. `base` — корень данных: рот бежит с cwd=BRAIN и не
+    передаёт ничего, пульт зовёт из своего процесса и передаёт BRAIN явно.
+    """
+    tagged = set()
+    fn = os.path.join(base, TESTS, "tags", f"{geo}.json")
+    if os.path.exists(fn):
+        try:
+            tagged = {r["id"] for r in json.load(open(fn, encoding="utf-8"))}
+        except Exception:
+            tagged = set()
+    sp = os.path.join(base, TESTS, "dedup", f"{geo}.json")
+    if os.path.exists(sp):
+        try:
+            sg = json.load(open(sp, encoding="utf-8"))
+            reps = {g["rep"] for g in sg.get("groups") or []}
+            ids = [
+                i for i in ids if i in reps
+            ]  # проглоченных разметка не увидит НИКОГДА
+        except Exception:
+            pass
+    return [i for i in ids if i not in tagged]
+
+
 def mark(geo, limit=None):
     """Шаг 3: разметить мух гео. Добирает только неразмеченных.
 
@@ -141,7 +174,6 @@ def mark(geo, limit=None):
     """
     fn = f"{TESTS}/tags/{geo}.json"
     done = json.load(open(fn, encoding="utf-8")) if os.path.exists(fn) else []
-    have = {r["id"] for r in done}
     za_rep = {}
     sp = sgustok_path(geo)
     if os.path.exists(sp):
@@ -154,9 +186,9 @@ def mark(geo, limit=None):
         )
     else:
         print(f"{geo}: схлопывания нет — размечаем все мухи как есть", flush=True)
-    flies = [f for f in load_flies(geo) if f[0] not in have]
-    if za_rep:
-        flies = [f for f in flies if f[0] in za_rep]
+    all_flies = load_flies(geo)
+    beru = set(undone(geo, [i for i, _t in all_flies]))  # ТА ЖЕ функция, что у пульта
+    flies = [f for f in all_flies if f[0] in beru]
     if limit:
         flies = flies[: int(limit)]
     if not flies:
