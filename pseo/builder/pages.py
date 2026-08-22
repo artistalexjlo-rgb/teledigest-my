@@ -145,7 +145,9 @@ TYPE_SHORT = {
 SHELF_MIN = 3  # полка становится страницей от 3 абзацев (мельче — тонковато)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
-DATA = f"{BASE}/data"
+# Каталог собранных страниц: пульт уводит испытательный прогон в свою папку той же
+# переменной, что и `render.py`, — иначе середина тракта осталась бы в боевой `data`.
+DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 # built-данные лежат либо локально (pull с VPS), либо укажи путь
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
@@ -2339,6 +2341,9 @@ def write(name, obj):
     таких сигналов быстро отучается им верить. Поэтому сравниваем с тем, что уже лежит,
     игнорируя сами поля даты, и переставляем дату ТОЛЬКО при реальном отличии.
     """
+    os.makedirs(
+        DATA, exist_ok=True
+    )  # испытательный каталог заводится сам, боевой уже есть
     p = f"{DATA}/{name}"
     keep = None
     try:

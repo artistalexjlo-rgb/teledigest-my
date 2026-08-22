@@ -46,22 +46,19 @@ def test_old_steps_are_gone():
     assert not lишние, f"старые кнопки на месте: {sorted(lишние)}"
 
 
-def test_build_step_costs_no_keys():
-    """Сборка — код, а не рот: зовёт рендер, а не билдерский рот."""
-    argv = bot.MENU["build"][1]
-    assert any(a.endswith("render.py") for a in argv), argv
-    assert "--all" in argv, argv
-
-
 def test_steps_go_in_tract_order():
-    """Вертикаль меню = порядок тракта: разметка → списки → сборка → переводы."""
+    """Вертикаль меню = порядок тракта: схлопывание → разметка → списки → сборка → переводы.
+
+    Схлопывание стоит ПЕРВЫМ не для красоты: размечать оно даёт представителей, и после
+    разметки его звать поздно — рту уже заплачено за каждую почти-копию.
+    """
     kinds = [
         st["kind"]
         for st in bot.pipeline_steps(
             {"mark": [], "mark_n": 0, "svod": [], "geos": 0, "views": 0}
         )
     ]
-    assert kinds == ["mark", "svod", "build", "translate"], kinds
+    assert kinds == ["sgusti", "mark", "svod", "build", "translate"], kinds
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
@@ -70,8 +67,8 @@ def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     ⛔ Иначе шаг покажет ✅ на несобранном гео, и упавшее заново не встанет (канон §0.17).
     """
     monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
-    (tmp_path / "tags").mkdir()
-    (tmp_path / "tags" / "cz.json").write_text(
+    (tmp_path / "tests" / "tags").mkdir(parents=True)
+    (tmp_path / "tests" / "tags" / "cz.json").write_text(
         '[{"id": "a", "perevod": "текст", "tema": "transport", "podtema": "аренда"}]',
         encoding="utf-8",
     )
@@ -117,3 +114,42 @@ def test_optional_argument_is_dropped_without_a_pair():
         'argv = [a for a in argv if "{shelf}" not in a]' in src
     ), "аргумент не выкидывается"
     assert "stale_shelf" not in src, "вернулась ветка про устаревшую полку"
+
+
+def test_tract_writes_only_into_tests():
+    """⛔ Прогоны новой схемы живут в `tests/` и только там (заказ юзера 20.08).
+
+    Повод: 21.08 разметка ушла в боевую `tags/`, смешав 146 старых записей с 42 новыми, а свод
+    переписал боевой корпус Чехии. Каталог обязан решаться ОДНОЙ константой.
+    """
+    src = (HERE.parent / "builder" / "tract.py").read_text(encoding="utf-8")
+    assert 'TESTS = "tests"' in src, "каталог прогонов не задан константой"
+    for line in src.splitlines():
+        code = line.split("#", 1)[0]
+        if 'f"tags/' in code or 'f"out_facet/' in code:
+            raise AssertionError(f"тракт пишет в боевую папку: {line.strip()}")
+
+
+def test_build_assembles_pages_before_rendering():
+    """Сборка = страницы, потом рендер. Один рендер даёт `rendered=0` — это уже случалось."""
+    cmd = " ".join(bot.MENU["build"][1])
+    assert "pages.py" in cmd and "render.py" in cmd, cmd
+    assert cmd.index("pages.py") < cmd.index("render.py"), cmd
+    # ⛔ Каталог задаётся ПЕРЕМЕННЫМИ: `pages.py` читает корпус из BUILT_DIR, `render.py`
+    # пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено прогоном.
+    assert "BUILT_DIR=" in cmd and "/tests" in cmd, cmd
+    assert "PSEO_OUT=" in cmd and "/tests/out" in cmd, cmd
+    # ⛔ И середина тракта — собранные страницы — тоже в `tests/`, ОБЕИМ половинам. Без
+    # `PSEO_DATA` они ложились в `/app/data` внутри образа: вне маунта, вне тестовой папки
+    # и насмерть при редеплое.
+    halves = cmd.split("&&")
+    assert len(halves) == 2, cmd
+    for half in halves:
+        assert "PSEO_DATA=" in half and "/tests/data" in half, half
+
+
+def test_state_counts_the_test_folder():
+    """Состояние считает по тестовой разметке, иначе шаги покажут боевые числа."""
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert 'TESTS = "tests"' in src
+    assert "{BRAIN}/{TESTS}/tags/" in src, "состояние читает боевые теги"

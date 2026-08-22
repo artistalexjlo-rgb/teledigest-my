@@ -472,15 +472,22 @@ def country_full_name_en(code: str) -> str:
     keeps `wisdom_base`/`wikivoyage_base` consistent across writers
     (Apps Script, wiki import, migration).
     """
-    c = (code or "").lower()
-    name = COUNTRY_NAMES_EN.get(c)
-    if name:
-        return name
-    # Fall back to uppercase ISO and log so missing countries surface.
-    if c:
-        log.warning(
-            "country_full_name_en: missing English name for ISO code %r — "
-            "falling back to uppercase. Add it to COUNTRY_NAMES_EN.",
-            c,
-        )
-    return c.upper()
+    raw = (code or "").strip().lower()
+    # ⛔ Поле страны бывает СПИСКОМ: "de, ru", "eg, tr, ru", "tr,bg" — так его пишет
+    # extraction, когда совет верен для нескольких стран. Раньше список искался как ОДИН
+    # ISO-код, не находился и уезжал в текст эмбеддинга заглушкой "DE, RU" (замер 20.08:
+    # такие предупреждения шли пачками каждую минуту). Режем и берём имя каждому коду.
+    names = []
+    for c in [x.strip() for x in raw.split(",") if x.strip()]:
+        name = COUNTRY_NAMES_EN.get(c)
+        if not name:
+            # Предупреждаем ПО КОДУ, а не по списку — иначе в логе мусор вида "de, ru",
+            # который нельзя добавить в справочник.
+            log.warning(
+                "country_full_name_en: missing English name for ISO code %r — "
+                "falling back to uppercase. Add it to COUNTRY_NAMES_EN.",
+                c,
+            )
+            name = c.upper()
+        names.append(name)
+    return ", ".join(names)

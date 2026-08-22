@@ -1,8 +1,13 @@
 """ТРАКТ «ТЕМА И ПОДТЕМА» (канон §0.19) — шаги 3 и 4 взамен старой нарезки.
 
-Шаг 3 РАЗМЕТКА: муха → перевод + тема (одна из 13) + подтема. Пачка 25, пишет `tags/<гео>.json`.
-Шаг 4 СПИСКИ:   мухи темы → списки с именами. Пачка 90, пишет `out_facet/<гео>.json` в том
-                виде, который уже понимает сборка: `views_by_task` и `shelves` (остаток).
+Шаг 3 РАЗМЕТКА: муха → перевод + тема (одна из 13) + подтема. Пачка 25.
+Шаг 4 СПИСКИ:   мухи темы → списки с именами. Пачка 90; корпус в том виде, который уже
+                понимает сборка: `views_by_task` и `shelves` (остаток).
+
+⛔ ВСЁ ПИШЕТСЯ В `tests/` И ТОЛЬКО ТУДА (заказ юзера 20.08: прогоны новой схемы — в тестовую
+папку). Боевые `tags/` и `out_facet/` не трогаются, пока схема не принята: 21.08 я направил
+разметку в боевую папку, там смешались 146 старых записей с 42 новыми, а свод переписал боевой
+корпус Чехии. Каталог задан ОДНОЙ константой ниже — второго места, где это решается, нет.
 
 ⛔ Числа списков у рта НЕ спрашиваем и вилок не задаём — их место в коде. Порог страницы один
 на весь тракт (`tail_taxonomy.PAGE_MIN`).
@@ -17,9 +22,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import dedup  # noqa: E402
 import tail_taxonomy as tax  # noqa: E402
 from facet import load_flies  # noqa: E402
 from keybroker import call  # noqa: E402
+
+# ⛔ ЕДИНСТВЕННОЕ место, где решается «куда пишем». Боевые каталоги рядом (`tags/`,
+# `out_facet/`) — их новый тракт не касается.
+TESTS = "tests"
+
+# Порог схлопывания почти-копий. Замер 20.08 на боевом корпусе: 0.86 прячет за счётчиком
+# до четверти содержимого (в одной группе из 44 советов Черногории слиплись налог,
+# регистрация и ответственность владельца жилья), 0.93 берёт 3,5% — настоящие почти-копии.
+# Судить порог по протоколу схлопывания (`tests/dedup/<гео>.txt`), а не по счётчику.
+SGUSTOK_THR = 0.93
 
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
 SVOD_BATCH = 90  # мух в запрос списков: та же пачка, что у прочих ртов тракта
@@ -55,12 +71,92 @@ SVOD_SYS = (
 )
 
 
+def sgustok_path(geo):
+    return f"{TESTS}/dedup/{geo}.json"
+
+
+def sgusti(geo):
+    """Шаг 2: схлопнуть почти-копии гео ДО разметки — размечать будем представителей.
+
+    Ключей НЕ тратит: вектора готовые, из `local_vec.db` свипера.
+
+    ⭐ ПИШЕТ ПРОТОКОЛ, а не счётчик. `tests/dedup/<гео>.txt` — по каждой склейке текст
+    представителя, который остаётся, и полные тексты тех, кого он проглотил. Иначе шаг
+    неизмерим: «схлопнуто 27» не отличает настоящие повторы от съеденного содержимого, а
+    ровно на этом 0.86 и прокололся.
+    """
+    flies = load_flies(geo)
+    texts = {i: t for i, t in flies}
+    ids = [i for i, _ in flies]
+    vv = dedup.load_vecs(ids)
+    no_vec = [i for i in ids if i not in vv]
+    groups = dedup.groups_all(ids, vv, SGUSTOK_THR)
+    multi = [g for g in groups if len(g) > 1]
+    swallowed = sum(len(g) - 1 for g in multi)
+    recs = []
+    for g in sorted(groups, key=lambda g: -len(g)):
+        rep = max(g, key=lambda i: len(texts[i]))
+        recs.append({"rep": rep, "ids": g})
+
+    os.makedirs(f"{TESTS}/dedup", exist_ok=True)
+    with open(sgustok_path(geo), "w", encoding="utf-8") as fh:
+        json.dump(
+            {"geo": geo, "thr": SGUSTOK_THR, "no_vec": len(no_vec), "groups": recs},
+            fh,
+            ensure_ascii=False,
+        )
+    proto = f"{TESTS}/dedup/{geo}.txt"
+    with open(proto, "w", encoding="utf-8") as fh:
+        print(f"# {geo}: схлопывание почти-копий, порог {SGUSTOK_THR}", file=fh)
+        print(
+            f"# мух {len(ids)}, без вектора {len(no_vec)}, "
+            f"склеек {len(multi)}, схлопнуто {swallowed}",
+            file=fh,
+        )
+        for r in recs:
+            if len(r["ids"]) < 2:
+                continue
+            print("", file=fh)
+            print(f"=== группа из {len(r['ids'])} ===", file=fh)
+            print(f"[ОСТАЁТСЯ {r['rep']}] {texts[r['rep']]}", file=fh)
+            for i in r["ids"]:
+                if i != r["rep"]:
+                    print(f"  [СХЛОПНУТА {i}] {texts[i]}", file=fh)
+    sizes = sorted((len(g) for g in multi), reverse=True)[:8]
+    print(
+        f"{geo}: мух {len(ids)}, без вектора {len(no_vec)}, склеек {len(multi)}, "
+        f"схлопнуто {swallowed} ({100.0 * swallowed / max(len(ids), 1):.1f}%), "
+        f"крупнейшие {sizes}",
+        flush=True,
+    )
+    print(f"  к разметке пойдут {len(recs)} представителей", flush=True)
+    print(f"  протокол глазами -> {proto}", flush=True)
+
+
 def mark(geo, limit=None):
-    """Шаг 3: разметить мух гео. Добирает только неразмеченных."""
-    fn = f"tags/{geo}.json"
+    """Шаг 3: разметить мух гео. Добирает только неразмеченных.
+
+    Если схлопывание (шаг 2) прошло — размечаем ТОЛЬКО представителей, а сколько мух за
+    каждым, несём числом `n`: платить рту за пересказ одного и того же незачем.
+    """
+    fn = f"{TESTS}/tags/{geo}.json"
     done = json.load(open(fn, encoding="utf-8")) if os.path.exists(fn) else []
     have = {r["id"] for r in done}
+    za_rep = {}
+    sp = sgustok_path(geo)
+    if os.path.exists(sp):
+        sg = json.load(open(sp, encoding="utf-8"))
+        za_rep = {g["rep"]: len(g["ids"]) for g in sg.get("groups") or []}
+        print(
+            f"{geo}: схлопывание есть (порог {sg.get('thr')}), "
+            f"представителей {len(za_rep)}",
+            flush=True,
+        )
+    else:
+        print(f"{geo}: схлопывания нет — размечаем все мухи как есть", flush=True)
     flies = [f for f in load_flies(geo) if f[0] not in have]
+    if za_rep:
+        flies = [f for f in flies if f[0] in za_rep]
     if limit:
         flies = flies[: int(limit)]
     if not flies:
@@ -95,8 +191,11 @@ def mark(geo, limit=None):
                     # видимой кучей, а не растворяется по чужим темам.
                     "tema": tema if tema in keys else "prochee",
                     "podtema": str(r.get("podtema")).strip(),
+                    # сколько мух стоит за представителем (1 — если схлопывания не было)
+                    "n": za_rep.get(fid, 1),
                 }
             )
+        os.makedirs(f"{TESTS}/tags", exist_ok=True)
         with open(fn, "w", encoding="utf-8") as fh:  # чекпоинт: СТОП не съест сделанное
             json.dump(done, fh, ensure_ascii=False)
         print(f"  {min(st + MARK_BATCH, len(flies))}/{len(flies)}", flush=True)
@@ -105,7 +204,7 @@ def mark(geo, limit=None):
 
 def svod(geo):
     """Шаг 4: мухи темы → списки → страницы и остаток. Пишет корпус для сборки."""
-    fn = f"tags/{geo}.json"
+    fn = f"{TESTS}/tags/{geo}.json"
     if not os.path.exists(fn):
         print(f"{geo}: разметки нет", flush=True)
         return
@@ -142,13 +241,18 @@ def svod(geo):
         for imya, ids in spiski.items():
             ids = [i for i in dict.fromkeys(ids) if i not in seen and i in by_id]
             seen.update(ids)
-            items = [{"id": i, "text": by_id[i]["perevod"]} for i in ids]
+            items = [
+                {"id": i, "text": by_id[i]["perevod"], "n": by_id[i].get("n", 1)}
+                for i in ids
+            ]
             if len(items) >= tax.PAGE_MIN:
                 views.append({"zadacha": imya, "shelf": shelf_name, "items": items})
             else:
                 ostatok.extend(items)
         ostatok.extend(
-            {"id": r["id"], "text": r["perevod"]} for r in group if r["id"] not in seen
+            {"id": r["id"], "text": r["perevod"], "n": r.get("n", 1)}
+            for r in group
+            if r["id"] not in seen
         )
         if ostatok:
             shelves.append({"shelf": shelf_name, "items": ostatok})
@@ -157,13 +261,13 @@ def svod(geo):
             f"{sum(1 for v in views if v['shelf'] == shelf_name)}, остаток {len(ostatok)}",
             flush=True,
         )
-    os.makedirs("out_facet", exist_ok=True)
+    os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
     out = {"geo": geo, "views_by_task": views, "shelves": shelves, "prochee": []}
-    with open(f"out_facet/{geo}.json", "w", encoding="utf-8") as fh:
+    with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False)
     print(
         f"свод {geo}: страниц {len(views)}, тем с остатком {len(shelves)} "
-        f"-> out_facet/{geo}.json",
+        f"-> {TESTS}/out_facet/{geo}.json",
         flush=True,
     )
 
@@ -172,7 +276,9 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         raise SystemExit("нужно: tract.py <гео> --mark [сколько] | --svod")
     _geo = sys.argv[1]
-    if "--mark" in sys.argv:
+    if "--sgusti" in sys.argv:
+        sgusti(_geo)
+    elif "--mark" in sys.argv:
         _i = sys.argv.index("--mark")
         mark(_geo, sys.argv[_i + 1] if len(sys.argv) > _i + 1 else None)
     elif "--svod" in sys.argv:
