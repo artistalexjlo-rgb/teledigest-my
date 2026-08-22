@@ -131,6 +131,76 @@ def test_every_geo_step_gets_its_own_rows(monkeypatch):
     assert "run:mark:gr" in text, text
 
 
+def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
+    """Пока идёт проба, меню считает ОДНУ страну.
+
+    Повод: без этого пульт рисовал строку на каждое из 94 гео у каждого шага — полотно
+    кнопок, где нужную надо искать, а «ВСЁ ПО ПОРЯДКУ» звало на весь корпус (188 шагов,
+    ~23 тысячи запросов при потолке ~5 280 в день).
+    """
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    bot.set_test_geo("gr")
+    assert bot.test_geo() == "gr"
+
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "sgusti": ["gr"],
+            "mark": [{"geo": "gr", "n": 765}],
+            "mark_n": 765,
+            "svod": [],
+            "geos": 0,
+            "views": 0,
+            "langs": [],
+        },
+    )
+    bot.send_menu(None)
+    text = str(sent[-1][1])
+    assert "run:sgusti:gr" in text and "run:mark:gr" in text, text
+    for chuzhoy in ("br", "kr", "vn", "any"):
+        assert f"run:sgusti:{chuzhoy}" not in text, chuzhoy
+    assert "проба: gr" in text, text
+
+    bot.set_test_geo("-")  # снятие возвращает счёт по всему корпусу
+    assert bot.test_geo() == ""
+
+
+def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
+    """Страна пробы меняется КНОПКОЙ: строка в меню + список стран под ней.
+
+    Набирать `/geo gr` руками — значит помнить команду и код страны; пульт весь на кнопках,
+    и этот выбор не исключение.
+    """
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    bot.set_test_geo("gr")
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "all_geos": [{"geo": "br", "n": 3011}, {"geo": "gr", "n": 765}],
+            "sgusti": ["gr"],
+            "mark": [{"geo": "gr", "n": 765}],
+            "mark_n": 765,
+            "svod": [],
+            "geos": 0,
+            "views": 0,
+            "langs": [],
+        },
+    )
+    bot.send_menu(None)
+    assert "geo:pick" in str(sent[-1][1]), sent[-1][1]
+
+    bot.send_geo_picker()
+    picker = str(sent[-1][1])
+    assert "geo:br" in picker and "geo:gr" in picker, picker
+    assert "geo:-" in picker, "нет кнопки «весь корпус»"
+
+
 def test_optional_argument_is_dropped_without_a_pair():
     """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
 

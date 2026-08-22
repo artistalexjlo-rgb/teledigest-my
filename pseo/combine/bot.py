@@ -44,6 +44,11 @@ LIVE_EVERY = int(
 # ⛔ Прогоны новой схемы живут в своей папке (заказ юзера 20.08). Боевые `tags/` и
 # `out_facet/` пульт не трогает, пока схема не принята.
 TESTS = "tests"
+# ⛔ СТРАНА ПРОБЫ. Пока схема испытывается, работа идёт по ОДНОЙ стране, и меню обязано
+# показывать её одну: без этого пульт рисовал 94 гео на каждый шаг — полотно кнопок,
+# в котором нужную строку надо искать, а «ВСЁ ПО ПОРЯДКУ» звало на весь корпус.
+# Лежит файлом рядом с данными пробы, меняется командой `/geo <код>`; пусто = весь корпус.
+GEO_FILE = os.path.join(BRAIN, TESTS, "GEO")
 JOBS_DB = os.path.join(BRAIN, "combine_jobs.db")
 KB_DB = os.path.join(BRAIN, "keybroker.db")
 # два флага: facet-рты чтут RUNNER_STOP, lang_runner — LANG_RUNNER_STOP
@@ -110,6 +115,24 @@ MENU = {
         ["python", "-u", f"{BUILDER}/facet_lang.py", "--stamp-keys", "{geo}"],
     ),
 }
+
+
+def test_geo():
+    """Код страны пробы или пусто. Файл — чтобы переживал редеплой контейнера."""
+    try:
+        return open(GEO_FILE, encoding="utf-8").read().strip().lower()
+    except Exception:
+        return (os.environ.get("TEST_GEO") or "").strip().lower()
+
+
+def set_test_geo(geo):
+    """Задать страну пробы. `-` (или пусто) снимает её: считаем весь корпус."""
+    geo = (geo or "").strip().lower()
+    if geo == "-":
+        geo = ""
+    os.makedirs(os.path.dirname(GEO_FILE), exist_ok=True)
+    with open(GEO_FILE, "w", encoding="utf-8") as fh:
+        fh.write(geo)
 
 
 def log(*a):
@@ -345,6 +368,7 @@ def pipeline_state():
     import sys as _sys
 
     st = {
+        "all_geos": [],
         "sgusti": [],
         "mark": [],
         "mark_n": 0,
@@ -387,7 +411,13 @@ def pipeline_state():
                 continue
             for g in _facet.geo_codes(country):
                 by_geo.setdefault(g, set()).add(fid)
+        only = test_geo()
         for g, ids in sorted(by_geo.items(), key=lambda kv: -len(kv[1])):
+            # Полный список — для кнопки выбора страны пробы; работа шагов ниже считается
+            # ТОЛЬКО по выбранной. Один проход по базе, два разных ответа.
+            st["all_geos"].append({"geo": g, "n": len(ids)})
+            if only and g != only:
+                continue
             left = len(ids - tagged.get(g, set()))
             if left:
                 st["mark"].append({"geo": g, "n": left})
@@ -402,8 +432,9 @@ def pipeline_state():
             st["sgusti"].append(x["geo"])
 
     # ── списки: разметка есть, а корпус старше её или отсутствует ──────────────────────
+    only = test_geo()
     for geo, ids in sorted(tagged.items()):
-        if not ids:
+        if not ids or (only and geo != only):
             continue
         corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
         tags_fn = f"{BRAIN}/{TESTS}/tags/{geo}.json"
@@ -428,7 +459,15 @@ def state_card():
     s = pipeline_state()
     if s.get("error"):
         return f"⚠️ {s['error']}", None
-    lines = [f"📦 корпус: {s['geos']} гео, {s['views']} страниц"]
+    geo = test_geo()
+    lines = [
+        (
+            f"🎯 проба: {geo}"
+            if geo
+            else "🎯 проба: страна не выбрана (весь корпус) — /geo <код>"
+        ),
+        f"📦 корпус: {s['geos']} гео, {s['views']} страниц",
+    ]
     if s["mark"]:
         worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["mark"][:6])
         lines.append(f"1) разметка: {len(s['mark'])} гео, {s['mark_n']} мух — {worst}")
@@ -812,7 +851,17 @@ def send_menu(job):
     s = pipeline_state()
     steps = pipeline_steps(s)
     total = sum(len(st["jobs"]) for st in steps)
-    rows = []
+    # ⛔ Страна пробы меняется КНОПКОЙ, а не набором команды: пульт — это кнопки, набирать
+    # `/geo gr` руками значит помнить и код страны, и саму команду.
+    geo_now = test_geo()
+    rows = [
+        [
+            {
+                "text": f"🎯 проба: {geo_now or 'весь корпус'} — сменить",
+                "callback_data": "geo:pick",
+            }
+        ]
+    ]
     if total:
         rows.append(
             [
@@ -852,6 +901,31 @@ def send_menu(job):
             )
     tg("sendMessage", chat_id=CHAT, text=card, reply_markup={"inline_keyboard": rows})
     log("меню отправлено | шагов:", total, "| первый:", first)
+
+
+def send_geo_picker():
+    """Список стран для пробы: самые крупные сверху, плюс «весь корпус».
+
+    Числа те же, что у шага разметки, — из одного прохода по базе, а не из второй копии.
+    """
+    s = pipeline_state()
+    rows = [[{"text": "весь корпус (снять пробу)", "callback_data": "geo:-"}]]
+    for x in (s.get("all_geos") or [])[:14]:
+        rows.append(
+            [
+                {
+                    "text": "%s — %d мух" % (x["geo"], x["n"]),
+                    "callback_data": f"geo:{x['geo']}",
+                }
+            ]
+        )
+    rows.append([{"text": "◀ назад в меню", "callback_data": "menu"}])
+    tg(
+        "sendMessage",
+        chat_id=CHAT,
+        text="страна пробы:",
+        reply_markup={"inline_keyboard": rows},
+    )
 
 
 def start_cycle(job):
@@ -934,6 +1008,11 @@ def main():
                     job.stop()
                 elif data == "menu":
                     send_menu(job)
+                elif data == "geo:pick":
+                    send_geo_picker()
+                elif data.startswith("geo:"):
+                    set_test_geo(data.split(":", 1)[1])
+                    send_menu(job)
                 elif data == "run:cycle":
                     start_cycle(job)
                 elif data.startswith("run:"):
@@ -985,6 +1064,16 @@ def main():
                 job.stop()
             elif text in ("/status", "/combine_status"):
                 job.status()
+            elif text.split(" ")[0] == "/geo":
+                arg = text.split(" ", 1)[1].strip() if " " in text else ""
+                if not arg:
+                    cur = test_geo()
+                    say(f"страна пробы: {cur or 'не выбрана (весь корпус)'}")
+                else:
+                    set_test_geo(arg)
+                    cur = test_geo()
+                    say(f"страна пробы: {cur or 'снята — считаю весь корпус'}")
+                    send_menu(job)
             else:
                 parts = text.split()
                 if parts and parts[0] in MENU:
