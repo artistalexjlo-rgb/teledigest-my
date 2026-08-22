@@ -833,14 +833,20 @@ def send_menu(job):
         )
         if st["note"]:
             rows.append([{"text": f"　　　└ {st['note']}", "callback_data": "menu"}])
-        # ⛔ Строки по гео берём из очереди шага, а не из ключа `geos` у шага: шаги нового
+        # ⛔ Строки по гео берём из работ ШАГА, а не из ключа `geos` у шага: шаги нового
         # тракта его не носят, и стартовое меню падало на KeyError.
-        for x in (facet_queue(s) if st["kind"] == "mark" else [])[:8]:
+        # ⛔ И рисуем их ЛЮБОМУ шагу, чья работа разложена по гео, а не одной разметке:
+        # без своей строки шаг запускается только целиком (94 гео), а проба идёт на одном.
+        n_by_geo = {x["geo"]: x["n"] for x in facet_queue(s)}
+        for _k, geo in st["jobs"][:8]:
+            if not geo:
+                continue
+            n = n_by_geo.get(geo)
             rows.append(
                 [
                     {
-                        "text": "　　　└ %s — %d мух" % (x["geo"], x["n"]),
-                        "callback_data": f"run:mark:{x['geo']}",
+                        "text": "　　　└ %s%s" % (geo, f" — {n} мух" if n else ""),
+                        "callback_data": f"run:{st['kind']}:{geo}",
                     }
                 ]
             )

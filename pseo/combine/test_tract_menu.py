@@ -103,6 +103,34 @@ def test_menu_builds_on_a_live_state(monkeypatch):
     assert "cz" in text and "191" in text, text
 
 
+def test_every_geo_step_gets_its_own_rows(monkeypatch):
+    """У шага, чья работа разложена по гео, в меню есть строка НА ГЕО.
+
+    Повод: схлопывание завелось строкой «94 гео» и без строк по гео — запустить его можно
+    было только на всём корпусе разом, а проба идёт на одной стране.
+    """
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "sgusti": ["gr", "me"],
+            "mark": [{"geo": "gr", "n": 765}],
+            "mark_n": 765,
+            "svod": [],
+            "geos": 0,
+            "views": 0,
+            "langs": [],
+        },
+    )
+    bot.send_menu(None)
+    text = str(sent[-1][1])
+    assert "run:sgusti:gr" in text, text
+    assert "run:sgusti:me" in text, text
+    assert "run:mark:gr" in text, text
+
+
 def test_optional_argument_is_dropped_without_a_pair():
     """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
 
