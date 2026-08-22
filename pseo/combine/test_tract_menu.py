@@ -201,6 +201,54 @@ def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
     assert "geo:-" in picker, "нет кнопки «весь корпус»"
 
 
+def test_cycle_counts_the_current_tract(monkeypatch):
+    """«ВСЁ ПО ПОРЯДКУ» считает расход по НЫНЕШНИМ шагам и не падает.
+
+    Повод: 22.08 оценка тянула ключи умершей схемы (`no_shelf`, `no_kratko`, `no_branch`),
+    и первое же нажатие уронило пульт с KeyError — вместе со всей обработкой кнопок.
+    """
+    said = []
+    monkeypatch.setattr(bot, "say", lambda t: said.append(t))
+    monkeypatch.setattr(
+        bot,
+        "pipeline_state",
+        lambda: {
+            "all_geos": [{"geo": "gr", "n": 765}],
+            "sgusti": ["gr"],
+            "mark": [{"geo": "gr", "n": 765}],
+            "mark_n": 765,
+            "svod": [],
+            "geos": 0,
+            "views": 0,
+            "langs": [],
+        },
+    )
+
+    class FakeJob:
+        chain = []
+
+        def start(self, kind, geo, _chain=False):
+            self.started = (kind, geo)
+
+    j = FakeJob()
+    bot.start_cycle(j)
+    assert j.started == ("sgusti", "gr"), getattr(j, "started", None)
+    text = " ".join(said)
+    assert "весь тракт" in text, text
+    # разметка 765/25=31 вызов, списки ≤(13+8) вызовов, по 4 запроса worst-case
+    assert "~" in text and "запросов" in text, text
+
+
+def test_one_bad_button_does_not_kill_the_pult():
+    """Обработка обновления вызывается ПОД `try` — сбой стоит кнопки, а не пульта."""
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert "def handle_update(" in src, "обработка не вынесена из цикла"
+    i = src.index("for u in r.get(")
+    tail = src[i : i + 400]
+    assert "try:" in tail and "handle_update(u, job)" in tail, tail
+    assert "except Exception" in tail, tail
+
+
 def test_optional_argument_is_dropped_without_a_pair():
     """`mark cz` без пары обязан запускаться: лишний аргумент выкидывается из команды.
 
