@@ -63,6 +63,30 @@ def test_flies_without_vector_are_kept_alone():
     assert sorted(len(g) for g in groups) == [1, 2]
 
 
+def test_undone_is_the_single_rule(tmp_path):
+    """`undone` — единственное место, где решается «кого возьмёт разметка».
+
+    Проглоченные схлопыванием не берутся никогда, уже размеченные — не берутся повторно,
+    а корень данных передаётся явно: рот бежит с cwd=BRAIN, пульт зовёт из своего процесса.
+    """
+    os.makedirs(tmp_path / "tests" / "dedup")
+    os.makedirs(tmp_path / "tests" / "tags")
+    with open(tmp_path / "tests" / "dedup" / "xx.json", "w", encoding="utf-8") as fh:
+        json.dump(
+            {"groups": [{"rep": "a", "ids": ["a", "b"]}, {"rep": "c", "ids": ["c"]}]},
+            fh,
+        )
+    ids = ["a", "b", "c"]
+    assert tract.undone("xx", ids, base=str(tmp_path)) == ["a", "c"]
+
+    with open(tmp_path / "tests" / "tags" / "xx.json", "w", encoding="utf-8") as fh:
+        json.dump([{"id": "a"}], fh)
+    assert tract.undone("xx", ids, base=str(tmp_path)) == ["c"]
+
+    # без схлопывания берутся все неразмеченные
+    assert tract.undone("yy", ids, base=str(tmp_path)) == ids
+
+
 @pytest.fixture
 def geo_probe(tmp_path, monkeypatch):
     """Гео из четырёх мух: две — почти-копии, две — разные. Вектора подставляем."""

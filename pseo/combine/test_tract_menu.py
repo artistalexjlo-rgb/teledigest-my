@@ -5,7 +5,6 @@
 всё остальное — код. Сторож держит две вещи: новые кнопки на месте и старые не вернулись.
 """
 
-import json
 import os
 import pathlib
 import sys
@@ -250,23 +249,18 @@ def test_one_bad_button_does_not_kill_the_pult():
     assert "except Exception" in tail, tail
 
 
-def test_swallowed_flies_are_not_counted_as_work(tmp_path, monkeypatch):
-    """Проглоченные схлопыванием мухи — не работа разметки.
+def test_pult_asks_the_tract_what_is_undone():
+    """Работу шага считает САМ ШАГ — у пульта своей арифметики нет.
 
-    Повод (22.08, Греция): схлопывание оставило 751 представителя из 765, разметка прошла
-    все 751 — а шаг остался красным с «14 мух». Эти 14 разметке недоступны никогда:
-    тракт сам берёт только представителей, и кнопка звала вхолостую.
+    Повод (22.08, Греция): правило «кого возьмёт разметка» жило дважды — в тракте и своей
+    формулой в пульте. В тракт добавился фильтр представителей, пульт про него не узнал, и
+    после полной разметки 751 из 751 шаг висел с «14 мух». Сторож требует ОДНОГО места.
     """
-    brain = tmp_path
-    monkeypatch.setattr(bot, "BRAIN", str(brain))
-    os.makedirs(brain / bot.TESTS / "dedup", exist_ok=True)
-    with open(brain / bot.TESTS / "dedup" / "gr.json", "w", encoding="utf-8") as fh:
-        json.dump(
-            {"groups": [{"rep": "a", "ids": ["a", "b"]}, {"rep": "c", "ids": ["c"]}]},
-            fh,
-        )
-    assert bot._reps("gr") == {"a", "c"}
-    assert bot._reps("me") == set(), "у гео без схлопывания представителей нет"
+    src = (HERE / "bot.py").read_text(encoding="utf-8")
+    assert "_tract.undone(" in src, "пульт не спрашивает тракт о работе шага"
+    assert (
+        "ids - tagged.get(" not in src
+    ), "в пульте осталась своя формула работы разметки"
 
 
 def test_optional_argument_is_dropped_without_a_pair():
