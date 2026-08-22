@@ -359,6 +359,15 @@ _RUBRICS = {
 }
 
 
+def _reps(geo):
+    """Множество представителей схлопывания для гео. Пусто = схлопывания не было."""
+    try:
+        d = json.load(open(f"{BRAIN}/{TESTS}/dedup/{geo}.json", encoding="utf-8"))
+        return {g["rep"] for g in d.get("groups") or []}
+    except Exception:
+        return set()
+
+
 def pipeline_state():
     """ЧТО НЕ СДЕЛАНО по тракту «тема и подтема» (§0.19) — считается из данных, не из памяти.
 
@@ -419,6 +428,13 @@ def pipeline_state():
             st["all_geos"].append({"geo": g, "n": len(ids)})
             if only and g != only:
                 continue
+            # ⛔ ШАГ СЧИТАЕТ ТО, ЧТО МОЖНО СДЕЛАТЬ. После схлопывания размечаются только
+            # представители, и проглоченные мухи разметке недоступны НИКОГДА. Считать их
+            # работой — значит держать шаг вечно красным и звать вхолостую: 22.08 Греция
+            # так и осталась «14 мух» после полной разметки 751 из 751.
+            reps = _reps(g)
+            if reps:
+                ids = ids & reps
             left = len(ids - tagged.get(g, set()))
             if left:
                 st["mark"].append({"geo": g, "n": left})

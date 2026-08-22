@@ -5,6 +5,7 @@
 всё остальное — код. Сторож держит две вещи: новые кнопки на месте и старые не вернулись.
 """
 
+import json
 import os
 import pathlib
 import sys
@@ -247,6 +248,25 @@ def test_one_bad_button_does_not_kill_the_pult():
     tail = src[i : i + 400]
     assert "try:" in tail and "handle_update(u, job)" in tail, tail
     assert "except Exception" in tail, tail
+
+
+def test_swallowed_flies_are_not_counted_as_work(tmp_path, monkeypatch):
+    """Проглоченные схлопыванием мухи — не работа разметки.
+
+    Повод (22.08, Греция): схлопывание оставило 751 представителя из 765, разметка прошла
+    все 751 — а шаг остался красным с «14 мух». Эти 14 разметке недоступны никогда:
+    тракт сам берёт только представителей, и кнопка звала вхолостую.
+    """
+    brain = tmp_path
+    monkeypatch.setattr(bot, "BRAIN", str(brain))
+    os.makedirs(brain / bot.TESTS / "dedup", exist_ok=True)
+    with open(brain / bot.TESTS / "dedup" / "gr.json", "w", encoding="utf-8") as fh:
+        json.dump(
+            {"groups": [{"rep": "a", "ids": ["a", "b"]}, {"rep": "c", "ids": ["c"]}]},
+            fh,
+        )
+    assert bot._reps("gr") == {"a", "c"}
+    assert bot._reps("me") == set(), "у гео без схлопывания представителей нет"
 
 
 def test_optional_argument_is_dropped_without_a_pair():
