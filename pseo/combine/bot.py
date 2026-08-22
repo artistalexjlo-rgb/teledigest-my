@@ -62,6 +62,7 @@ STOP_FLAGS = [
 # на копиях чисел этот проект уже горел (DEAD_AT разъехался по трём файлам).
 sys.path.insert(0, BUILDER)
 import tail_taxonomy as _tax  # noqa: E402
+import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 
 _TAX_VERSION = _tax.VERSION
 _TAX_NAMES = set(_tax.SHELF_NAMES)
@@ -942,14 +943,19 @@ def start_cycle(job):
         say("цикл не нужен: всё готово, можно шипить.")
         return
     # ИСПОЛНЕНИЕ ВСЛУХ (worst-case, не «выглядит ок»): считаем ДО запуска и вслух.
-    fq = facet_queue(s)
-    est = (
-        sum(x["n"] for x in fq)  # разметка: батч 25, но worst-case — запрос на муху
-        + len(s["no_shelf"]) * 70
-        + s["no_kratko"]
-        + s["no_branch"]  # ветвление: ~1 запрос на страницу-гиганта
-        + sum((m + st_) * 3 for _, m, st_ in s["langs"])
-    )
+    #
+    # ⛔ Считаем по ШАГАМ НЫНЕШНЕГО тракта. 22.08 здесь стояли ключи умершей схемы
+    # (`no_shelf`, `no_kratko`, `no_branch`), и первое же нажатие «ВСЁ ПО ПОРЯДКУ» уронило
+    # пульт с KeyError — оценка обязана считаться из того же состояния, что рисует меню.
+    est = 0
+    for x in facet_queue(s):
+        n = x["n"]
+        # разметка: пачка MARK_BATCH, worst-case 4 запроса к Google на вызов (keybroker)
+        est += -(-n // _tract.MARK_BATCH) * 4
+        # списки: пачка SVOD_BATCH внутри КАЖДОЙ из 13 тем → не больше 13 + n/пачка вызовов
+        est += (len(_tax.SHELVES) + n // _tract.SVOD_BATCH) * 4
+    # схлопывание ключей не тратит (вектора готовые), сборка и рендер — тоже
+    est += sum((m + st_) * 3 for _, m, st_ in (s.get("langs") or []))
     plan = " → ".join(
         f"{st['label'].split(' — ')[0]}×{len(st['jobs'])}" for st in steps if st["jobs"]
     )
@@ -962,6 +968,92 @@ def start_cycle(job):
     first = chain.pop(0)
     job.chain = chain
     job.start(first[0], first[1], _chain=True)
+
+
+def handle_update(u, job):
+    """Одно обновление из Telegram: кнопка или команда.
+
+    ⛔ ОТДЕЛЬНОЙ ФУНКЦИЕЙ — чтобы сбой на ОДНОЙ кнопке не убивал пульт целиком. 22.08
+    «ВСЁ ПО ПОРЯДКУ» упало с KeyError по мёртвому ключу состояния, и вместе с обработкой
+    легло всё: процесс умер, задача не бежала, отчёта не было. Ошибка обязана стоить
+    одной кнопки и уехать юзеру текстом, а не уносить пульт.
+    """
+    cb = u.get("callback_query")
+    if cb:
+        if cb["from"]["id"] != CHAT:
+            log(f"ОТКАЗ кнопка от чужого id={cb['from']['id']} (админ {CHAT})")
+            return
+        log("←КНОПКА:", cb["data"])
+        tg("answerCallbackQuery", callback_query_id=cb["id"])
+        data = cb["data"]
+        if data == "stop":
+            job.stop()
+        elif data == "menu":
+            send_menu(job)
+        elif data == "geo:pick":
+            send_geo_picker()
+        elif data.startswith("geo:"):
+            set_test_geo(data.split(":", 1)[1])
+            send_menu(job)
+        elif data == "run:cycle":
+            start_cycle(job)
+        elif data.startswith("run:"):
+            _, kind, geo = (data + ":").split(":")[:3]
+            # КНОПКА ШАГА БЕЗ ГЕО = ВСЕ РАБОТЫ ЭТОГО ШАГА, и берём их из
+            # `pipeline_steps` — того же списка, что рисует меню и собирает цикл.
+            #
+            # ⛔ Раньше здесь была ветка НА КАЖДЫЙ РОТ: своя для `facet` (цепочка из
+            # facet_queue), своя для `assign` (из no_shelf), а всё остальное падало
+            # в `job.start(kind, geo or None)`. То есть правило «как развернуть шаг
+            # в цепочку» жило третьей копией — и новый шаг её не получил: кнопка
+            # «3. Адреса страниц» ушла в общую ветку без гео, вышло
+            # `--stamp-keys ""` и падение на пути `out_facet/.json` (08.08). Шаг был
+            # добавлен в реестр ртов, в метрику и в вертикаль — в четвёртое место
+            # нет. Теперь мест ОДНО: добавил шаг в pipeline_steps — кнопка работает.
+            #
+            # `all`/`new` — псевдонимы пустого гео: их шлют кнопки СТАРЫХ сообщений,
+            # которые Telegram хранит вечно, и молча ронять их нельзя.
+            if not geo or geo in ("all", "new"):
+                st = next(
+                    (x for x in pipeline_steps(pipeline_state()) if x["kind"] == kind),
+                    None,
+                )
+                jobs = (st or {}).get("jobs") or []
+                if not jobs:
+                    say(f"шагу «{kind}» делать нечего.")
+                else:
+                    job.chain = jobs[1:]
+                    job.start(jobs[0][0], jobs[0][1], _chain=True)
+            else:
+                job.start(kind, geo)
+        return
+    msg = u.get("message") or {}
+    src = msg.get("from", {}).get("id")
+    if src != CHAT:  # не юзер — в ТГ молчим (канон), но в лог пишем ВСЕГДА
+        log(f"ОТКАЗ сообщение от чужого id={src} (админ {CHAT}): {msg.get('text')}")
+        return
+    text = (msg.get("text") or "").strip()
+    log("←КОМАНДА:", text)
+    if text in ("/combine", "/start"):
+        send_menu(job)
+    elif text in ("/stop", "/combine_stop"):
+        job.stop()
+    elif text in ("/status", "/combine_status"):
+        job.status()
+    elif text.split(" ")[0] == "/geo":
+        arg = text.split(" ", 1)[1].strip() if " " in text else ""
+        if not arg:
+            cur = test_geo()
+            say(f"страна пробы: {cur or 'не выбрана (весь корпус)'}")
+        else:
+            set_test_geo(arg)
+            cur = test_geo()
+            say(f"страна пробы: {cur or 'снята — считаю весь корпус'}")
+            send_menu(job)
+    else:
+        parts = text.split()
+        if parts and parts[0] in MENU:
+            job.start(parts[0], parts[1] if len(parts) > 1 else None)
 
 
 def main():
@@ -996,88 +1088,14 @@ def main():
         r = tg("getUpdates", offset=offset, timeout=30)
         for u in r.get("result", []):
             offset = u["update_id"] + 1
-            cb = u.get("callback_query")
-            if cb:
-                if cb["from"]["id"] != CHAT:
-                    log(f"ОТКАЗ кнопка от чужого id={cb['from']['id']} (админ {CHAT})")
-                    continue
-                log("←КНОПКА:", cb["data"])
-                tg("answerCallbackQuery", callback_query_id=cb["id"])
-                data = cb["data"]
-                if data == "stop":
-                    job.stop()
-                elif data == "menu":
-                    send_menu(job)
-                elif data == "geo:pick":
-                    send_geo_picker()
-                elif data.startswith("geo:"):
-                    set_test_geo(data.split(":", 1)[1])
-                    send_menu(job)
-                elif data == "run:cycle":
-                    start_cycle(job)
-                elif data.startswith("run:"):
-                    _, kind, geo = (data + ":").split(":")[:3]
-                    # КНОПКА ШАГА БЕЗ ГЕО = ВСЕ РАБОТЫ ЭТОГО ШАГА, и берём их из
-                    # `pipeline_steps` — того же списка, что рисует меню и собирает цикл.
-                    #
-                    # ⛔ Раньше здесь была ветка НА КАЖДЫЙ РОТ: своя для `facet` (цепочка из
-                    # facet_queue), своя для `assign` (из no_shelf), а всё остальное падало
-                    # в `job.start(kind, geo or None)`. То есть правило «как развернуть шаг
-                    # в цепочку» жило третьей копией — и новый шаг её не получил: кнопка
-                    # «3. Адреса страниц» ушла в общую ветку без гео, вышло
-                    # `--stamp-keys ""` и падение на пути `out_facet/.json` (08.08). Шаг был
-                    # добавлен в реестр ртов, в метрику и в вертикаль — в четвёртое место
-                    # нет. Теперь мест ОДНО: добавил шаг в pipeline_steps — кнопка работает.
-                    #
-                    # `all`/`new` — псевдонимы пустого гео: их шлют кнопки СТАРЫХ сообщений,
-                    # которые Telegram хранит вечно, и молча ронять их нельзя.
-                    if not geo or geo in ("all", "new"):
-                        st = next(
-                            (
-                                x
-                                for x in pipeline_steps(pipeline_state())
-                                if x["kind"] == kind
-                            ),
-                            None,
-                        )
-                        jobs = (st or {}).get("jobs") or []
-                        if not jobs:
-                            say(f"шагу «{kind}» делать нечего.")
-                        else:
-                            job.chain = jobs[1:]
-                            job.start(jobs[0][0], jobs[0][1], _chain=True)
-                    else:
-                        job.start(kind, geo)
-                continue
-            msg = u.get("message") or {}
-            src = msg.get("from", {}).get("id")
-            if src != CHAT:  # не юзер — в ТГ молчим (канон), но в лог пишем ВСЕГДА
-                log(
-                    f"ОТКАЗ сообщение от чужого id={src} (админ {CHAT}): {msg.get('text')}"
+            try:
+                handle_update(u, job)
+            except Exception as e:
+                log("СБОЙ обработки обновления:", repr(e))
+                say(
+                    "⚠️ пульт споткнулся на этом действии и продолжает работать: "
+                    f"{type(e).__name__}: {e}"
                 )
-                continue
-            text = (msg.get("text") or "").strip()
-            log("←КОМАНДА:", text)
-            if text in ("/combine", "/start"):
-                send_menu(job)
-            elif text in ("/stop", "/combine_stop"):
-                job.stop()
-            elif text in ("/status", "/combine_status"):
-                job.status()
-            elif text.split(" ")[0] == "/geo":
-                arg = text.split(" ", 1)[1].strip() if " " in text else ""
-                if not arg:
-                    cur = test_geo()
-                    say(f"страна пробы: {cur or 'не выбрана (весь корпус)'}")
-                else:
-                    set_test_geo(arg)
-                    cur = test_geo()
-                    say(f"страна пробы: {cur or 'снята — считаю весь корпус'}")
-                    send_menu(job)
-            else:
-                parts = text.split()
-                if parts and parts[0] in MENU:
-                    job.start(parts[0], parts[1] if len(parts) > 1 else None)
 
 
 if __name__ == "__main__":
