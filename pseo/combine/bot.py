@@ -83,10 +83,17 @@ MENU = {
         "Разметка <гео[:сколько]>",
         ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--mark", "{shelf}"],
     ),
-    # ШАГ 4. Списки: мухи темы → списки с именами → страницы и остаток. Пачка 90.
-    "svod": (
-        "Списки <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--svod"],
+    # ШАГ 4. Обобщение (канон §0.19, звено 4): ОДИН вызов на тему — справочник имён,
+    # деление толстых подтем, короткий ответ. Пачками рот придумывает имена заново в каждой:
+    # 22.08 тема виз Греции дала 36 страниц пятью параллельными наборами имён.
+    "obobshi": (
+        "Обобщение <гео>",
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--obobshi"],
+    ),
+    # ШАГ 5. Корпус по справочнику — код, ключей не тратит.
+    "sborka": (
+        "Корпус по справочнику <гео>",
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--sborka"],
     ),
     # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `pages.py`
     # превращает корпус в страницы, `render.py` рендерит уже готовые. 21.08 кнопка звала один
@@ -373,7 +380,8 @@ def pipeline_state():
         "sgusti": [],
         "mark": [],
         "mark_n": 0,
-        "svod": [],
+        "obobshi": [],
+        "sborka": [],
         "geos": 0,
         "views": 0,
         "langs": [],
@@ -441,12 +449,21 @@ def pipeline_state():
     for geo, ids in sorted(tagged.items()):
         if not ids or (only and geo != only):
             continue
-        corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
         tags_fn = f"{BRAIN}/{TESTS}/tags/{geo}.json"
-        if not os.path.exists(corpus) or os.path.getmtime(corpus) < os.path.getmtime(
+        canon = f"{BRAIN}/{TESTS}/canon.json"
+        # обобщение: справочника нет или он старше разметки
+        if not os.path.exists(canon) or os.path.getmtime(canon) < os.path.getmtime(
             tags_fn
         ):
-            st["svod"].append(geo)
+            st["obobshi"].append(geo)
+        # корпус: собран раньше разметки или справочника
+        corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
+        svezhee = max(
+            os.path.getmtime(tags_fn),
+            os.path.getmtime(canon) if os.path.exists(canon) else 0,
+        )
+        if not os.path.exists(corpus) or os.path.getmtime(corpus) < svezhee:
+            st["sborka"].append(geo)
 
     # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
     for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet/*.json")):
@@ -476,9 +493,15 @@ def state_card():
     if s["mark"]:
         worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["mark"][:6])
         lines.append(f"1) разметка: {len(s['mark'])} гео, {s['mark_n']} мух — {worst}")
-    if s["svod"]:
-        lines.append(f"2) списки: {len(s['svod'])} гео — {', '.join(s['svod'][:6])}")
-    if not s["mark"] and not s["svod"]:
+    if s.get("obobshi"):
+        lines.append(
+            f"2) обобщение: {len(s['obobshi'])} гео — {', '.join(s['obobshi'][:6])}"
+        )
+    if s.get("sborka"):
+        lines.append(
+            f"3) корпус: {len(s['sborka'])} гео — {', '.join(s['sborka'][:6])}"
+        )
+    if not s["mark"] and not s.get("obobshi") and not s.get("sborka"):
         lines.append("всё разобрано: можно собирать сайт")
     return chr(10).join(lines), None
 
@@ -504,23 +527,35 @@ def pipeline_steps(s):
             "note": "",
         },
         {
-            "kind": "svod",
-            "jobs": [("svod", g) for g in s["svod"]],
+            "kind": "obobshi",
+            "jobs": [("obobshi", g) for g in (s.get("obobshi") or [])],
             "label": (
-                f"3. Списки — {len(s['svod'])} гео" if s["svod"] else "3. Списки"
+                f"3. Обобщение — {len(s.get('obobshi') or [])} гео"
+                if s.get("obobshi")
+                else "3. Обобщение"
             ),
-            "note": "",
+            "note": "один вызов на тему; справочник имён tests/canon.json",
+        },
+        {
+            "kind": "sborka",
+            "jobs": [("sborka", g) for g in (s.get("sborka") or [])],
+            "label": (
+                f"4. Корпус по справочнику — {len(s.get('sborka') or [])} гео"
+                if s.get("sborka")
+                else "4. Корпус по справочнику"
+            ),
+            "note": "ключей не тратит",
         },
         {
             "kind": "build",
             "jobs": [("build", None)] if s["geos"] else [],
-            "label": f"4. Сборка сайта — {s['views']} страниц",
+            "label": f"5. Сборка сайта — {s['views']} страниц",
             "note": "",
         },
         {
             "kind": "translate",
             "jobs": [],
-            "label": "5. Переводы",
+            "label": "6. Переводы",
             "note": "запускать после сборки",
         },
     ]
@@ -956,8 +991,8 @@ def start_cycle(job):
         n = x["n"]
         # разметка: пачка MARK_BATCH, worst-case 4 запроса к Google на вызов (keybroker)
         est += -(-n // _tract.MARK_BATCH) * 4
-        # списки: пачка SVOD_BATCH внутри КАЖДОЙ из 13 тем → не больше 13 + n/пачка вызовов
-        est += (len(_tax.SHELVES) + n // _tract.SVOD_BATCH) * 4
+        # обобщение: ОДИН вызов на тему (канон §0.19), тем не больше тринадцати
+        est += len(_tax.SHELVES) * 4
     # схлопывание ключей не тратит (вектора готовые), сборка и рендер — тоже
     est += sum((m + st_) * 3 for _, m, st_ in (s.get("langs") or []))
     plan = " → ".join(

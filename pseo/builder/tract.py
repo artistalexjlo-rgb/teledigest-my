@@ -23,6 +23,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dedup  # noqa: E402
+
+# адрес страницы — существующей транслитерацией `slugs`, второй копии нет
+import slugs  # noqa: E402
 import tail_taxonomy as tax  # noqa: E402
 from facet import load_flies  # noqa: E402
 from keybroker import call  # noqa: E402
@@ -37,8 +40,11 @@ TESTS = "tests"
 # Судить порог по протоколу схлопывания (`tests/dedup/<гео>.txt`), а не по счётчику.
 SGUSTOK_THR = 0.93
 
+# Верх страницы — канон §0.19 («на странице от 4 до 15 пунктов»). Низ живёт в
+# `tail_taxonomy.PAGE_MIN` и здесь НЕ дублируется.
+PAGE_MAX = 15
+
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
-SVOD_BATCH = 90  # мух в запрос списков: та же пачка, что у прочих ртов тракта
 
 
 def mark_sys():
@@ -60,14 +66,24 @@ def mark_sys():
     )
 
 
-SVOD_SYS = (
-    'Ниже мухи ОДНОЙ темы гида по стране: {"<id>": "<текст мухи>", ...}.\n'
-    "Разложи их по СПИСКАМ: список — один запрос человека, на который эти мухи отвечают.\n"
-    "ПРАВИЛА:\n"
-    "  - КАЖДАЯ муха ровно в ОДНОМ списке, ни одна не потеряна;\n"
-    '  - имя списка 2–6 слов, как запрос человека: "аренда автомобиля", "оплата такси";\n'
-    "  - ⛔ ЗАПРЕЩЕНЫ имена-рубрики («прочее», «общие советы») и имя самой темы.\n"
-    'СТРОГО JSON: {"spiski": [{"imya": "…", "ids": ["…"]}]}'
+OBOB_SYS = (
+    "Ты СВОДИШЬ НАЗВАНИЯ, а не пишешь тексты. Ниже одна тема гида по стране: подтемы с \n"
+    "массой (сколько советов) и сами советы.\n"
+    "ЗАДАЧА — три вещи одним ответом:\n"
+    "  1. КАНОН ИМЁН: разные названия одной и той же подтемы свести к ОДНОМУ имени. Имя \n"
+    "     канона 2–6 слов, как запрос человека: «аренда автомобиля», «сроки рассмотрения \n"
+    "     визы». ⛔ ЗАПРЕЩЕНЫ сборные имена-корзины: «прочее», «разное», «дополнительная \n"
+    "     информация», «общие советы», а также имя самой темы.\n"
+    "     adres — тот же смысл латиницей через дефис: arenda-avtomobilya.\n"
+    "  2. ДЕЛЕНИЕ ТОЛСТЫХ: если под одним каноном собирается больше 15 советов, раздели его \n"
+    "     по смыслу на несколько канонов и раскидай советы исключениями по id.\n"
+    "  3. КОРОТКИЙ ОТВЕТ каждому канону: 30–50 слов, ТОЛЬКО факты из советов этого канона, \n"
+    "     ничего не выдумывать и не обобщать сверх написанного.\n"
+    "⛔ Советы НЕ переписывай и НЕ сокращай — ты решаешь только имена.\n"
+    'СТРОГО JSON: {"kanon": [{"imya": "<подтема из входа>", '
+    '"kanon": "<общее имя>", "adres": "<латиницей>"}], '
+    '"isklyucheniya": [{"id": "<id совета>", "kanon": "<имя>"}], '
+    '"kratko": [{"kanon": "<имя>", "text": "<30-50 слов>"}]}'
 )
 
 
@@ -234,86 +250,209 @@ def mark(geo, limit=None):
     print(f"{geo}: размечено всего {len(done)} -> {fn}", flush=True)
 
 
-def svod(geo):
-    """Шаг 4: мухи темы → списки → страницы и остаток. Пишет корпус для сборки."""
+def canon_path(base=""):
+    """Справочник имён: «имя подтемы → канон + латинский адрес».
+
+    Канон §0.19 держит его в git как `pseo/site/canon.json` и правит РУКАМИ; прогон в
+    контейнере в git писать не может, поэтому пишет сюда, а в git файл переносится руками.
+    Место ОДНО: два места чтения — это два разных ответа на один вопрос.
+    """
+    return os.path.join(base, TESTS, "canon.json")
+
+
+def load_canon(base=""):
+    return _load_json(canon_path(base), {})
+
+
+def obobshi(geo):
+    """Звено 4 ОБОБЩЕНИЕ: рот, ОДИН вызов на тему.
+
+    Вход рту: подтемы темы с массами плюс сами советы. Выход: справочник «имя → канон»,
+    исключения по id и короткий ответ каждому канону.
+
+    ⛔ Рот решает ТОЛЬКО имена: советы не переписываются. Корпус хранит факты, справочник —
+    решения, поэтому ошибку обобщения правит рука в справочнике, а не перепрогон рта.
+
+    ⛔ ОДИН ВЫЗОВ НА ТЕМУ — не пачками. Пачками рот не видит имён из соседних пачек и
+    придумывает их заново: 22.08 тема виз Греции дала 36 страниц пятью параллельными
+    наборами («сроки рассмотрения визы» · «сроки получения визы» · «сроки рассмотрения и
+    отслеживание» — про одно и то же).
+    """
     fn = f"{TESTS}/tags/{geo}.json"
-    if not os.path.exists(fn):
+    tagged = _load_json(fn, None)
+    if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
-    flies = [r for r in json.load(open(fn, encoding="utf-8")) if r.get("perevod")]
+    by_id = {r["id"]: r for r in tagged}
     by_tema = {}
-    for r in flies:
-        by_tema.setdefault(r.get("tema") or "prochee", []).append(r)
-    names = {k: n for k, n, _d in tax.SHELVES}
-    views, shelves = [], []
+    for r in tagged:
+        if r.get("perevod"):
+            by_tema.setdefault(r.get("tema") or "prochee", []).append(r)
+
+    imena = load_canon()
+    kp = f"{TESTS}/kratko/{geo}.json"
+    kratko = _load_json(kp, {})
+
     for tema, group in sorted(by_tema.items(), key=lambda kv: -len(kv[1])):
-        spiski = {}
-        for st in range(0, len(group), SVOD_BATCH):
-            if os.path.exists("RUNNER_STOP"):
-                print(f"  стоп на теме {tema}", flush=True)
-                break
-            chunk = group[st : st + SVOD_BATCH]
-            idx = {r["id"]: r["perevod"] for r in chunk}
-            res = call(
-                json.dumps(idx, ensure_ascii=False),
-                SVOD_SYS,
-                consumer="carve",
-                salvage=("spiski", "ids"),
-            )
-            for sp in (res or {}).get("spiski") or []:
-                imya = str(sp.get("imya") or "").strip()
-                if not imya or tax.bad_label(imya):
-                    continue
-                spiski.setdefault(imya, []).extend(
-                    i for i in (sp.get("ids") or []) if i in idx
-                )
-        by_id = {r["id"]: r for r in group}
-        seen, ostatok = set(), []
-        shelf_name = names.get(tema, tema)
-        for imya, ids in spiski.items():
-            ids = [i for i in dict.fromkeys(ids) if i not in seen and i in by_id]
-            seen.update(ids)
-            items = [
-                {"id": i, "text": by_id[i]["perevod"], "n": by_id[i].get("n", 1)}
-                for i in ids
-            ]
-            if len(items) >= tax.PAGE_MIN:
-                views.append({"zadacha": imya, "shelf": shelf_name, "items": items})
-            else:
-                ostatok.extend(items)
-        ostatok.extend(
-            {"id": r["id"], "text": r["perevod"], "n": r.get("n", 1)}
-            for r in group
-            if r["id"] not in seen
+        if os.path.exists("RUNNER_STOP"):
+            print(f"  стоп на теме {tema}", flush=True)
+            break
+        massy = {}
+        for r in group:
+            massy[r["podtema"]] = massy.get(r["podtema"], 0) + 1
+        user = json.dumps(
+            {
+                "podtemy": [{"imya": k, "massa": v} for k, v in massy.items()],
+                "sovety": [{"id": r["id"], "text": r["perevod"]} for r in group],
+            },
+            ensure_ascii=False,
         )
-        if ostatok:
-            shelves.append({"shelf": shelf_name, "items": ostatok})
+        res = call(user, OBOB_SYS, consumer="carve", salvage=("kanon", "kanon"))
+        for row in (res or {}).get("kanon") or []:
+            imya = str((row or {}).get("imya") or "").strip()
+            kan = str((row or {}).get("kanon") or "").strip()
+            if not imya or not kan or tax.bad_label(kan):
+                continue
+            imena[imya] = {
+                "kanon": kan,
+                "adres": str(row.get("adres") or "").strip() or slugs.slug(kan),
+            }
+        # перенос совета — свойство САМОЙ мухи, поэтому ложится к её теме и подтеме
+        for row in (res or {}).get("isklyucheniya") or []:
+            i = str((row or {}).get("id") or "").strip()
+            kan = str((row or {}).get("kanon") or "").strip()
+            if i in by_id and kan and not tax.bad_label(kan):
+                by_id[i]["kanon"] = kan
+        for row in (res or {}).get("kratko") or []:
+            kan = str((row or {}).get("kanon") or "").strip()
+            txt = str((row or {}).get("text") or "").strip()
+            if kan and txt:
+                kratko[kan] = txt
+        kanony = {v["kanon"] for k, v in imena.items() if k in massy}
         print(
-            f"  тема {tema}: мух {len(group)} -> страниц "
-            f"{sum(1 for v in views if v['shelf'] == shelf_name)}, остаток {len(ostatok)}",
+            f"  тема {tema}: советов {len(group)}, подтем {len(massy)} -> "
+            f"канонов {len(kanony)}",
             flush=True,
         )
-    os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
-    out = {"geo": geo, "views_by_task": views, "shelves": shelves, "prochee": []}
-    with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
-        json.dump(out, fh, ensure_ascii=False)
+        os.makedirs(f"{TESTS}/kratko", exist_ok=True)
+        _save_json(canon_path(), imena)  # чекпоинт: СТОП не съедает уплаченное
+        _save_json(kp, kratko)
+        _save_json(fn, tagged)
     print(
-        f"свод {geo}: страниц {len(views)}, тем с остатком {len(shelves)} "
-        f"-> {TESTS}/out_facet/{geo}.json",
+        f"обобщение {geo}: справочник {len(imena)} имён -> {canon_path()}, "
+        f"коротких ответов {len(kratko)}",
         flush=True,
     )
 
 
+def kanon_mukhi(r, imena):
+    """Канон совета: свой перенос → справочник → собственная подтема. ОДНО место правила —
+    его зовут и сборка, и всё, что спросит «куда пойдёт этот совет»."""
+    return (
+        r.get("kanon") or (imena.get(r["podtema"]) or {}).get("kanon") or r["podtema"]
+    )
+
+
+def sborka(geo):
+    """Звено 5 СБОРКА: код, ключей НЕ тратит.
+
+    Группируем советы по канону; подтема от PAGE_MIN пунктов — страница, остальное в
+    остаток своей темы. Правила вывода проверяет КОД (канон, звено 4): каждый id ровно в
+    одном месте, на странице от 4 до 15 пунктов. Нарушение печатается и правится рукой
+    в справочнике — не перепрогоном рта.
+    """
+    tagged = _load_json(f"{TESTS}/tags/{geo}.json", None)
+    if not tagged:
+        print(f"{geo}: разметки нет", flush=True)
+        return
+    flies = [r for r in tagged if r.get("perevod")]
+    imena = load_canon()
+    kratko = _load_json(f"{TESTS}/kratko/{geo}.json", {})
+    names = {k: n for k, n, _d in tax.SHELVES}
+
+    po_kanonu = {}
+    for r in flies:
+        po_kanonu.setdefault(
+            (r.get("tema") or "prochee", kanon_mukhi(r, imena)), []
+        ).append(r)
+
+    views, ostatki = [], {}
+    for (tema, kan), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
+        shelf = names.get(tema, tema)
+        items = [
+            {"id": r["id"], "text": r["perevod"], "n": r.get("n", 1)} for r in group
+        ]
+        if len(items) >= tax.PAGE_MIN and not tax.bad_label(kan):
+            views.append(
+                {
+                    "zadacha": kan,
+                    "shelf": shelf,
+                    "items": items,
+                    "adres": (imena.get(kan) or {}).get("adres") or slugs.slug(kan),
+                    **({"kratko": kratko[kan]} if kratko.get(kan) else {}),
+                }
+            )
+        else:
+            ostatki.setdefault(shelf, []).extend(items)
+
+    vse = [it["id"] for v in views for it in v["items"]]
+    vse += [it["id"] for x in ostatki.values() for it in x]
+    tolstye = [
+        (v["zadacha"], len(v["items"])) for v in views if len(v["items"]) > PAGE_MAX
+    ]
+    print(
+        f"сборка {geo}: страниц {len(views)}, тем с остатком {len(ostatki)}, "
+        f"пунктов {len(vse)} из {len(flies)} размеченных",
+        flush=True,
+    )
+    if len(vse) != len(set(vse)):
+        print(f"  ⛔ id в двух местах: {len(vse) - len(set(vse))}", flush=True)
+    if len(vse) != len(flies):
+        print(f"  ⛔ потеряно советов: {len(flies) - len(vse)}", flush=True)
+    if tolstye:
+        print(
+            f"  ⚠️ толще {PAGE_MAX}: {len(tolstye)} страниц — {tolstye[:5]}; "
+            "делить рукой в справочнике",
+            flush=True,
+        )
+    os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
+    out = {
+        "geo": geo,
+        "views_by_task": views,
+        "shelves": [{"shelf": k, "items": v} for k, v in ostatki.items()],
+        "prochee": [],
+    }
+    with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False)
+    print(f"  -> {TESTS}/out_facet/{geo}.json", flush=True)
+
+
+def _load_json(path, default):
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def _save_json(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, ensure_ascii=False, indent=1)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        raise SystemExit("нужно: tract.py <гео> --mark [сколько] | --svod")
+        raise SystemExit(
+            "нужно: tract.py <гео> --sgusti | --mark [сколько] | --obobshi | --sborka"
+        )
     _geo = sys.argv[1]
     if "--sgusti" in sys.argv:
         sgusti(_geo)
     elif "--mark" in sys.argv:
         _i = sys.argv.index("--mark")
         mark(_geo, sys.argv[_i + 1] if len(sys.argv) > _i + 1 else None)
-    elif "--svod" in sys.argv:
-        svod(_geo)
+    elif "--obobshi" in sys.argv:
+        obobshi(_geo)
+    elif "--sborka" in sys.argv:
+        sborka(_geo)
     else:
         raise SystemExit("неизвестный шаг")

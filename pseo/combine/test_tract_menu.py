@@ -32,9 +32,14 @@ SNYATO = {
 
 
 def test_new_steps_are_in_the_menu():
-    """Разметка и списки зовут НОВЫЙ модуль тракта, а не старый facet."""
-    assert "mark" in bot.MENU and "svod" in bot.MENU
-    for kind, flag in (("mark", "--mark"), ("svod", "--svod")):
+    """Шаги тракта зовут НОВЫЙ модуль, а не старый facet."""
+    for kind, flag in (
+        ("sgusti", "--sgusti"),
+        ("mark", "--mark"),
+        ("obobshi", "--obobshi"),
+        ("sborka", "--sborka"),
+    ):
+        assert kind in bot.MENU, kind
         argv = bot.MENU[kind][1]
         assert any(a.endswith("tract.py") for a in argv), argv
         assert flag in argv and "{geo}" in argv, argv
@@ -47,7 +52,8 @@ def test_old_steps_are_gone():
 
 
 def test_steps_go_in_tract_order():
-    """Вертикаль меню = порядок тракта: схлопывание → разметка → списки → сборка → переводы.
+    """Вертикаль меню = порядок тракта (§0.19): схлопывание → разметка → обобщение →
+    корпус по справочнику → сборка сайта → переводы.
 
     Схлопывание стоит ПЕРВЫМ не для красоты: размечать оно даёт представителей, и после
     разметки его звать поздно — рту уже заплачено за каждую почти-копию.
@@ -55,10 +61,24 @@ def test_steps_go_in_tract_order():
     kinds = [
         st["kind"]
         for st in bot.pipeline_steps(
-            {"mark": [], "mark_n": 0, "svod": [], "geos": 0, "views": 0}
+            {
+                "mark": [],
+                "mark_n": 0,
+                "obobshi": [],
+                "sborka": [],
+                "geos": 0,
+                "views": 0,
+            }
         )
     ]
-    assert kinds == ["sgusti", "mark", "svod", "build", "translate"], kinds
+    assert kinds == [
+        "sgusti",
+        "mark",
+        "obobshi",
+        "sborka",
+        "build",
+        "translate",
+    ], kinds
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
@@ -73,7 +93,7 @@ def test_work_is_counted_as_undone(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     st = bot.pipeline_state()
-    assert "cz" in st["svod"], st["svod"]
+    assert "cz" in st["obobshi"], st["obobshi"]
 
 
 def test_menu_builds_on_a_live_state(monkeypatch):
@@ -91,7 +111,8 @@ def test_menu_builds_on_a_live_state(monkeypatch):
         lambda: {
             "mark": [{"geo": "cz", "n": 191}],
             "mark_n": 191,
-            "svod": ["cz"],
+            "obobshi": ["cz"],
+            "sborka": ["cz"],
             "geos": 1,
             "views": 12,
             "langs": [],
@@ -118,7 +139,8 @@ def test_every_geo_step_gets_its_own_rows(monkeypatch):
             "sgusti": ["gr", "me"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "svod": [],
+            "obobshi": [],
+            "sborka": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -151,7 +173,8 @@ def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
             "sgusti": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "svod": [],
+            "obobshi": [],
+            "sborka": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -186,7 +209,8 @@ def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
             "sgusti": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "svod": [],
+            "obobshi": [],
+            "sborka": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -217,7 +241,8 @@ def test_cycle_counts_the_current_tract(monkeypatch):
             "sgusti": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "svod": [],
+            "obobshi": [],
+            "sborka": [],
             "geos": 0,
             "views": 0,
             "langs": [],
