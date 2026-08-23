@@ -30,7 +30,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE)]
 
-import facet  # noqa: E402
+import corpus as facet  # noqa: E402
 
 TEXT = "A long enough lesson about local rules, prices and paperwork. " * 4
 

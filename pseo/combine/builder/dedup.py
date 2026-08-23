@@ -22,13 +22,14 @@ import glob
 import json
 import os
 import signal
-import sqlite3
 import sys
 
 import numpy as np
 import tail_taxonomy as _tax
 
-VEC_DB = os.environ.get("LOCAL_VEC_DB", "/root/embed_ab/local_vec.db")
+# ⛔ Вектора и кластеризация переехали в `vectors.py` (24.08) — импорт, НЕ копия.
+from vectors import VEC_DB, avg_link, groups_all, load_vecs  # noqa: F401
+
 OUT = "out_facet"
 THR = (
     0.86  # порог avg-link (контроль 2026-07-19); не крутить без нового контроля глазами
@@ -82,85 +83,6 @@ def _atomic_json(path, obj):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False)
     os.replace(tmp, path)
-
-
-def load_vecs(ids):
-    """id мухи → нормированный вектор. Мухи без вектора (свипер не догнал) — нет в dict."""
-    c = sqlite3.connect(VEC_DB)
-    out = {}
-    for s in range(0, len(ids), 900):  # лимит переменных sqlite
-        chunk = ids[s : s + 900]
-        q = ",".join("?" * len(chunk))
-        for did, blob in c.execute(
-            f"SELECT doc_id, v FROM vec WHERE doc_id IN ({q})", chunk
-        ):
-            a = np.frombuffer(blob, dtype=np.float32)
-            out[did] = a / (np.linalg.norm(a) or 1.0)
-    c.close()
-    return out
-
-
-def avg_link(sim, thr):
-    """Агломеративный average-link: мёржим пару кластеров с максимальной средней
-    связью, пока она >= порога. Single-link отвергнут контролем (цепочки)."""
-    cls = [[i] for i in range(sim.shape[0])]
-    while len(cls) > 1:
-        best, bi, bj = -1.0, -1, -1
-        for i in range(len(cls)):
-            for j in range(i + 1, len(cls)):
-                s = float(np.mean(sim[np.ix_(cls[i], cls[j])]))
-                if s > best:
-                    best, bi, bj = s, i, j
-        if best < thr:
-            break
-        cls[bi] += cls.pop(bj)
-    return cls
-
-
-def groups_all(ids, vv, thr):
-    """Схлопывание почти-копий на БОЛЬШОМ множестве (гео целиком, до разметки).
-
-    Возвращает список списков id: [[rep-кандидаты…], …]. Мухи без вектора не судим —
-    каждая идёт своей группой.
-
-    ⭐ ПОЧЕМУ НЕ ЗОВЁМ `avg_link` НА ВСЁМ СРАЗУ. Он перебирает все пары кластеров на каждом
-    слиянии: на виде из 30 мух это незаметно, на гео из 765 — порядка 10^7 переборов, часы.
-    Здесь сначала бьём множество на КОМПОНЕНТЫ по рёбрам «похожи не меньше порога», и
-    average-link считаем ВНУТРИ компоненты. Это не приближение, а тот же результат: средняя
-    связь не выше максимальной, поэтому две группы без единого ребра ≥ порога слиться не
-    могут. Компоненты на рабочем пороге мелкие, и перебор внутри них дёшев.
-    """
-    have = [i for i in ids if i in vv]
-    if len(have) < 2:
-        return [[i] for i in ids]
-    m = np.stack([vv[i] for i in have])
-    sim = m @ m.T
-    parent = list(range(len(have)))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for a, b in zip(*np.where(np.triu(sim >= thr, k=1))):
-        ra, rb = find(int(a)), find(int(b))
-        if ra != rb:
-            parent[ra] = rb
-    comps = {}
-    for i in range(len(have)):
-        comps.setdefault(find(i), []).append(i)
-
-    out = []
-    for comp in comps.values():
-        if len(comp) == 1:
-            out.append([have[comp[0]]])
-            continue
-        sub = sim[np.ix_(comp, comp)]
-        for c in avg_link(sub, thr):
-            out.append([have[comp[i]] for i in c])
-    out += [[i] for i in ids if i not in vv]
-    return out
 
 
 def group_view(view, vv):

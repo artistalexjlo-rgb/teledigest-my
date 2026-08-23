@@ -22,12 +22,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import dedup  # noqa: E402
-
-# адрес страницы — существующей транслитерацией `slugs`, второй копии нет
-import slugs  # noqa: E402
+# ⛔ Тракт НЕ импортирует отменённую схему (`facet`, `dedup`): чтение корпуса и
+# вектора живут своими модулями, чтобы старый код не попадался под руку (рамка 24.08).
+import slugs  # noqa: E402  адрес — существующей транслитерацией, второй копии нет
 import tail_taxonomy as tax  # noqa: E402
-from facet import load_flies  # noqa: E402
+import vectors  # noqa: E402
+from corpus import load_flies  # noqa: E402
 from keybroker import call  # noqa: E402
 
 # ⛔ ЕДИНСТВЕННОЕ место, где решается «куда пишем». Боевые каталоги рядом (`tags/`,
@@ -104,9 +104,9 @@ def sgusti(geo):
     flies = load_flies(geo)
     texts = {i: t for i, t in flies}
     ids = [i for i, _ in flies]
-    vv = dedup.load_vecs(ids)
+    vv = vectors.load_vecs(ids)
     no_vec = [i for i in ids if i not in vv]
-    groups = dedup.groups_all(ids, vv, SGUSTOK_THR)
+    groups = vectors.groups_all(ids, vv, SGUSTOK_THR)
     multi = [g for g in groups if len(g) > 1]
     swallowed = sum(len(g) - 1 for g in multi)
     recs = []

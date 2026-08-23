@@ -20,7 +20,7 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import dedup  # noqa: E402
+import vectors as dedup  # noqa: E402
 import tract  # noqa: E402
 
 
