@@ -221,7 +221,7 @@ def mark(geo, limit=None):
         res = call(
             json.dumps(idx, ensure_ascii=False),
             mark_sys(),
-            consumer="facet",
+            consumer="mark",  # звено 3, канон §0.4
             salvage=("rows", "podtema"),
         )
         rows = (res or {}).get("rows") or []
@@ -307,7 +307,7 @@ def obobshi(geo):
             },
             ensure_ascii=False,
         )
-        res = call(user, OBOB_SYS, consumer="carve", salvage=("kanon", "kanon"))
+        res = call(user, OBOB_SYS, consumer="canon", salvage=("kanon", "kanon"))
         for row in (res or {}).get("kanon") or []:
             imya = str((row or {}).get("imya") or "").strip()
             kan = str((row or {}).get("kanon") or "").strip()
