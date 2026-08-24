@@ -66,25 +66,36 @@ def mark_sys():
     )
 
 
-OBOB_SYS = (
-    "Ты СВОДИШЬ НАЗВАНИЯ, а не пишешь тексты. Ниже одна тема гида по стране: подтемы с \n"
-    "массой (сколько советов) и сами советы.\n"
-    "ЗАДАЧА — три вещи одним ответом:\n"
-    "  1. КАНОН ИМЁН: разные названия одной и той же подтемы свести к ОДНОМУ имени. Имя \n"
-    "     канона 2–6 слов, как запрос человека: «аренда автомобиля», «сроки рассмотрения \n"
-    "     визы». ⛔ ЗАПРЕЩЕНЫ сборные имена-корзины: «прочее», «разное», «дополнительная \n"
-    "     информация», «общие советы», а также имя самой темы.\n"
-    "     adres — тот же смысл латиницей через дефис: arenda-avtomobilya.\n"
-    "  2. ДЕЛЕНИЕ ТОЛСТЫХ: если под одним каноном собирается больше 15 советов, раздели его \n"
-    "     по смыслу на несколько канонов и раскидай советы исключениями по id.\n"
-    "  3. КОРОТКИЙ ОТВЕТ каждому канону: 30–50 слов, ТОЛЬКО факты из советов этого канона, \n"
-    "     ничего не выдумывать и не обобщать сверх написанного.\n"
-    "⛔ Советы НЕ переписывай и НЕ сокращай — ты решаешь только имена.\n"
-    'СТРОГО JSON: {"kanon": [{"imya": "<подтема из входа>", '
-    '"kanon": "<общее имя>", "adres": "<латиницей>"}], '
-    '"isklyucheniya": [{"id": "<id совета>", "kanon": "<имя>"}], '
-    '"kratko": [{"kanon": "<имя>", "text": "<30-50 слов>"}]}'
-)
+# Имён в теме: границы из старого промпта (`DEALS_MAX = 15`, «дел от 5 до 15») — число
+# не выдумано заново, оно бегало в проде. Больше 15 — это уже не список, а простыня.
+NAMES_MIN, NAMES_MAX = 5, 15
+RASKLAD_BATCH = 90  # советов в запрос прохода Б: тексты в один запрос не влезают
+
+
+def spisok_sys():
+    """Проход А: закрытый список имён темы. Дословно `DEALS_SYS`, по-английски."""
+    return (
+        "Below are task labels from ONE theme of a country guide (number: label), with "
+        "the number of advices in brackets. Compose a CLOSED list of what people really "
+        f"come with. From {NAMES_MIN} to {NAMES_MAX} items.\n"
+        "NAME RULES: a name is ONE human request, it becomes the PAGE TITLE. Different "
+        "wordings of the same thing are ONE name. Do NOT mix different things "
+        "(student visa != work visa; tax id != citizenship != residence permit). "
+        "FORBIDDEN: 'Other', 'Miscellaneous', 'General tips', 'Useful information', "
+        "'Specifics' without a subject, and a name equal to the theme name itself. "
+        "English, 2-6 words.\n"
+        'STRICT JSON: {"names": ["<name>", ...]}'
+    )
+
+
+def rasklad_sys():
+    """Проход Б: присваивание из закрытого списка. Дословно `DEAL_ASSIGN_SYS`."""
+    return (
+        "Below is a CLOSED list of names (number: name), then advices (number: text). "
+        "Assign EVERY advice to exactly ONE name FROM THE LIST — do not invent new ones. "
+        'If none of them fits, put "0".\n'
+        'STRICT JSON: {"map": {"<advice number>": "<name number or 0>"}}'
+    )
 
 
 def sgustok_path(geo):
@@ -265,92 +276,106 @@ def load_canon(base=""):
 
 
 def obobshi(geo):
-    """Звено 4 ОБОБЩЕНИЕ: рот, ОДИН вызов на тему.
+    """Звено 4 ОБОБЩЕНИЕ: два прохода на тему (канон §0.19, PLAN.md).
 
-    Вход рту: подтемы темы с массами плюс сами советы. Выход: справочник «имя → канон»,
-    исключения по id и короткий ответ каждому канону.
+    А — из меток темы с массами закрытый СПИСОК ИМЁН (это корзины страниц).
+    Б — каждому совету имя ТОЛЬКО из списка; не подошло ни одно — совет уходит в остаток.
 
-    ⛔ Рот решает ТОЛЬКО имена: советы не переписываются. Корпус хранит факты, справочник —
-    решения, поэтому ошибку обобщения правит рука в справочнике, а не перепрогон рта.
+    ⛔ Почему два прохода, а не один. Один вызов «сведи названия» (22.08) слипал по широкому
+    слову: в «документы на визу» ушли 33 разные подтемы — биометрия, ч/б печать, выписки,
+    скрепки. Имя подтемы ставится в звене 3 ПО ОДНОЙ мухе, и свод по сходству имён честно
+    слил всё, где есть частое слово. Здесь имя рождается из списка, а список ЗАКРЫТ.
 
-    ⛔ ОДИН ВЫЗОВ НА ТЕМУ — не пачками. Пачками рот не видит имён из соседних пачек и
-    придумывает их заново: 22.08 тема виз Греции дала 36 страниц пятью параллельными
-    наборами («сроки рассмотрения визы» · «сроки получения визы» · «сроки рассмотрения и
-    отслеживание» — про одно и то же).
+    ⛔ Рту идут НОМЕРА, не id (сквозное правило PLAN.md): и метки, и советы, и имена.
     """
     fn = f"{TESTS}/tags/{geo}.json"
     tagged = _load_json(fn, None)
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
-    by_id = {r["id"]: r for r in tagged}
     by_tema = {}
     for r in tagged:
         if r.get("perevod"):
             by_tema.setdefault(r.get("tema") or "prochee", []).append(r)
 
     imena = load_canon()
-    kp = f"{TESTS}/kratko/{geo}.json"
-    kratko = _load_json(kp, {})
-
     for tema, group in sorted(by_tema.items(), key=lambda kv: -len(kv[1])):
         if os.path.exists("RUNNER_STOP"):
             print(f"  стоп на теме {tema}", flush=True)
             break
+
+        # ── ПРОХОД А: закрытый список имён темы ────────────────────────────────────
         massy = {}
         for r in group:
             massy[r["podtema"]] = massy.get(r["podtema"], 0) + 1
-        user = json.dumps(
-            {
-                "podtemy": [{"imya": k, "massa": v} for k, v in massy.items()],
-                "sovety": [{"id": r["id"], "text": r["perevod"]} for r in group],
-            },
-            ensure_ascii=False,
+        metki = sorted(massy.items(), key=lambda kv: -kv[1])
+        idx = {str(j): f"{m} ({n})" for j, (m, n) in enumerate(metki)}
+        res = call(
+            json.dumps(idx, ensure_ascii=False),
+            spisok_sys(),
+            consumer="canon",
+            salvage=("names", "names"),
         )
-        res = call(user, OBOB_SYS, consumer="canon", salvage=("kanon", "kanon"))
-        for row in (res or {}).get("kanon") or []:
-            imya = str((row or {}).get("imya") or "").strip()
-            kan = str((row or {}).get("kanon") or "").strip()
-            if not imya or not kan or tax.bad_label(kan):
-                continue
-            imena[imya] = {
-                "kanon": kan,
-                "adres": str(row.get("adres") or "").strip() or slugs.slug(kan),
-            }
-        # перенос совета — свойство САМОЙ мухи, поэтому ложится к её теме и подтеме
-        for row in (res or {}).get("isklyucheniya") or []:
-            i = str((row or {}).get("id") or "").strip()
-            kan = str((row or {}).get("kanon") or "").strip()
-            if i in by_id and kan and not tax.bad_label(kan):
-                by_id[i]["kanon"] = kan
-        for row in (res or {}).get("kratko") or []:
-            kan = str((row or {}).get("kanon") or "").strip()
-            txt = str((row or {}).get("text") or "").strip()
-            if kan and txt:
-                kratko[kan] = txt
-        kanony = {v["kanon"] for k, v in imena.items() if k in massy}
+        names = []
+        for raw in (res or {}).get("names") or []:
+            nm = str(raw or "").strip()
+            if nm and not tax.bad_label(nm) and nm not in names:
+                names.append(nm)
+        names = names[:NAMES_MAX]
+        if not names:
+            print(f"  тема {tema}: список имён не получен, пропуск", flush=True)
+            continue
+        for nm in names:
+            imena.setdefault(nm, {"adres": slugs.slug(nm)})
+
+        # ── ПРОХОД Б: присваивание из закрытого списка ─────────────────────────────
+        # ⛔ Нумерация имён С ЕДИНИЦЫ: «0» занят под «ни одно не подошло» (так в
+        # исходном промпте). С нуля ноль значил бы и первое имя, и отказ.
+        spisok = {str(k): nm for k, nm in enumerate(names, start=1)}
+        vzyato = 0
+        for st in range(0, len(group), RASKLAD_BATCH):
+            if os.path.exists("RUNNER_STOP"):
+                print(f"  стоп на теме {tema}, пачка {st}", flush=True)
+                break
+            chunk = group[st : st + RASKLAD_BATCH]
+            user = json.dumps(
+                {
+                    "names": spisok,
+                    "advices": {str(j): r["perevod"] for j, r in enumerate(chunk)},
+                },
+                ensure_ascii=False,
+            )
+            res = call(user, rasklad_sys(), consumer="assign", salvage=("map", "map"))
+            mp = (res or {}).get("map") or {}
+            for j, r in enumerate(chunk):
+                nom = str(mp.get(str(j), "0")).strip()
+                # ⛔ Номер вне списка — не «новое имя», а промах: совет остаётся без имени
+                # и уйдёт в остаток. Список закрыт, придумать шестнадцатое нельзя.
+                if nom in spisok:
+                    r["kanon"] = spisok[nom]
+                    vzyato += 1
+            _save_json(fn, tagged)  # чекпоинт: СТОП не съедает уплаченное
+            _save_json(canon_path(), imena)
         print(
-            f"  тема {tema}: советов {len(group)}, подтем {len(massy)} -> "
-            f"канонов {len(kanony)}",
+            f"  тема {tema}: советов {len(group)}, меток {len(metki)} -> имён "
+            f"{len(names)}, разложено {vzyato}",
             flush=True,
         )
-        os.makedirs(f"{TESTS}/kratko", exist_ok=True)
-        _save_json(canon_path(), imena)  # чекпоинт: СТОП не съедает уплаченное
-        _save_json(kp, kratko)
-        _save_json(fn, tagged)
     print(
-        f"обобщение {geo}: справочник {len(imena)} имён -> {canon_path()}, "
-        f"коротких ответов {len(kratko)}",
+        f"обобщение {geo}: справочник {len(imena)} имён -> {canon_path()}",
         flush=True,
     )
 
 
-def kanon_mukhi(r, imena):
-    """Канон совета: свой перенос → справочник → собственная подтема. ОДНО место правила —
-    его зовут и сборка, и всё, что спросит «куда пойдёт этот совет»."""
-    return (
-        r.get("kanon") or (imena.get(r["podtema"]) or {}).get("kanon") or r["podtema"]
-    )
+def kanon_mukhi(r, imena=None):
+    """Имя страницы для совета. ОДНО место правила.
+
+    Имя ставит проход Б звена 4 и кладёт его совету полем `kanon`. Нет поля — значит рот
+    ответил «0» (ни одно имя из закрытого списка не подошло) или пачка не доехала: совет
+    идёт в ОСТАТОК темы, а не заводит собственную корзину из своей подтемы. Иначе корзины
+    начнут плодиться по одной на совет — ровно то, из-за чего звено 4 переписано.
+    """
+    return r.get("kanon") or ""
 
 
 def sborka(geo):
@@ -372,9 +397,7 @@ def sborka(geo):
 
     po_kanonu = {}
     for r in flies:
-        po_kanonu.setdefault(
-            (r.get("tema") or "prochee", kanon_mukhi(r, imena)), []
-        ).append(r)
+        po_kanonu.setdefault((r.get("tema") or "prochee", kanon_mukhi(r)), []).append(r)
 
     views, ostatki = [], {}
     for (tema, kan), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
@@ -382,7 +405,7 @@ def sborka(geo):
         items = [
             {"id": r["id"], "text": r["perevod"], "n": r.get("n", 1)} for r in group
         ]
-        if len(items) >= tax.PAGE_MIN and not tax.bad_label(kan):
+        if kan and len(items) >= tax.PAGE_MIN and not tax.bad_label(kan):
             views.append(
                 {
                     "zadacha": kan,

@@ -59,11 +59,13 @@ def test_call_actually_uses_salvage():
 def test_tract_steps_ask_for_salvage():
     """Оба рта тракта обязаны просить спасение: ответ приходит на всю пачку сразу.
 
-    Шаги тракта по канону §0.19: разметка (пачка 25) и обобщение (один вызов на тему).
-    Шаг «Списки» отменён — имена сводит обобщение.
+    Шаги тракта по канону §0.19: разметка (пачка 25) и обобщение — проход А (список имён
+    на тему) плюс проход Б (присваивание пачками).
     """
     src = (HERE / "tract.py").read_text(encoding="utf-8")
     mk = src[src.index("def mark(") : src.index("def obobshi(")]
     assert 'salvage=("rows", "podtema")' in mk, "разметка не просит спасения"
     ob = src[src.index("def obobshi(") :]
-    assert 'salvage=("kanon", "kanon")' in ob, "обобщение не просит спасения"
+    # звено 4 = два прохода, и спасать обязаны ОБА: битое тело стоит одной пачки, а не темы
+    assert 'salvage=("names", "names")' in ob, "проход А не просит спасения"
+    assert 'salvage=("map", "map")' in ob, "проход Б не просит спасения"
