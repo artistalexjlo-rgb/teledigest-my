@@ -16,7 +16,7 @@ import sqlite3
 import sys
 
 import tail_taxonomy as _tax
-from dedup import BRANCH_ITEM_MIN  # порог пунктов в ветви — ОДНО место, не копия
+from tail_taxonomy import BRANCH_ITEM_MIN  # порог ветви — у владельца порогов (§0.16)
 from keybroker import call
 from slugs import slug  # тот же слаг, что строит адреса при сборке
 
@@ -290,15 +290,19 @@ def translate_texts(id_text, lang):
 
 
 def add_kratko(geo, lang):
-    """Синтез коротких ответов по ГОТОВОМУ языковому файлу — логика и промпт живут в
-    dedup.kratko_lang (одно место на все языки, включая ru). Сбой не роняет перевод."""
-    try:
-        import dedup
+    """Короткий ответ языкового файла — СВОЙ, без обращения к отменённой схеме.
 
+    ⛔ ЗАЧЕМ ЗДЕСЬ (24.08). До этого звено 6 звало `dedup.kratko_lang`, то есть из-за одной
+    функции тянуло весь файл отменённого тракта. Заказ юзера дословно: «это должно быть
+    внутри кода нового пульта и не тянуть НИЧЕГО ниоткуда».
+
+    Сбой не роняет перевод: вернём 0 и пойдём дальше.
+    """
+    try:
         cwd = os.getcwd()
-        os.chdir(HERE)  # dedup работает относительными путями out_facet_<lang>/
+        os.chdir(HERE)  # файлы языков лежат относительными путями out_facet_<lang>/
         try:
-            return dedup.kratko_lang(geo, lang)
+            return kratko_lang(geo, lang)
         finally:
             os.chdir(cwd)
     except Exception as e:
@@ -681,6 +685,138 @@ def run(geo, lang):
     # не переводится с русского (до 07-22 было так, плашка могла разъехаться с текстом).
     add_kratko(geo, lang)
     return True  # явный успех (было: падал в None → exit 3 на каждой записи)
+
+
+# ── КОРОТКИЙ ОТВЕТ НА ЯЗЫКЕ ─────────────────────────────────────────────────────
+# Перенесено из отменённой схемы 24.08 ДОСЛОВНО: логика и промпт не менялись, поменялся
+# только дом. Заказ юзера: звено 6 несёт своё и не тянет ничего ниоткуда.
+#
+# ⭐ Синтез, а не перевод (правило 07-22): ответ собирается из абзацев ЭТОГО языка.
+# Перевод готовой русской выжимки разводит плашку и текст разными путями, а проверить
+# это на языке, которого никто в команде не читает, нечем.
+KRATKO_TOP = 12  # топ-абзацев на выжимку (окно соска ~16.6К токенов — с запасом)
+KRATKO_KRATKO_SAVE_EVERY = 5  # чекпоинт: СТОП не съедает уплаченное
+
+LANG_NAME = {
+    "ru": "русском",
+    "en": "English",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "zh": "Chinese (Simplified)",
+    "fr": "French",
+    "de": "German",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ar": "Arabic",
+    "th": "Thai",
+    "it": "Italian",
+    "hi": "Hindi",
+    "tr": "Turkish",
+}
+
+
+def kratko_sys(lang="ru"):
+    if lang == "ru":
+        tail = "Естественный русский, без воды и без «в чатах говорят»."
+    else:
+        tail = (
+            f"Write the answer in natural {LANG_NAME.get(lang, lang)} — the SAME language "
+            "as the advice above. No filler, no «people in chats say»."
+        )
+    return (
+        "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
+        "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
+        "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
+        f"сверх написанного. {tail}\n"
+        'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
+    )
+
+
+def kratko_for(view, lang="ru"):
+    """LLM-выжимка короткого ответа из топ-групп ЭТОГО ЖЕ файла (тексты репрезентантов) —
+    значит на языке файла. None = инфра-сбой/невалид — страница выйдет без блока, не блокер.
+    """
+    from keybroker import call  # импорт тут: кластеризация остаётся keyless
+
+    by_id = {it["id"]: it for it in view["items"]}
+    tops = [
+        by_id[g["rep"]]["text"]
+        for g in view["groups"][:KRATKO_TOP]
+        if g["rep"] in by_id
+    ]
+    if not tops:
+        return None
+    out = call(
+        json.dumps(tops, ensure_ascii=False), kratko_sys(lang), consumer="kratko"
+    )
+    k = (out or {}).get("kratko")
+    return k.strip() if isinstance(k, str) and k.strip() else None
+
+
+# ДУБЛЬ КОМБАЙНА: мягкий стоп. Исходник писал файл ТОЛЬКО в конце гео — стоп/падение
+# посреди гео сжигало уже сделанные вызовы впустую (факт 07-21: 36 попыток на au в трубу).
+# Теперь: SIGTERM/флаг = дожать текущий вид, СОХРАНИТЬ и выйти; плюс сейв каждые KRATKO_SAVE_EVERY.
+KRATKO_SAVE_EVERY = 5
+_STOP = False
+
+
+def kratko_lang(geo, lang):
+    """Короткий ответ ДЛЯ ЯЗЫКОВОГО файла: синтез из абзацев ЭТОГО файла, на ЕГО языке.
+    Зовётся после сборки out_facet_<lang>/<geo>.json. Идемпотентно (готовые не трогает),
+    чекпоинт каждые KRATKO_SAVE_EVERY, стоп-флаг между видами — как в русском run()."""
+    fn = f"out_facet_{lang}/{geo}.json"
+    d = json.load(open(fn, encoding="utf-8"))
+    views = d.get("views_by_task", [])
+    need = [v for v in views if v.get("groups") and not v.get("kratko")]
+    if not need:
+        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
+        return 0
+    print(f"{geo}/{lang}: нужно kratko: {len(need)}", flush=True)
+    n_k = n_miss = miss_streak = 0
+    for v in need:
+        if os.path.exists("LANG_RUNNER_STOP"):
+            _atomic(fn, d)
+            print(f"{geo}/{lang}: остановлен, сохранено kratko +{n_k}", flush=True)
+            return n_k
+        k = None
+        for _ in range(3):  # 1 + 2 ретрая: сбой обычно транзиентный (парс/сеть)
+            k = kratko_for(v, lang)
+            if k:
+                break
+        if k:
+            v["kratko"] = k
+            n_k += 1
+            miss_streak = 0
+            if n_k % KRATKO_SAVE_EVERY == 0:
+                _atomic(fn, d)
+        else:  # вид не сжался даже с ретраями — промах. Единичный не блокер (блок скрыт).
+            n_miss += 1
+            miss_streak += 1
+            if miss_streak >= 5:  # 5 подряд без успеха → пул мёртв, НЕ долбим впустую
+                _atomic(fn, d)
+                print(
+                    f"{geo}/{lang}: 5 промахов подряд — пул не отдаёт, стоп "
+                    f"(сделано {n_k}, осталось {len(need) - n_k - n_miss})",
+                    flush=True,
+                )
+                d = json.load(open(fn, encoding="utf-8"))
+                d["fails"] = (d.get("fails") or []) + [
+                    {
+                        "step": "kratko",
+                        "lang": lang,
+                        "why": "5 kratko подряд не сделались — пул не отдаёт",
+                        "done": n_k,
+                    }
+                ]
+                _atomic(fn, d)
+                return n_k
+        print(
+            f"  {geo}/{lang}: kratko {n_k}/{len(need)} (промахов {n_miss})", flush=True
+        )
+    _atomic(fn, d)
+    tail = f", промахов {n_miss}" if n_miss else ""
+    print(f"{geo}/{lang}: kratko +{n_k}{tail}", flush=True)
+    return n_k
 
 
 if __name__ == "__main__":
