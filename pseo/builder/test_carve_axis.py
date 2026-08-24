@@ -17,7 +17,10 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE)]
+# `legacy` — отменённая схема: сторожу читать оттуда МОЖНО (правило живое,
+# код мёртв), править нельзя. См. pseo/legacy/README.md
+sys.path[:0] = [str(HERE), str(HERE.parent / "legacy")]
+LEGACY = HERE.parent / "legacy"
 
 import facet  # noqa: E402
 import tail_taxonomy as tax  # noqa: E402
@@ -382,7 +385,7 @@ def test_prochee_flies_are_not_a_section(tmp_path, monkeypatch):
 
 def test_pult_can_run_the_new_step():
     """Прогон обязан запускаться из пульта, а не с моего десктопа: у facet есть флаг."""
-    src = (HERE / "facet.py").read_text(encoding="utf-8")
+    src = (LEGACY / "facet.py").read_text(encoding="utf-8")
     # ⛔ Ищем РАЗБОР аргумента, а не строку подсказки: первая версия проверки была зелёной
     # на сломанном коде, потому что имя флага осталось в usage.
     assert '"--assign-flies" in sys.argv' in src, "флаг не разбирается в CLI"
@@ -454,6 +457,6 @@ def test_control_entry_costs_one_call(tmp_path, monkeypatch):
 
 def test_control_entry_is_in_cli():
     """Контроль запускается командой, а не из моей головы: у facet есть флаг."""
-    src = (HERE / "facet.py").read_text(encoding="utf-8")
+    src = (LEGACY / "facet.py").read_text(encoding="utf-8")
     assert '"--deals-only" in sys.argv' in src, "флаг не разбирается"
     assert "deals_for_pair(geo" in src, "флаг ничего не зовёт"
