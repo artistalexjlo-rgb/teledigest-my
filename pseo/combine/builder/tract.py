@@ -387,6 +387,15 @@ def kanon_mukhi(r, imena=None):
     return r.get("kanon") or ""
 
 
+def podeli(items, limit):
+    """Пачка больше `limit` → куски по `limit` подряд, последний неполный.
+
+    38 при пороге 15 → 15/15/8. Ровнять части (13/13/12) юзер не просил, и выдумывать это
+    не надо: правило простое — на странице не больше порога.
+    """
+    return [items[i : i + limit] for i in range(0, len(items), limit)] or [items]
+
+
 def sborka(geo):
     """Звено 5 СБОРКА: код, ключей НЕ тратит.
 
@@ -415,18 +424,35 @@ def sborka(geo):
         items = [
             {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
-        if kan and len(items) >= tax.PAGE_MIN and not tax.bad_label(kan):
+        if not (kan and len(items) >= tax.PAGE_MIN and not tax.bad_label(kan)):
+            ostatki.setdefault(shelf, []).extend(items)
+            continue
+        base = (imena.get(kan) or {}).get("adres") or slugs.slug(kan)
+        chasti = podeli(items, PAGE_MAX)
+        for nom, chast in enumerate(chasti, start=1):
+            # Хвост короче порога страницей не становится — в остаток, как и всё, чего на
+            # страницу не хватило. Иначе получилась бы страница на один-два пункта.
+            if len(chast) < tax.PAGE_MIN:
+                ostatki.setdefault(shelf, []).extend(chast)
+                continue
+            # ⛔ Часть — САМОСТОЯТЕЛЬНАЯ страница: страница не бывает толще PAGE_MAX, значит
+            # часть и есть страница. Адрес второй и дальше получает суффикс, иначе они молча
+            # затрут первую.
             views.append(
                 {
-                    "zadacha": kan,
+                    "zadacha": kan if len(chasti) == 1 else f"{kan} ({nom})",
                     "shelf": shelf,
-                    "items": items,
-                    "adres": (imena.get(kan) or {}).get("adres") or slugs.slug(kan),
+                    "items": chast,
+                    "adres": base if nom == 1 else f"{base}-{nom}",
                     **({"kratko": kratko[kan]} if kratko.get(kan) else {}),
                 }
             )
-        else:
-            ostatki.setdefault(shelf, []).extend(items)
+        if len(chasti) > 1:
+            print(
+                f"  «{kan}»: {len(items)} пунктов -> {len(chasti)} страниц "
+                f"{[len(c) for c in chasti]}",
+                flush=True,
+            )
 
     vse = [it["id"] for v in views for it in v["items"]]
     vse += [it["id"] for x in ostatki.values() for it in x]
@@ -444,8 +470,8 @@ def sborka(geo):
         print(f"  ⛔ потеряно советов: {len(flies) - len(vse)}", flush=True)
     if tolstye:
         print(
-            f"  ⚠️ толще {PAGE_MAX}: {len(tolstye)} страниц — {tolstye[:5]}; "
-            "делить рукой в справочнике",
+            f"  ⛔ СЛОМАНО ДЕЛЕНИЕ: страниц толще {PAGE_MAX} — {len(tolstye)}: "
+            f"{tolstye[:5]}",
             flush=True,
         )
     os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
