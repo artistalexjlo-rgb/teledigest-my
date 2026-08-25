@@ -48,21 +48,28 @@ MARK_BATCH = 25  # мух в запрос разметки: 25 переводо�
 
 
 def mark_sys():
-    """Промпт шага 3: три поля одним ответом, записи объектами."""
-    spisok = "; ".join(f"{k} — {n}" for k, n, _d in tax.SHELVES)
+    """Промпт звена 3: тема и подтема, ПО-АНГЛИЙСКИ. Перевода не просим.
+
+    Темы — закрытый список ключей из таксономии: рот выбирает ключ, а не выдумывает
+    название. Ключи латинские и говорят сами за себя (`visa`, `transport`, `housing`),
+    поэтому список идёт роту как есть.
+    """
+    spisok = ", ".join(k for k, _n, _d in tax.SHELVES)
     return (
-        "Ты РАЗМЕТЧИК готового совета, НЕ автор. Совет не переписывай и не сокращай.\n"
-        'На вход JSON {"0": "<совет>", ...}. Разметь КАЖДЫЙ.\n'
-        'Верни СТРОГО JSON: {"rows": [{"i": "<индекс>", "perevod": "…", '
+        "You are a MARKER of a ready advice, NOT an author. Do not rewrite, shorten "
+        "or summarise the advice.\n"
+        'Input is JSON {"0": "<advice>", ...}. Mark EVERY one.\n'
+        'Return STRICT JSON: {"rows": [{"i": "<index>", '
         '"tema": "…", "podtema": "…"}, ...]}\n'
-        "  Каждая муха — ОТДЕЛЬНЫЙ объект: битая запись стоит одной мухи, а не всей пачки.\n"
-        "  i       — ключ совета из входа.\n"
-        "  perevod — дословный перевод на русский: все факты, числа, названия, условия как есть.\n"
-        f"  tema    — РОВНО ОДИН ключ из списка: {spisok}.\n"
-        "  podtema — 2–6 слов: зачем человек придёт за этим советом. Как запрос человека: "
-        '"аренда автомобиля", "оплата такси", "поездка из аэропорта Тиват". '
-        "⛔ ЗАПРЕЩЕНО повторять название темы и давать широкое слово-рубрику.\n"
-        "Только JSON, без пояснений."
+        "  Each advice is a SEPARATE object: a broken record costs one advice, "
+        "not the whole batch.\n"
+        "  i       — the key of the advice from the input.\n"
+        f"  tema    — EXACTLY ONE key from this list: {spisok}.\n"
+        "  podtema — 2-6 words IN ENGLISH: what a person comes for. Like a human "
+        'query: "car rental", "paying for a taxi", "airport transfer". '
+        "FORBIDDEN: repeating the theme name and broad rubric words "
+        "(transport, money, documents).\n"
+        "JSON only, no explanations."
     )
 
 
@@ -245,7 +252,6 @@ def mark(geo, limit=None):
             done.append(
                 {
                     "id": fid,
-                    "perevod": str(r.get("perevod") or "").strip(),
                     # ⛔ Тема вне закрытых 13 — не выдумка рта, а парковка: пусть лежит
                     # видимой кучей, а не растворяется по чужим темам.
                     "tema": tema if tema in keys else "prochee",
@@ -293,9 +299,12 @@ def obobshi(geo):
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
+    # ⛔ Текст берём ИЗ БАЗЫ по id: в тегах его больше нет (звено 3 не переводит и не
+    # дублирует). Читать корпус бесплатно, а хранить второй экземпляр текста незачем.
+    texts = dict(load_flies(geo))
     by_tema = {}
     for r in tagged:
-        if r.get("perevod"):
+        if r["id"] in texts:
             by_tema.setdefault(r.get("tema") or "prochee", []).append(r)
 
     imena = load_canon()
@@ -341,7 +350,7 @@ def obobshi(geo):
             user = json.dumps(
                 {
                     "names": spisok,
-                    "advices": {str(j): r["perevod"] for j, r in enumerate(chunk)},
+                    "advices": {str(j): texts[r["id"]] for j, r in enumerate(chunk)},
                 },
                 ensure_ascii=False,
             )
@@ -390,7 +399,8 @@ def sborka(geo):
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
-    flies = [r for r in tagged if r.get("perevod")]
+    texts = dict(load_flies(geo))
+    flies = [r for r in tagged if r["id"] in texts]
     imena = load_canon()
     kratko = _load_json(f"{TESTS}/kratko/{geo}.json", {})
     names = {k: n for k, n, _d in tax.SHELVES}
@@ -403,7 +413,7 @@ def sborka(geo):
     for (tema, kan), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
         shelf = names.get(tema, tema)
         items = [
-            {"id": r["id"], "text": r["perevod"], "n": r.get("n", 1)} for r in group
+            {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
         if kan and len(items) >= tax.PAGE_MIN and not tax.bad_label(kan):
             views.append(

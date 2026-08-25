@@ -28,13 +28,16 @@ def _tags(tmp_path, rows):
 
 
 def _row(i, podtema, tema="visa"):
-    return {
-        "id": f"hash-{i}",
-        "perevod": f"advice {i}",
-        "tema": tema,
-        "podtema": podtema,
-        "n": 1,
-    }
+    """Запись разметки: id, тема, подтема, счётчик. Текста в тегах НЕТ — он в базе."""
+    return {"id": f"hash-{i}", "tema": tema, "podtema": podtema, "n": 1}
+
+
+def _texts(monkeypatch, rows):
+    """Сторожу база не нужна — нужен текст по id, поэтому чтение корпуса подменяется."""
+    # ⛔ Текст НЕ содержит id: иначе проверка «настоящий хеш роту не уходит» была бы
+    # ложной — хеш приезжал бы в запрос внутри самого текста.
+    pary = [(r["id"], f"advice number {j}") for j, r in enumerate(rows)]
+    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pary))
 
 
 def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch):
@@ -42,6 +45,7 @@ def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     rows = [_row(i, f"label {i}") for i in range(6)]
     _tags(tmp_path, rows)
+    _texts(monkeypatch, rows)
     seen = {}
 
     def fake_call(user, sysprompt, **kw):
@@ -74,7 +78,9 @@ def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch)
 def test_name_outside_the_list_is_dropped(tmp_path, monkeypatch):
     """Номер вне списка — промах, а не новое имя: список закрыт."""
     monkeypatch.chdir(tmp_path)
-    _tags(tmp_path, [_row(i, "label") for i in range(3)])
+    rows = [_row(i, "label") for i in range(3)]
+    _tags(tmp_path, rows)
+    _texts(monkeypatch, rows)
 
     def fake_call(user, sysprompt, **kw):
         if kw["consumer"] == "canon":
@@ -90,7 +96,9 @@ def test_name_outside_the_list_is_dropped(tmp_path, monkeypatch):
 def test_real_ids_never_reach_the_mouth(tmp_path, monkeypatch):
     """Сквозное правило: 24-символьный хеш роту не показывается нигде."""
     monkeypatch.chdir(tmp_path)
-    _tags(tmp_path, [_row(i, f"label {i}") for i in range(3)])
+    rows = [_row(i, f"label {i}") for i in range(3)]
+    _tags(tmp_path, rows)
+    _texts(monkeypatch, rows)
     payloads = []
 
     def fake_call(user, sysprompt, **kw):
@@ -113,6 +121,7 @@ def test_advice_without_a_name_goes_to_the_remainder(tmp_path, monkeypatch):
     for r in rows[:4]:
         r["kanon"] = "visa documents"
     _tags(tmp_path, rows)
+    _texts(monkeypatch, rows)
     tract.sborka("gr")
     out = json.load(
         open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
