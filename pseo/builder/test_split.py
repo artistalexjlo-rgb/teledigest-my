@@ -68,3 +68,57 @@ def test_single_page_keeps_its_plain_name(tmp_path, monkeypatch):
     out = _geo(tmp_path, monkeypatch, 12)
     v = out["views_by_task"][0]
     assert v["zadacha"] == "visa documents" and v["adres"] == "visa-documents"
+
+
+def _geo_mix(tmp_path, monkeypatch, bez_imeni, s_imenem=0, tema="visa"):
+    """Гео из советов с именем и без: без имени — это и есть остаток темы."""
+    monkeypatch.chdir(tmp_path)
+    rows = [
+        {
+            "id": f"y{i}",
+            "tema": tema,
+            "podtema": "label",
+            "n": 1,
+            "kanon": "visa documents",
+        }
+        for i in range(s_imenem)
+    ]
+    rows += [
+        {"id": f"n{i}", "tema": tema, "podtema": "label", "n": 1}
+        for i in range(bez_imeni)
+    ]
+    os.makedirs(tmp_path / "tests" / "tags", exist_ok=True)
+    with open(tmp_path / "tests" / "tags" / "gr.json", "w", encoding="utf-8") as fh:
+        json.dump(rows, fh, ensure_ascii=False)
+    pary = [(r["id"], f"advice {j}") for j, r in enumerate(rows)]
+    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pary))
+    tract.sborka("gr")
+    return json.load(
+        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
+    )
+
+
+def test_big_remainder_becomes_misc_pages(tmp_path, monkeypatch):
+    """34 совета без имени → три страницы «Разное» 15/15/4, на теме кучи не остаётся."""
+    out = _geo_mix(tmp_path, monkeypatch, bez_imeni=34)
+    misc = [v for v in out["views_by_task"] if v["adres"].startswith(tract.MISC_ADRES)]
+    assert [len(v["items"]) for v in misc] == [15, 15, 4], misc
+    assert [v["adres"] for v in misc] == ["misc", "misc-2", "misc-3"]
+    assert not out["shelves"], "остаток остался кучей на теме"
+
+
+def test_small_remainder_stays_on_the_theme(tmp_path, monkeypatch):
+    """Меньше порога страницы — остаётся списком на теме, страницей не становится."""
+    out = _geo_mix(tmp_path, monkeypatch, bez_imeni=2)
+    assert not [
+        v for v in out["views_by_task"] if v["adres"].startswith(tract.MISC_ADRES)
+    ]
+    assert sum(len(sh["items"]) for sh in out["shelves"]) == 2
+
+
+def test_nothing_is_lost_between_pages_and_the_theme(tmp_path, monkeypatch):
+    """Счёт сходится: советы либо на страницах, либо на теме, и ни один не пропал."""
+    out = _geo_mix(tmp_path, monkeypatch, bez_imeni=34, s_imenem=20)
+    na_stranicah = sum(len(v["items"]) for v in out["views_by_task"])
+    na_teme = sum(len(sh["items"]) for sh in out["shelves"])
+    assert na_stranicah + na_teme == 54, (na_stranicah, na_teme)

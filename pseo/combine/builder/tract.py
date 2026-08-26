@@ -44,6 +44,11 @@ SGUSTOK_THR = 0.93
 # `tail_taxonomy.PAGE_MIN` и здесь НЕ дублируется.
 PAGE_MAX = 15
 
+# Остаток темы, набравшийся на страницу, выходит служебной страницей «Разное».
+# ⛔ Запрет сборных имён (`bad_label`) — про имена ОТ РТА: ими он прикрывал лень нарезки.
+# Здесь имя ставит код и честно называет то, что не сложилось, — это не то же самое.
+MISC_NAME, MISC_ADRES = "Разное", "misc"
+
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
 
 
@@ -419,8 +424,10 @@ def sborka(geo):
         po_kanonu.setdefault((r.get("tema") or "prochee", kanon_mukhi(r)), []).append(r)
 
     views, ostatki = [], {}
+    tem_po_shelf = {}  # человеческое имя полки → ключ темы: ключ нужен адресу «Разного»
     for (tema, kan), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
         shelf = names.get(tema, tema)
+        tem_po_shelf[shelf] = tema
         items = [
             {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
@@ -456,6 +463,25 @@ def sborka(geo):
                 f"{[len(c) for c in chasti]}",
                 flush=True,
             )
+
+    # ── ОСТАТОК: набралось на страницу — делаем «Разное», нет — оставляем на теме ──────
+    for shelf, items in list(ostatki.items()):
+        if len(items) < tax.PAGE_MIN:
+            continue  # мелочь остаётся списком на странице темы
+        tema = tem_po_shelf.get(shelf)
+        for nom, chast in enumerate(podeli(items, PAGE_MAX), start=1):
+            if len(chast) < tax.PAGE_MIN:
+                continue  # хвост-обрезок не публикуем, как и везде
+            views.append(
+                {
+                    "zadacha": MISC_NAME if nom == 1 else f"{MISC_NAME} ({nom})",
+                    "tema": tema,
+                    "shelf": shelf,
+                    "items": chast,
+                    "adres": MISC_ADRES if nom == 1 else f"{MISC_ADRES}-{nom}",
+                }
+            )
+        ostatki.pop(shelf)
 
     vse = [it["id"] for v in views for it in v["items"]]
     vse += [it["id"] for x in ostatki.values() for it in x]
