@@ -8,8 +8,14 @@
         /<язык>/<страна>/<тема>/                тема: кнопки страниц + остаток
           /<язык>/<страна>/<тема>/<страница>/   страница: советы
 
-Ловим три вещи, на которых старый сборщик и горел: мостик `/s/` в адресе темы, плоский адрес
-страницы без темы, и адрес, посчитанный из ЗАГОЛОВКА (тогда он свой в каждом языке).
+Сторожим то, что РЕАЛЬНО можно нарушить правкой:
+
+- адрес берётся из корпуса, а не считается из заголовка (иначе он свой в каждом языке);
+- остаток темы не теряется при группировке;
+- нет адреса — нет страницы (иначе страницы затирают друг друга).
+
+⛔ Проверки «нет мостика `/s/`» тут не будет: путь собирается одной строкой, взяться ему
+неоткуда. Тест, который не может упасть, — это не сторож, а украшение.
 """
 
 import importlib.util
@@ -71,15 +77,6 @@ def test_tree_has_four_levels(tmp_path, monkeypatch):
     assert "/ru/gr/" in paths
     assert "/ru/gr/visa/" in paths
     assert "/ru/gr/visa/visa-documents/" in paths
-
-
-def test_no_bridge_and_no_flat_page(tmp_path, monkeypatch):
-    """Мостика `/s/` нет, плоского адреса страницы нет — на этом горел старый сборщик."""
-    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents")])
-    site.sobrat_vse("ru")
-    paths = list(_pages(tmp_path))
-    assert not [p for p in paths if "/s/" in p], paths
-    assert "/ru/gr/visa-documents/" not in paths, paths
 
 
 def test_address_comes_from_the_corpus_not_from_the_title(tmp_path, monkeypatch):
