@@ -25,12 +25,12 @@ import os
 import sys
 
 import tail_taxonomy as tax
-from keybroker import call
 
 # ⛔ Чтение корпуса переехало в `corpus.py` (24.08): живому тракту нужны отсюда
 # только эти имена, и держать их в файле отменённой схемы значит заставлять его
 # открывать. Здесь импорт, НЕ копия.
 from corpus import ANY_GEO, DB, MIN_LEN, geo_codes, is_junk, load_flies  # noqa: F401
+from keybroker import call
 
 ROLES = ("цель", "требование", "обход", "обстоятельство")
 

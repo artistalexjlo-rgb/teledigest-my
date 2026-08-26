@@ -16,9 +16,9 @@ import sqlite3
 import sys
 
 import tail_taxonomy as _tax
-from tail_taxonomy import BRANCH_ITEM_MIN  # порог ветви — у владельца порогов (§0.16)
 from keybroker import call
 from slugs import slug  # тот же слаг, что строит адреса при сборке
+from tail_taxonomy import BRANCH_ITEM_MIN  # порог ветви — у владельца порогов (§0.16)
 
 DB = "/home/teledigest/data/messages_fts.db"
 HERE = "/root/pseo_builder"
