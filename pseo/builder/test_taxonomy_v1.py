@@ -15,7 +15,9 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE)]
+# `legacy` — отменённая схема: сторожу читать оттуда МОЖНО (правило живое,
+# код мёртв), править нельзя. См. pseo/legacy/README.md
+sys.path[:0] = [str(HERE), str(HERE.parent / "legacy")]
 
 import facet  # noqa: E402
 import tail_taxonomy as tax  # noqa: E402

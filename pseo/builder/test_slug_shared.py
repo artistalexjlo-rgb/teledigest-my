@@ -23,7 +23,10 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+# `legacy` — отменённая схема: сторожу читать оттуда МОЖНО (правило живое, код мёртв),
+# править нельзя. См. pseo/legacy/README.md
+sys.path[:0] = [_HERE, os.path.join(os.path.dirname(_HERE), "legacy")]
 import dedup as dd  # noqa: E402
 import facet_lang as fl  # noqa: E402
 import pages as pg  # noqa: E402

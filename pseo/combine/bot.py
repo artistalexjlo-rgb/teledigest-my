@@ -389,7 +389,7 @@ def pipeline_state():
     if BUILDER not in _sys.path:
         _sys.path.insert(0, BUILDER)
     try:
-        import facet as _facet
+        import corpus as _facet
     except Exception as e:  # без билдера состояние не посчитать — честно скажем
         st["error"] = str(e)
         return st

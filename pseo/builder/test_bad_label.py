@@ -21,7 +21,10 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE)]
+# `legacy` — отменённая схема: сторожу читать оттуда МОЖНО (правило живое,
+# код мёртв), править нельзя. См. pseo/legacy/README.md
+sys.path[:0] = [str(HERE), str(HERE.parent / "legacy")]
+LEGACY = HERE.parent / "legacy"
 
 import facet  # noqa: E402
 import tail_taxonomy as tax  # noqa: E402
@@ -97,8 +100,8 @@ def test_rule_lives_in_one_place():
         and "_JUNK_LABEL = (" in f.read_text(encoding="utf-8")
     ]
     assert holders == ["tail_taxonomy.py"], f"словарь живёт не в одном месте: {holders}"
-    for mod in ("facet.py", "pages.py"):
-        src = (HERE / mod).read_text(encoding="utf-8")
+    for mod, base in (("facet.py", LEGACY), ("pages.py", HERE)):
+        src = (base / mod).read_text(encoding="utf-8")
         assert "bad_label(" in src, f"{mod}: правило не зовётся"
         assert "_JUNK_LABEL" not in src, f"{mod}: своя копия словаря"
 
@@ -119,7 +122,7 @@ def test_unknown_key_value_is_printed_not_only_counted():
     Замер 13.08: счётчик показывал «неопознанный ключ 1», и понять, что рот ответил
     `prochee`, было нельзя — пришлось лезть в данные руками.
     """
-    src = (HERE / "facet.py").read_text(encoding="utf-8")
+    src = (LEGACY / "facet.py").read_text(encoding="utf-8")
     assert "unknown_keys" in src, "значение ключа нигде не собирается"
     assert "','.join(unknown_keys[:5])" in src, "значение не попадает в печать"
 
