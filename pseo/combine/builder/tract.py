@@ -441,6 +441,9 @@ def sborka(geo):
             views.append(
                 {
                     "zadacha": kan if len(chasti) == 1 else f"{kan} ({nom})",
+                    # ⛔ КЛЮЧ темы, а не только человеческое имя: ключ — сегмент адреса
+                    # (`/ru/gr/visa/…`), и сборщику незачем угадывать его обратно по имени.
+                    "tema": tema,
                     "shelf": shelf,
                     "items": chast,
                     "adres": base if nom == 1 else f"{base}-{nom}",

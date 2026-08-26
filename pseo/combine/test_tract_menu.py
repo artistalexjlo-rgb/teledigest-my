@@ -318,8 +318,8 @@ def test_tract_writes_only_into_tests():
 def test_build_assembles_pages_before_rendering():
     """Сборка = страницы, потом рендер. Один рендер даёт `rendered=0` — это уже случалось."""
     cmd = " ".join(bot.MENU["build"][1])
-    assert "pages.py" in cmd and "render.py" in cmd, cmd
-    assert cmd.index("pages.py") < cmd.index("render.py"), cmd
+    assert "site.py" in cmd and "render.py" in cmd, cmd
+    assert cmd.index("site.py") < cmd.index("render.py"), cmd
     # ⛔ Каталог задаётся ПЕРЕМЕННЫМИ: `pages.py` читает корпус из BUILT_DIR, `render.py`
     # пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено прогоном.
     assert "BUILT_DIR=" in cmd and "/tests" in cmd, cmd

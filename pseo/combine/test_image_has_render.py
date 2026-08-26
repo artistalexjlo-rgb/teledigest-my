@@ -21,7 +21,9 @@ ROOT = PSEO.parent  # корень репо = контекст сборки
 DOCKERFILE = HERE / "Dockerfile"
 
 # Точки входа рендера. Всё остальное вычисляется из их импортов.
-ENTRIES = ["render.py", "builder/pages.py", "builder/readycheck.py"]
+# ⛔ `site.py`, а не `pages.py`: старый сборщик строит отменённое дерево (мостик `/s/`,
+# плоский адрес страницы) и в образ пульта больше не едет (26.08).
+ENTRIES = ["render.py", "builder/site.py", "builder/readycheck.py"]
 
 # Каталоги, которые рендер читает ПО ИМЕНИ в рантайме (ast их не видит):
 # шаблоны — FileSystemLoader, словари — load_i18n, ассеты — copy_assets, site-конфиг.
