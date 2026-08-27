@@ -32,9 +32,13 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
-# `themes.json` живёт РЯДОМ С КОДОМ, как и `countries.json` — не в BUILT_DIR (это
-# монтируемые данные прогона, а имена тем те же для всех стран и прогонов).
-THEMES_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/themes.json"
+# `themes.json` РАСТЁТ: звено 6 дописывает купленные языки — как canon.json, живёт на
+# СМОНТИРОВАННОМ томе (BUILT_DIR), а не в образе, иначе редеплой стирал бы покупки (28.08,
+# юзер поймал — файл стоял рядом с кодом, я скопировал место у СТАТИЧНОГО countries.json,
+# не подумав, что этот файл не статичный). Английский источник — сид в git на случай
+# пустого тома: если контейнер только что развернули, читать покупки ещё неоткуда.
+SEED_THEMES_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/themes.json"
+THEMES_FILE = f"{BUILT}/themes.json"
 
 
 def theme_names(lang):
@@ -42,7 +46,7 @@ def theme_names(lang):
     русский: все имена живут в `themes.json` (27.08, не в коде). Языка ещё нет в файле —
     честный фолбэк на ключ, а не выдумка.
     """
-    mp = (_load(THEMES_FILE) or {}).get(lang) or {}
+    mp = (_load(THEMES_FILE) or _load(SEED_THEMES_FILE) or {}).get(lang) or {}
     return {k: mp.get(k) or k.replace("_", " ") for k in tract.THEME_KEYS}
 
 

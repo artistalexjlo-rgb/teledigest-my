@@ -24,6 +24,9 @@ COPY pseo/mirror_static/ /app/mirror_static/
 # `country_codes.py` — справочник стран рядом со сборщиком (249 стран, имена и флаги).
 # Копия файла бота, дословная; сторож `test_country_codes_copy` не даст ей отстать. В образ
 # едет как обычный модуль builder — никакого захода в `src/` и никаких путей вне /app.
+# ⛔ `themes.json` здесь — ТОЛЬКО СИД (английский источник, статика из git). Рабочий файл,
+# в который звено 6 дописывает купленные языки, живёт на смонтированном BRAIN_DIR и этой
+# копии не касается — иначе редеплой стирал бы покупки (28.08).
 COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
 COPY pseo/builder/readycheck.py /app/builder/
 

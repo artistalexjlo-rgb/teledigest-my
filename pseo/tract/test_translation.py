@@ -232,3 +232,35 @@ def test_theme_names_are_bought_from_english_and_cached(tmp_path, monkeypatch):
     assert "labels" not in schet2 or "border" not in schet2.get(
         "labels", []
     ), "второй прогон купил темы заново — кэш не сработал"
+
+
+def test_themes_file_lives_on_the_mounted_volume_not_in_the_image():
+    """themes.json РАСТЁТ (звено 6 дописывает языки) — обязан жить на BUILT_DIR, а не
+    рядом с кодом: иначе редеплой контейнера стирал бы все покупки (28.08, юзер поймал).
+
+    ⛔ `BUILT`/`THEMES_FILE` — константы, посчитанные при импорте: монкипатчить `BUILT` и
+    ждать, что `THEMES_FILE` пересчитается, бессмысленно. Проверяем СВЯЗЬ на текущих
+    значениях, как есть.
+    """
+    assert translation.THEMES_FILE == f"{translation.BUILT}/themes.json"
+    assert (
+        translation.SEED_THEMES_FILE != translation.THEMES_FILE
+    ), "сид и рабочий файл — РАЗНЫЕ пути, иначе первый прогон затирал бы сид"
+
+
+def test_first_touch_of_an_empty_volume_seeds_english_from_git(tmp_path, monkeypatch):
+    """Свежий контейнер, смонтированный том ещё пуст: английский источник копируется из
+    git-сида на том и там остаётся — второй прогон сид уже не трогает.
+    """
+    monkeypatch.setattr(translation, "BUILT", str(tmp_path))
+    monkeypatch.setattr(translation, "THEMES_FILE", str(tmp_path / "themes.json"))
+    assert not (tmp_path / "themes.json").exists(), "том должен стартовать пустым"
+
+    schet = {}
+    _rot(monkeypatch, schet)
+    translation.theme_names("ru")
+    on_disk = json.loads((tmp_path / "themes.json").read_text(encoding="utf-8"))
+    assert on_disk["en"], "английский сид не скопировался на том при первом касании"
+    assert (
+        len(schet.get("labels") or []) == 13
+    ), "русский всё равно куплен ротом, а не сид"
