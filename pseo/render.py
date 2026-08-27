@@ -87,7 +87,7 @@ VOICE_ANY = [0, 6]  # «объяснись с местными», «спроси
 
 
 def voice_pool(pools: dict, page: dict) -> list:
-    idx = VOICE_BY_SHELF.get(page.get("shelf_key") or "", VOICE_ANY)
+    idx = VOICE_BY_SHELF.get(page.get("theme") or "", VOICE_ANY)
     lines = [pools["voice"][i] for i in idx if i < len(pools["voice"])]
     return lines or pools["voice"]  # пул короче ожидаемого → ведём себя как раньше
 
@@ -99,12 +99,16 @@ def door_url(page: dict) -> str:
     `?geo=&shelf=`, а nginx уже пишет строку запроса и Referer — значит видно, какая страна
     и какой раздел отдают переходы, и своего бэкенда для этого не нужно.
 
+    ⛔ 28.08: поле называлось `shelf_key` со старого сборщика (`pages.py`, снят 27.08).
+    Новый кладёт тему в `theme`, а старое имя тут молча читало пустоту — раздел в query
+    всегда был пуст, реплики CTA (`voice_pool`) всегда падали на нейтральный пул.
+
     Сам шлюз ведёт в продукт НАПРЯМУЮ: иначе страница слала бы на саму себя.
     """
     if "/go/luky/" in (page.get("path") or ""):
         return SITE["cta_luky_url"]
     lang = page.get("lang", "ru")
-    q = [("geo", page.get("geo") or ""), ("shelf", page.get("shelf_key") or "")]
+    q = [("geo", page.get("geo") or ""), ("shelf", page.get("theme") or "")]
     tail = urllib.parse.urlencode([(k, v) for k, v in q if v])
     return f"/{lang}/go/luky/" + (f"?{tail}" if tail else "")
 
