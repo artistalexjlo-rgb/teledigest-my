@@ -46,16 +46,34 @@ def _korpus(tmp_path, monkeypatch, views, shelves=()):
     monkeypatch.setattr(site, "DATA", str(tmp_path / "data"))
 
 
-def _view(zadacha, adres, tema="visa", n=5):
+def _view(zadacha, adres, tema="visa", n=5, branch=None, part=1, parts=1):
     return {
         "zadacha": zadacha,
         "tema": tema,
         "shelf": "Визовые процедуры",
         "adres": adres,
+        "branch": branch or adres,
+        "part": part,
+        "parts": parts,
         "items": [
             {"id": f"h{i}", "text": f"advice {i}. tail", "n": 1} for i in range(n)
         ],
     }
+
+
+def _vetka(zadacha, base, chastey, tema="visa"):
+    """Ветка из нескольких частей — так её отдаёт звено 5."""
+    return [
+        _view(
+            zadacha,
+            base if k == 1 else f"{base}-{k}",
+            tema=tema,
+            branch=base,
+            part=k,
+            parts=chastey,
+        )
+        for k in range(1, chastey + 1)
+    ]
 
 
 def _pages(tmp_path):
@@ -119,3 +137,42 @@ def test_page_without_address_is_skipped(tmp_path, monkeypatch):
     _korpus(tmp_path, monkeypatch, [v])
     site.sobrat_vse("ru")
     assert not [p for p in _pages(tmp_path) if p.startswith("/ru/gr/visa/")]
+
+
+def test_branch_is_one_tile_on_the_theme(tmp_path, monkeypatch):
+    """Ветка из трёх частей выходит на тему ОДНОЙ плиткой (PLAN.md, 27.08).
+
+    Соседних «имя» и «имя (2)» не бывает: части — внутреннее устройство ветки, а не
+    соседи по витрине. Подпись плитки — сумма по всем частям.
+    """
+    _korpus(tmp_path, monkeypatch, _vetka("visa documents", "visa-documents", 3))
+    site.sobrat_vse("ru")
+    tema = _pages(tmp_path)["/ru/gr/visa/"]
+    assert [t["url"] for t in tema["tiles"]] == ["/ru/gr/visa/visa-documents/"]
+    assert tema["tiles"][0]["blurb"] == "15", "подпись плитки — сумма всех частей"
+    assert [t["title"] for t in tema["tiles"]] == ["visa documents"]
+
+
+def test_parts_link_to_each_other(tmp_path, monkeypatch):
+    """Во вторую часть можно попасть только из первой — значит части знают сестёр."""
+    _korpus(tmp_path, monkeypatch, _vetka("visa documents", "visa-documents", 3))
+    site.sobrat_vse("ru")
+    pages = _pages(tmp_path)
+    p2 = pages["/ru/gr/visa/visa-documents-2/"]
+    assert [c["url"] for c in p2["chasti"]] == [
+        "/ru/gr/visa/visa-documents/",
+        "/ru/gr/visa/visa-documents-2/",
+        "/ru/gr/visa/visa-documents-3/",
+    ]
+    assert [c["current"] for c in p2["chasti"]] == [False, True, False]
+    assert p2["h1"] == "visa documents", "номер части в имя не лезет"
+    assert (
+        "2/3" in p2["title"]
+    ), "а в заголовок окна — лезет, страницы должны различаться"
+
+
+def test_single_page_has_no_part_nav(tmp_path, monkeypatch):
+    """Ветка в одну страницу переходов не показывает — нечего перелистывать."""
+    _korpus(tmp_path, monkeypatch, [_view("visa fees", "visa-fees")])
+    site.sobrat_vse("ru")
+    assert _pages(tmp_path)["/ru/gr/visa/visa-fees/"]["chasti"] == []

@@ -87,11 +87,24 @@ def korpus(geo, lang="ru"):
     return _load(f"{BUILT}/{d}/{geo}.json")
 
 
-def stranica(page_data, geo, lang):
-    """Страница советов: `/<язык>/<страна>/<тема>/<страница>/`."""
+def stranica(page_data, geo, lang, vetka=()):
+    """Страница советов: `/<язык>/<страна>/<тема>/<страница>/`.
+
+    `vetka` — все части этой же ветки по порядку. Части знают друг о друге, потому что
+    ветка выходит на тему ОДНОЙ плиткой (PLAN.md, «Ветвление одной темы»): попасть во
+    вторую часть можно только отсюда.
+    """
     tema = page_data["tema"]
     adres = page_data["adres"]
     path = f"/{lang}/{geo}/{tema}/{adres}/"
+    chasti = [
+        {
+            "n": p.get("part", 1),
+            "url": f"/{lang}/{geo}/{tema}/{p['adres']}/",
+            "current": p["adres"] == adres,
+        }
+        for p in vetka
+    ]
     faqs = [
         {
             "q": it["text"].split(".")[0][:120],
@@ -112,25 +125,48 @@ def stranica(page_data, geo, lang):
         "shelf_name": TEMA_NAME.get(tema, tema),
         "intent_name": page_data["zadacha"],
         "h1": page_data["zadacha"],
-        "title": f"{page_data['zadacha']} — {_geo_name(geo, lang)}",
+        "title": (
+            f"{page_data['zadacha']} — {_geo_name(geo, lang)}"
+            if len(chasti) < 2
+            else f"{page_data['zadacha']} {page_data.get('part', 1)}"
+            f"/{len(chasti)} — {_geo_name(geo, lang)}"
+        ),
         "faqs": faqs,
         "chips": [],
+        # ⛔ Номер части — в заголовке ОКНА, а не в `h1`: имя одно на всю ветку, а
+        # поисковику части разными видеть надо.
+        "chasti": chasti if len(chasti) > 1 else [],
         "search_title": page_data["zadacha"],
     }
+
+
+def po_vetkam(stranicy):
+    """Страницы темы → ветки: список списков, части внутри по порядку.
+
+    Ключ — поле `branch` от звена 5. Страницы без него (старый корпус) — ветка сама себе.
+    """
+    vetki = {}
+    for p in stranicy:
+        vetki.setdefault(p.get("branch") or p["adres"], []).append(p)
+    return [sorted(v, key=lambda p: p.get("part", 1)) for v in vetki.values()]
 
 
 def tema_stranica(tema, stranicy, ostatok, geo, lang):
     """Тема: кнопки страниц сверху, остаток списком ниже. Своего текста не несёт."""
     path = f"/{lang}/{geo}/{tema}/"
-    tiles = [
-        {
-            "icon": "",
-            "title": p["zadacha"],
-            "blurb": f"{len(p['items'])}",
-            "url": f"/{lang}/{geo}/{tema}/{p['adres']}/",
-        }
-        for p in stranicy
-    ]
+    # ⛔ ОДНА ПЛИТКА НА ВЕТКУ (PLAN.md, 27.08). Группируем по полю `branch`, а не по имени
+    # (оно переводится) и не разбором суффикса `-2` (он следствие, а не признак).
+    tiles = []
+    for chasti in po_vetkam(stranicy):
+        pervaya = chasti[0]
+        tiles.append(
+            {
+                "icon": "",
+                "title": pervaya["zadacha"],
+                "blurb": f"{sum(len(p['items']) for p in chasti)}",
+                "url": f"/{lang}/{geo}/{tema}/{pervaya['adres']}/",
+            }
+        )
     page = {
         "lang": lang,
         "path": path,
@@ -229,9 +265,11 @@ def sobrat_geo(geo, lang="ru"):
     for tema, stranicy in po_teme.items():
         for p in stranicy:
             p["tema"] = tema
-            _, page = stranica(p, geo, lang)
-            _write(f"{lang}_{geo}_{tema}_{p['adres']}.json", page)
-            n += 1
+        for chasti in po_vetkam(stranicy):
+            for p in chasti:
+                _, page = stranica(p, geo, lang, chasti)
+                _write(f"{lang}_{geo}_{tema}_{p['adres']}.json", page)
+                n += 1
         _, page = tema_stranica(tema, stranicy, ostatki.get(tema), geo, lang)
         _write(f"{lang}_{geo}_{tema}.json", page)
         n += 1

@@ -14,6 +14,16 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
+  {%- if page.chasti %}
+  {# Переходы по частям ОДНОЙ ветки. Цифрами, без слов: ветка выходит на тему одной
+     плиткой, и новый ключ перевода на 14 языков ради «часть 2 из 3» тут не нужен. #}
+  <nav class="parts">
+    {%- for c in page.chasti %}
+    {%- if c.current %}<b>{{ c.n }}</b>{% else %}<a href="{{ c.url }}">{{ c.n }}</a>{% endif %}
+    {%- endfor %}
+  </nav>
+  {%- endif %}
+
   <h2>{{ page.list_label or t.label_faq }}</h2>
   {%- for f in page.faqs %}
   <details{% if loop.first %} open{% endif %}><summary><span class="sumq">{{ f.q }}</span><span></span></summary>

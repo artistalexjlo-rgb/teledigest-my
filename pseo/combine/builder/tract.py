@@ -44,10 +44,13 @@ SGUSTOK_THR = 0.93
 # `tail_taxonomy.PAGE_MIN` и здесь НЕ дублируется.
 PAGE_MAX = 15
 
-# Остаток темы, набравшийся на страницу, выходит служебной страницей «Разное».
+# Остаток темы, набравшийся на ветку, выходит служебной веткой.
+# ⛔ Имя АНГЛИЙСКОЕ, как и все имена прохода А: русское «Разное» уехало бы в корпус и
+# осталось бы единственной строкой сайта, которую звено 6 не переводит. «Разное» —
+# это перевод, и появляется он там же, где остальные заголовки.
 # ⛔ Запрет сборных имён (`bad_label`) — про имена ОТ РТА: ими он прикрывал лень нарезки.
 # Здесь имя ставит код и честно называет то, что не сложилось, — это не то же самое.
-MISC_NAME, MISC_ADRES = "Разное", "misc"
+MISC_NAME, MISC_ADRES = "Other", "misc"
 
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
 
@@ -401,6 +404,40 @@ def podeli(items, limit):
     return [items[i : i + limit] for i in range(0, len(items), limit)] or [items]
 
 
+def vetvi(imya, base, items, tema, shelf, extra=None):
+    """Пачка → страницы ОДНОЙ ВЕТКИ. Единственное место нарезки: и имена, и остаток.
+
+    Ветвление одной темы (PLAN.md, слова юзера 27.08): тема — это список ВЕТОК, а ветка —
+    одно имя. Не влезла в `PAGE_MAX` — продолжается страницами 1, 2, 3…; **последняя часть
+    сколько осталось, хоть один абзац** (16 = 15 + 1, «не будем мы бегать и прибираться»).
+
+    ⛔ Хвост НЕ сбрасывается в остаток: у этих советов имя УЖЕ есть, и сброс терял бы
+    принадлежность. `PAGE_MIN` решает другое — заводить ли ветку с нуля.
+
+    ⛔ Номер части живёт ПОЛЕМ (`part`), а не в имени: имя переводится в звене 6, и «(2)»
+    внутри заголовка размножилось бы по четырнадцати языкам.
+    """
+    chasti = podeli(items, PAGE_MAX)
+    return [
+        {
+            "zadacha": imya,
+            # ⛔ КЛЮЧ темы, а не человеческое имя: ключ — сегмент адреса (`/ru/gr/visa/…`),
+            # и сборщику незачем угадывать его обратно по имени.
+            "tema": tema,
+            "shelf": shelf,
+            "items": chast,
+            "adres": base if nom == 1 else f"{base}-{nom}",
+            # ⛔ Сборщик группирует части по ЭТОМУ полю, а не по имени и не разбором
+            # суффикса: имя на 14 языках разное, суффикс — следствие, а не признак.
+            "branch": base,
+            "part": nom,
+            "parts": len(chasti),
+            **(extra or {}),
+        }
+        for nom, chast in enumerate(chasti, start=1)
+    ]
+
+
 def sborka(geo):
     """Звено 5 СБОРКА: код, ключей НЕ тратит.
 
@@ -435,52 +472,31 @@ def sborka(geo):
             ostatki.setdefault(shelf, []).extend(items)
             continue
         base = (imena.get(kan) or {}).get("adres") or slugs.slug(kan)
-        chasti = podeli(items, PAGE_MAX)
-        for nom, chast in enumerate(chasti, start=1):
-            # Хвост короче порога страницей не становится — в остаток, как и всё, чего на
-            # страницу не хватило. Иначе получилась бы страница на один-два пункта.
-            if len(chast) < tax.PAGE_MIN:
-                ostatki.setdefault(shelf, []).extend(chast)
-                continue
-            # ⛔ Часть — САМОСТОЯТЕЛЬНАЯ страница: страница не бывает толще PAGE_MAX, значит
-            # часть и есть страница. Адрес второй и дальше получает суффикс, иначе они молча
-            # затрут первую.
-            views.append(
-                {
-                    "zadacha": kan if len(chasti) == 1 else f"{kan} ({nom})",
-                    # ⛔ КЛЮЧ темы, а не только человеческое имя: ключ — сегмент адреса
-                    # (`/ru/gr/visa/…`), и сборщику незачем угадывать его обратно по имени.
-                    "tema": tema,
-                    "shelf": shelf,
-                    "items": chast,
-                    "adres": base if nom == 1 else f"{base}-{nom}",
-                    **({"kratko": kratko[kan]} if kratko.get(kan) else {}),
-                }
-            )
+        chasti = vetvi(
+            kan,
+            base,
+            items,
+            tema,
+            shelf,
+            {"kratko": kratko[kan]} if kratko.get(kan) else None,
+        )
+        views.extend(chasti)
         if len(chasti) > 1:
             print(
                 f"  «{kan}»: {len(items)} пунктов -> {len(chasti)} страниц "
-                f"{[len(c) for c in chasti]}",
+                f"{[len(c['items']) for c in chasti]}",
                 flush=True,
             )
 
-    # ── ОСТАТОК: набралось на страницу — делаем «Разное», нет — оставляем на теме ──────
+    # ── ОСТАТОК: набралось на ветку — делаем служебную, нет — оставляем на теме ────────
+    # ⛔ Тем же вызовом, что и имена: отдельного правила для остатка НЕТ, иначе назавтра
+    # они разойдутся. «Разное» — не исключение, а такая же ветка (PLAN.md, 27.08).
     for shelf, items in list(ostatki.items()):
         if len(items) < tax.PAGE_MIN:
-            continue  # мелочь остаётся списком на странице темы
-        tema = tem_po_shelf.get(shelf)
-        for nom, chast in enumerate(podeli(items, PAGE_MAX), start=1):
-            if len(chast) < tax.PAGE_MIN:
-                continue  # хвост-обрезок не публикуем, как и везде
-            views.append(
-                {
-                    "zadacha": MISC_NAME if nom == 1 else f"{MISC_NAME} ({nom})",
-                    "tema": tema,
-                    "shelf": shelf,
-                    "items": chast,
-                    "adres": MISC_ADRES if nom == 1 else f"{MISC_ADRES}-{nom}",
-                }
-            )
+            continue  # мелочь веткой не становится — остаётся списком на странице темы
+        views.extend(
+            vetvi(MISC_NAME, MISC_ADRES, items, tem_po_shelf.get(shelf), shelf)
+        )
         ostatki.pop(shelf)
 
     vse = [it["id"] for v in views for it in v["items"]]

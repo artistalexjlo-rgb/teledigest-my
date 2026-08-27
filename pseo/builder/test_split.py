@@ -55,12 +55,16 @@ def test_thick_name_becomes_several_pages(tmp_path, monkeypatch):
     assert all(len(v["items"]) <= tract.PAGE_MAX for v in views)
 
 
-def test_tail_shorter_than_page_min_goes_to_the_remainder(tmp_path, monkeypatch):
-    """16 → 15 и хвост в 1 пункт: хвост страницей не становится, он в остатке."""
+def test_tail_stays_in_its_own_branch(tmp_path, monkeypatch):
+    """16 → 15 + 1. Хвост ветки НЕ сбрасывается: «не будем мы бегать и прибираться».
+
+    Слова юзера 27.08. У этих советов имя уже есть, и сброс в безымянный остаток терял бы
+    принадлежность. `PAGE_MIN` решает другое — заводить ли ветку с нуля.
+    """
     out = _geo(tmp_path, monkeypatch, 16)
-    assert [len(v["items"]) for v in out["views_by_task"]] == [15]
-    assert sum(len(sh["items"]) for sh in out["shelves"]) == 1
-    assert tax.PAGE_MIN == 4  # порог, по которому хвост признан обрезком
+    assert [len(v["items"]) for v in out["views_by_task"]] == [15, 1]
+    assert not out["shelves"], "хвост ветки уехал в остаток"
+    assert tax.PAGE_MIN == 4  # порог входа в ветку, к делению отношения не имеет
 
 
 def test_single_page_keeps_its_plain_name(tmp_path, monkeypatch):
@@ -68,6 +72,18 @@ def test_single_page_keeps_its_plain_name(tmp_path, monkeypatch):
     out = _geo(tmp_path, monkeypatch, 12)
     v = out["views_by_task"][0]
     assert v["zadacha"] == "visa documents" and v["adres"] == "visa-documents"
+
+
+def test_parts_share_one_clean_name_and_carry_their_number(tmp_path, monkeypatch):
+    """Номер части живёт ПОЛЕМ, а не в имени: имя переводится, «(2)» уехало бы в 14 языков."""
+    out = _geo(tmp_path, monkeypatch, 38)
+    views = out["views_by_task"]
+    assert {v["zadacha"] for v in views} == {"visa documents"}
+    assert [(v["branch"], v["part"], v["parts"]) for v in views] == [
+        ("visa-documents", 1, 3),
+        ("visa-documents", 2, 3),
+        ("visa-documents", 3, 3),
+    ]
 
 
 def _geo_mix(tmp_path, monkeypatch, bez_imeni, s_imenem=0, tema="visa"):
@@ -98,12 +114,17 @@ def _geo_mix(tmp_path, monkeypatch, bez_imeni, s_imenem=0, tema="visa"):
     )
 
 
-def test_big_remainder_becomes_misc_pages(tmp_path, monkeypatch):
-    """34 совета без имени → три страницы «Разное» 15/15/4, на теме кучи не остаётся."""
-    out = _geo_mix(tmp_path, monkeypatch, bez_imeni=34)
-    misc = [v for v in out["views_by_task"] if v["adres"].startswith(tract.MISC_ADRES)]
-    assert [len(v["items"]) for v in misc] == [15, 15, 4], misc
+def test_remainder_is_a_branch_like_any_other(tmp_path, monkeypatch):
+    """Остаток — ТАКАЯ ЖЕ ветка: одно имя, части внутри, хвост при себе.
+
+    33 совета → 15/15/3. Третья часть короче `PAGE_MIN` и всё равно остаётся: правило
+    деления одно на всё, отдельного для остатка нет.
+    """
+    out = _geo_mix(tmp_path, monkeypatch, bez_imeni=33)
+    misc = [v for v in out["views_by_task"] if v.get("branch") == tract.MISC_ADRES]
+    assert [len(v["items"]) for v in misc] == [15, 15, 3], misc
     assert [v["adres"] for v in misc] == ["misc", "misc-2", "misc-3"]
+    assert {v["zadacha"] for v in misc} == {"Other"}, "имя ветки должно быть английским"
     assert not out["shelves"], "остаток остался кучей на теме"
 
 
