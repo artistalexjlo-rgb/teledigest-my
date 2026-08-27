@@ -143,37 +143,3 @@ def test_nothing_is_lost_between_pages_and_the_theme(tmp_path, monkeypatch):
     na_stranicah = sum(len(v["items"]) for v in out["views_by_task"])
     na_teme = sum(len(sh["items"]) for sh in out["shelves"])
     assert na_stranicah + na_teme == 54, (na_stranicah, na_teme)
-
-
-def test_paid_markup_in_the_old_spelling_is_still_read(tmp_path, monkeypatch):
-    """Разметка со старыми именами полей читается: за неё уже уплачено ключами.
-
-    До 27.08 поля назывались транслитом (`tema`, `podtema`, `kanon`). Переименование не
-    должно обесценивать файлы `tags/<гео>.json` — единственное место, за которое ключи
-    потрачены безвозвратно. Поэтому читатель понимает оба написания, а пишет новое.
-    """
-    monkeypatch.chdir(tmp_path)
-    rows = [
-        {
-            "id": f"o{i}",
-            "tema": "visa",
-            "podtema": "label",
-            "n": 1,
-            "kanon": "visa fees",
-        }
-        for i in range(5)
-    ]
-    os.makedirs(tmp_path / "tests" / "tags", exist_ok=True)
-    with open(tmp_path / "tests" / "tags" / "gr.json", "w", encoding="utf-8") as fh:
-        json.dump(rows, fh, ensure_ascii=False)
-    monkeypatch.setattr(
-        tract,
-        "load_flies",
-        lambda geo: [(r["id"], f"advice {j}") for j, r in enumerate(rows)],
-    )
-    tract.build_corpus("gr")
-    out = json.load(
-        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
-    )
-    assert [v["title"] for v in out["views_by_task"]] == ["visa fees"]
-    assert out["views_by_task"][0]["theme"] == "visa"

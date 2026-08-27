@@ -289,22 +289,6 @@ def load_names(base=""):
     return _load_json(names_path(base), {})
 
 
-# Имена полей разметки до 27.08 были транслитом. Файлы `tags/<гео>.json` — единственное,
-# за что ключи уплачены БЕЗВОЗВРАТНО, поэтому переписывать их незачем: читатель понимает
-# оба написания, а пишет всегда новое.
-OLD_FIELDS = {"tema": "theme", "podtema": "subtheme", "kanon": "name"}
-
-
-def load_tags(geo):
-    """Разметка гео. Старые имена полей приводятся к новым ПРИ ЧТЕНИИ, файл не трогаем."""
-    rows = _load_json(f"{TESTS}/tags/{geo}.json", None)
-    for r in rows or []:
-        for old, new in OLD_FIELDS.items():
-            if old in r and new not in r:
-                r[new] = r.pop(old)
-    return rows
-
-
 def summarize(geo):
     """Звено 4 ОБОБЩЕНИЕ: два прохода на тему (канон §0.19, PLAN.md).
 
@@ -319,7 +303,7 @@ def summarize(geo):
     ⛔ Рту идут НОМЕРА, не id (сквозное правило PLAN.md): и метки, и советы, и имена.
     """
     fn = f"{TESTS}/tags/{geo}.json"
-    tagged = load_tags(geo)
+    tagged = _load_json(fn, None)
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
@@ -462,7 +446,7 @@ def build_corpus(geo):
     одном месте, на странице от 4 до 15 пунктов. Нарушение печатается и правится рукой
     в справочнике — не перепрогоном рта.
     """
-    tagged = load_tags(geo)
+    tagged = _load_json(f"{TESTS}/tags/{geo}.json", None)
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
