@@ -263,6 +263,59 @@ def home(geos, lang):
     }
 
 
+# Текст «о проекте» по языкам — авторский, лежит рядом с кодом (как countries.json,
+# themes.json): не переводится ротом, звену 6 тут делать нечего.
+ABOUT_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/about.json"
+
+
+def gateway_page(lang):
+    """Шлюз клика в продукт `/<язык>/go/luky/`. `door_url()` видит этот путь и ведёт
+    НАПРЯМУЮ в продукт, минуя querystring, — своего текста шлюзу не нужно."""
+    path = f"/{lang}/go/luky/"
+    return path, {
+        "lang": lang,
+        "path": path,
+        "template": "go.html.j2",
+        "shared_tail": False,
+        "noindex": True,  # в карту сайта не идёт (PLAN.md, «Схема страниц»)
+    }
+
+
+def find_page(lang):
+    """Страница поиска `/<язык>/find/`. Сам индекс (`search.json`) собирает render.py
+    из отрендеренных страниц — этой странице нужно только существовать."""
+    path = f"/{lang}/find/"
+    return path, {
+        "lang": lang,
+        "path": path,
+        "template": "find.html.j2",
+        "shared_tail": False,
+        "noindex": True,
+    }
+
+
+def about_page(lang):
+    """Страница «о проекте» `/<язык>/about/`. Текст авторский, из `about.json`;
+    нет языка в файле — страницу не пишем, а не показываем половину на английском."""
+    d = (_load(ABOUT_FILE) or {}).get(lang)
+    if not d:
+        return None
+    path = f"/{lang}/about/"
+    return path, {
+        "lang": lang,
+        "path": path,
+        "template": "index.html.j2",
+        "shared_tail": False,
+        "noindex": False,
+        "crumb_label": d["crumb_label"],
+        "title": d["title"],
+        "meta_desc": d["meta_desc"],
+        "h1": d["h1"],
+        "body": d["body"],
+        "search_title": d["h1"],
+    }
+
+
 def build_geo(geo, lang="ru"):
     """Одна страна: страницы тем и советов. Возвращает (сколько страниц, темы со счётом)."""
     d = corpus(geo, lang)
@@ -317,6 +370,18 @@ def build_all(lang="ru"):
     if geos:
         _, page = home(geos, lang)
         _write(f"{lang}.json", page)
+        total += 1
+    # Служебные страницы — на весь язык, без привязки к гео (PLAN.md, «База сайта»).
+    _, page = gateway_page(lang)
+    _write(f"{lang}_go_luky.json", page)
+    total += 1
+    _, page = find_page(lang)
+    _write(f"{lang}_find.json", page)
+    total += 1
+    about = about_page(lang)
+    if about:
+        _, page = about
+        _write(f"{lang}_about.json", page)
         total += 1
     print(f"ИТОГО {lang}: {total} страниц-data -> {DATA}", flush=True)
     return total

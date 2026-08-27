@@ -175,3 +175,35 @@ def test_single_page_has_no_part_nav(tmp_path, monkeypatch):
     _korpus(tmp_path, monkeypatch, [_view("visa fees", "visa-fees")])
     site.build_all("ru")
     assert _pages(tmp_path)["/ru/gr/visa/visa-fees/"]["parts"] == []
+
+
+def test_service_pages_exist_and_carry_no_content(tmp_path, monkeypatch):
+    """Шлюз и поиск пишутся всегда, даже без единого гео, и в карту сайта не идут."""
+    _korpus(tmp_path, monkeypatch, [])
+    site.build_all("ru")
+    pages = _pages(tmp_path)
+    assert pages["/ru/go/luky/"]["template"] == "go.html.j2"
+    assert pages["/ru/go/luky/"]["noindex"] is True
+    assert pages["/ru/find/"]["template"] == "find.html.j2"
+    assert pages["/ru/find/"]["noindex"] is True
+
+
+def test_about_page_carries_real_text_and_is_indexable(tmp_path, monkeypatch):
+    """«О проекте» несёт настоящий текст (не пустышку) и, в отличие от шлюза и поиска,
+    ИНДЕКСИРУЕТСЯ — это содержание, а не служебная переадресация."""
+    _korpus(tmp_path, monkeypatch, [])
+    site.build_all("ru")
+    about = _pages(tmp_path)["/ru/about/"]
+    assert about["noindex"] is False
+    assert about["h1"] and about["body"], "страница пустая — текста нет"
+    assert "href='#luky'" in about["body"], "маркер двери в продукт потерян"
+
+
+def test_about_page_is_skipped_when_language_has_no_text(tmp_path, monkeypatch):
+    """Нет текста на языке — нет страницы. Не показываем половину заглушкой."""
+    _korpus(tmp_path, monkeypatch, [])
+    empty_about = tmp_path / "no_about.json"
+    empty_about.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(site, "ABOUT_FILE", str(empty_about))
+    site.build_all("ru")
+    assert "/ru/about/" not in _pages(tmp_path)

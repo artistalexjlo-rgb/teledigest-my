@@ -1,0 +1,101 @@
+{
+ "_readme": "Текст страницы «о проекте» по языкам. Авторский, не переводится ротом — перенесён 27.08 из старой сборки (pseo/data/<lang>_about.json) без изменений. Маркер href='#luky' внутри body render.py подменяет на дверь в продукт (build(), см. door_url()).",
+ "ar": {
+  "title": "عن المشروع · Luky",
+  "meta_desc": "يجمع Luky تجربة حقيقية من محادثات المجتمع المفتوحة حسب البلد — إلى الهدف مباشرة، بلا حشو.",
+  "crumb_label": "عن المشروع",
+  "h1": "عن المشروع",
+  "body": "<p><a href='#luky'>Luky</a> هو تجربة أشخاص حقيقيين، لا نظرية جافة. نجمع نصائح حقيقية من محادثات المجتمع المفتوحة: كيف تسير الأمور فعلاً على الأرض، ما يجب تجنّبه، وما ينفع الآن.</p><p>البوابة واجهة لهذه التجربة حسب الموضوع والبلد. ولحالتك تحديداً يمكنك أن <a href='#luky'>تسأل Luky</a> — يجيب من تقارير الناس الأخيرة.</p>"
+ },
+ "de": {
+  "title": "Über uns · Luky",
+  "meta_desc": "Luky sammelt echte Erfahrungen aus offenen Community-Chats nach Land — auf den Punkt, ohne Geschwätz.",
+  "crumb_label": "Über uns",
+  "h1": "Über uns",
+  "body": "<p><a href='#luky'>Luky</a> ist die Erfahrung echter Menschen, keine trockene Theorie. Wir sammeln echte Tipps aus offenen Community-Chats: wie es vor Ort wirklich läuft, was man meiden sollte, was gerade funktioniert.</p><p>Das Portal ist ein Schaufenster dieser Erfahrung nach Thema und Land. Und für deinen konkreten Fall kannst du <a href='#luky'>Luky fragen</a> — es antwortet aus den aktuellen Berichten der Leute.</p>"
+ },
+ "en": {
+  "title": "About · Luky",
+  "meta_desc": "Luky gathers real experience from open community chats by country — to the point, no fluff.",
+  "crumb_label": "About",
+  "h1": "About",
+  "body": "<p><a href='#luky'>Luky</a> is the experience of real people, not dry theory. We gather real tips from open community chats: how things actually work on the ground, what to avoid, what works right now.</p><p>The portal is a showcase of that experience by topic and country. And for your specific case you can <a href='#luky'>ask Luky</a> — it answers from people's recent reports.</p>"
+ },
+ "es": {
+  "title": "Acerca de · Luky",
+  "meta_desc": "Luky reúne experiencia real de chats abiertos de comunidades por país — al grano, sin relleno.",
+  "crumb_label": "Acerca de",
+  "h1": "Acerca de",
+  "body": "<p><a href='#luky'>Luky</a> es la experiencia de gente real, no teoría seca. Reunimos consejos reales de chats abiertos de comunidades: cómo funcionan las cosas sobre el terreno, qué evitar, qué funciona ahora mismo.</p><p>El portal es un escaparate de esa experiencia por tema y país. Y para tu caso concreto puedes <a href='#luky'>preguntarle a Luky</a> — responde según reportes recientes de la gente.</p>"
+ },
+ "fr": {
+  "title": "À propos · Luky",
+  "meta_desc": "Luky rassemble l'expérience réelle des chats communautaires ouverts par pays — droit au but, sans blabla.",
+  "crumb_label": "À propos",
+  "h1": "À propos",
+  "body": "<p><a href='#luky'>Luky</a>, c'est l'expérience de vraies personnes, pas de la théorie sèche. Nous rassemblons de vrais conseils issus de chats communautaires ouverts : comment ça se passe vraiment sur place, ce qu'il faut éviter, ce qui marche en ce moment.</p><p>Le portail est une vitrine de cette expérience par thème et par pays. Et pour ton cas précis tu peux <a href='#luky'>demander à Luky</a> — il répond à partir des retours récents des gens.</p>"
+ },
+ "hi": {
+  "title": "बारे में · Luky",
+  "meta_desc": "Luky देश के हिसाब से खुली कम्युनिटी चैट से असली अनुभव जुटाता है — सीधे मुद्दे पर, बिना लफ़्फ़ाज़ी।",
+  "crumb_label": "बारे में",
+  "h1": "बारे में",
+  "body": "<p><a href='#luky'>Luky</a> असली लोगों का अनुभव है, सूखी थ्योरी नहीं। हम खुली कम्युनिटी चैट से सच्चे तरीके जुटाते हैं: ज़मीन पर चीज़ें असल में कैसे चलती हैं, किससे बचना है, अभी क्या काम करता है।</p><p>पोर्टल इस अनुभव की विषय और देश के हिसाब से झलक है। और ख़ास अपने मामले के लिए तुम <a href='#luky'>Luky से पूछ सकते हो</a> — यह लोगों की हाल की रिपोर्टों से जवाब देता है।</p>"
+ },
+ "it": {
+  "title": "Chi siamo · Luky",
+  "meta_desc": "Luky raccoglie l'esperienza reale dalle chat aperte della community per paese — diretta al punto, senza fronzoli.",
+  "crumb_label": "Chi siamo",
+  "h1": "Chi siamo",
+  "body": "<p><a href='#luky'>Luky</a> è l'esperienza di persone reali, non teoria astratta. Raccogliamo consigli veri dalle chat aperte della community: come funzionano le cose sul posto, cosa evitare, cosa funziona proprio ora.</p><p>Il portale è una vitrina di questa esperienza per tema e per paese. E per il tuo caso specifico puoi <a href='#luky'>chiedere a Luky</a> — risponde partendo dalle segnalazioni recenti delle persone.</p>"
+ },
+ "ja": {
+  "title": "概要 · Luky",
+  "meta_desc": "Luky は国ごとに公開コミュニティのチャットから実際の経験を集めます — 要点だけ、水増しなし。",
+  "crumb_label": "概要",
+  "h1": "概要",
+  "body": "<p><a href='#luky'>Luky</a> は乾いた理論ではなく、実際の人の経験です。公開されたコミュニティのチャットから本物のコツを集めています：現地で実際どう動くのか、何を避けるべきか、いま何が使えるのか。</p><p>このポータルはその経験をテーマと国ごとに並べたショーケースです。具体的なケースは<a href='#luky'>Luky に聞けます</a> — 人々の最近の報告から答えます。</p>"
+ },
+ "ko": {
+  "title": "소개 · Luky",
+  "meta_desc": "Luky는 나라별로 공개 커뮤니티 채팅방에서 실제 경험을 모읍니다 — 요점만, 군더더기 없이.",
+  "crumb_label": "소개",
+  "h1": "소개",
+  "body": "<p><a href='#luky'>Luky</a>는 마른 이론이 아니라 실제 사람들의 경험입니다. 공개된 커뮤니티 채팅방에서 진짜 팁을 모읍니다: 현지에서 실제로 어떻게 돌아가는지, 무엇을 피해야 하는지, 지금 무엇이 통하는지.</p><p>이 포털은 그 경험을 주제와 나라별로 진열한 곳입니다. 구체적인 상황은 <a href='#luky'>Luky에게 물어볼 수 있습니다</a> — 사람들의 최근 후기를 바탕으로 답합니다.</p>"
+ },
+ "pt": {
+  "title": "Sobre · Luky",
+  "meta_desc": "O Luky reúne experiência real de chats abertos de comunidades por país — direto ao ponto, sem enrolação.",
+  "crumb_label": "Sobre",
+  "h1": "Sobre",
+  "body": "<p><a href='#luky'>Luky</a> é a experiência de pessoas reais, não teoria seca. Reunimos dicas reais de chats abertos de comunidades: como as coisas funcionam na prática, o que evitar, o que funciona agora.</p><p>O portal é uma vitrine dessa experiência por tema e país. E para o seu caso concreto você pode <a href='#luky'>perguntar ao Luky</a> — ele responde a partir de relatos recentes das pessoas.</p>"
+ },
+ "ru": {
+  "title": "О проекте — Luky",
+  "meta_desc": "Luky собирает живой опыт из открытых чатов сообществ и отвечает по твоему случаю. А ещё переводит живой разговор голосом. Без воды.",
+  "crumb_label": "О проекте",
+  "h1": "О проекте",
+  "body": "<p><a href='#luky'>Luky</a> — это про живой опыт, а не общие статьи. Мы собираем ответы из открытых чатов сообществ: как там реально открывают счёт, снимают жильё, что с безопасностью и транспортом — словами тех, кто уже через это прошёл.</p><p>Спроси своими словами — Luky ответит под твою ситуацию, по недавним отзывам. А когда дойдёт до живого разговора с тем, кто не говорит на твоём языке, он переведёт прямо в разговоре голосом.</p><p>Это <strong>не официальная консультация</strong>: живой опыт людей бывает неточным и устаревает. Перед важными решениями проверяй актуальность.</p>"
+ },
+ "th": {
+  "title": "เกี่ยวกับ · Luky",
+  "meta_desc": "Luky รวบรวมประสบการณ์จริงจากแชทเปิดของคอมมูนิตี้แยกตามประเทศ — ตรงประเด็น ไม่มีน้ำ",
+  "crumb_label": "เกี่ยวกับ",
+  "h1": "เกี่ยวกับ",
+  "body": "<p><a href='#luky'>Luky</a> คือประสบการณ์ของคนจริง ไม่ใช่ทฤษฎีแห้ง ๆ เรารวบรวมเคล็ดลับจริงจากแชทเปิดของคอมมูนิตี้: หน้างานเอาจริงแล้วเป็นอย่างไร ควรเลี่ยงอะไร อะไรใช้ได้อยู่ตอนนี้</p><p>พอร์ทัลนี้คือหน้าร้านของประสบการณ์นั้น แยกตามหัวข้อและประเทศ และสำหรับกรณีเฉพาะของคุณ <a href='#luky'>ถาม Luky ได้</a> — ตอบจากรายงานล่าสุดของผู้คน</p>"
+ },
+ "tr": {
+  "title": "Hakkında · Luky",
+  "meta_desc": "Luky, ülkeye göre açık topluluk sohbetlerinden gerçek deneyimi derler — doğrudan konuya, laf kalabalığı yok.",
+  "crumb_label": "Hakkında",
+  "h1": "Hakkında",
+  "body": "<p><a href='#luky'>Luky</a>, kuru teori değil gerçek insanların deneyimidir. Açık topluluk sohbetlerinden gerçek ipuçları derliyoruz: yerinde işler gerçekte nasıl yürüyor, neden kaçınmalı, şu anda ne işe yarıyor.</p><p>Portal, bu deneyimin konuya ve ülkeye göre vitrinidir. Kendi somut durumun için ise <a href='#luky'>Luky'ye sorabilirsin</a> — insanların son bildirimlerinden yanıtlar.</p>"
+ },
+ "zh": {
+  "title": "关于 · Luky",
+  "meta_desc": "Luky 按国家收集来自公开社区聊天群的真实经验 — 直奔要点，不掺水。",
+  "crumb_label": "关于",
+  "h1": "关于",
+  "body": "<p><a href='#luky'>Luky</a> 是真实的人的经验，不是干巴巴的理论。我们从公开的社区聊天群里收集真实建议：当地实际怎么运作、要避开什么、现在什么方法有效。</p><p>这个门户是这些经验按主题和国家的橱窗。至于你的具体情况，可以<a href='#luky'>问 Luky</a> — 它根据人们最近的反馈来回答。</p>"
+ }
+}

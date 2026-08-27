@@ -17,6 +17,10 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
+  {%- if page.body %}{# служебная страница со своей прозой (about) — тема текста не несёт #}
+  <div class="prose">{{ page.body | safe }}</div>
+  {%- endif %}
+
   {%- if page.tiles %}
   {%- if page.list_label %}<h2>{{ page.list_label }}</h2>{% endif %}
   <div class="grid">
