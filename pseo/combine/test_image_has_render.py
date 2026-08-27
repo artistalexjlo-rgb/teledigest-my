@@ -24,10 +24,10 @@ DOCKERFILE = HERE / "Dockerfile"
 # плоский адрес страницы) и в образ пульта больше не едет (26.08).
 ENTRIES = [
     "render.py",
-    "builder/site.py",
+    "tract/site.py",
     # ⛔ Переводчик тракта — `translation.py`. Старый `facet_lang.py` уехал в legacy 27.08:
     # он переводил С РУССКОГО и ждал корпус отменённой схемы.
-    "builder/translation.py",
+    "tract/translation.py",
     "builder/readycheck.py",
 ]
 
@@ -101,7 +101,7 @@ def _local_and_third_party(path: pathlib.Path):
     """Импорты файла, разложенные на «локальный модуль репо» и «сторонний пакет».
 
     Локальный отдаётся СПИСКОМ мест, где модуль реально лежит: один и тот же `slugs`
-    существует и в `builder/`, и в дубле `combine/builder/`. В образе достаточно любого —
+    существует и в `builder/`, и в дубле `combine/tract/`. В образе достаточно любого —
     в `/app/builder/` они приезжают в одно место.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -119,7 +119,7 @@ def _local_and_third_party(path: pathlib.Path):
             f"pseo/{here}/{n}.py" if here else f"pseo/{n}.py",
             f"pseo/{n}.py",
             f"pseo/{n}/__init__.py",
-            f"pseo/combine/builder/{n}.py",
+            f"pseo/combine/tract/{n}.py",
             f"pseo/{n}" if (PSEO / n).is_dir() else "",  # пакет без __init__ (config/)
         ]
         found = [c for c in cands if c and (ROOT / c).exists()]
@@ -155,8 +155,8 @@ def test_duplicates_identical():
     а не прод. Осознанное расхождение добавляется в DIVERGING вместе с причиной.
     """
     drift = []
-    for src in sorted((PSEO / "combine" / "builder").glob("*.py")):
-        twin = PSEO / "builder" / src.name
+    for src in sorted((PSEO / "combine" / "tract").glob("*.py")):
+        twin = PSEO / "tract" / src.name
         if not twin.exists() or src.name in DIVERGING:
             continue
         a = twin.read_bytes().replace(b"\r\n", b"\n")

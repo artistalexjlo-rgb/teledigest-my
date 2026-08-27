@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import tail_taxonomy as tax  # noqa: E402
+import tract  # noqa: E402
 from keybroker import call  # noqa: E402
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
@@ -137,12 +137,12 @@ def theme_names(lang):
     """Имена тринадцати тем на языке. Один раз на язык, дальше берётся готовое."""
     vse = _load(THEMES_FILE, {}) or {}
     if lang == "ru":  # имена тем в таксономии УЖЕ русские — переводить нечего
-        return {k: n for k, n, _d in tax.SHELVES}
+        return dict(tract.THEMES)
     if vse.get(lang):
         return vse[lang]
     # ⛔ Источник — АНГЛИЙСКИЙ ключ темы (`visa`, `local_life`), а не русское имя из
     # таксономии: рот в этом звене переводит с английского, и второго направления у нас нет.
-    pairs = [(k, k.replace("_", " ")) for k, _n, _d in tax.SHELVES]
+    pairs = [(k, k.replace("_", " ")) for k in tract.THEME_KEYS]
     mp, stop = _by_batches(pairs, names_sys(lang), "labels", NAME_BATCH)
     if stop:
         print(f"  темы {lang}: {stop}", flush=True)

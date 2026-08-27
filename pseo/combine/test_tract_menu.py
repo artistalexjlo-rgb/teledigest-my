@@ -12,7 +12,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 # ⚠️ Основное дерево билдера, а не копия пульта: в копии нет `country_codes`, её кладёт
 # образ. Без него `import facet` падает, и состояние возвращает ошибку вместо работы.
-sys.path[:0] = [str(HERE), str(HERE.parent / "builder")]
+sys.path[:0] = [str(HERE), str(HERE.parent / "tract")]
 
 os.environ.setdefault("COMBINE_BOT_TOKEN", "test")
 os.environ.setdefault("ADMIN_ID", "1")
@@ -307,7 +307,7 @@ def test_tract_writes_only_into_tests():
     Повод: 21.08 разметка ушла в боевую `tags/`, смешав 146 старых записей с 42 новыми, а свод
     переписал боевой корпус Чехии. Каталог обязан решаться ОДНОЙ константой.
     """
-    src = (HERE.parent / "builder" / "tract.py").read_text(encoding="utf-8")
+    src = (HERE.parent / "tract" / "tract.py").read_text(encoding="utf-8")
     assert 'TESTS = "tests"' in src, "каталог прогонов не задан константой"
     for line in src.splitlines():
         code = line.split("#", 1)[0]

@@ -9,8 +9,8 @@
 разметку в боевую папку, там смешались 146 старых записей с 42 новыми, а свод переписал боевой
 корпус Чехии. Каталог задан ОДНОЙ константой ниже — второго места, где это решается, нет.
 
-⛔ Числа списков у рта НЕ спрашиваем и вилок не задаём — их место в коде. Порог страницы один
-на весь тракт (`tail_taxonomy.PAGE_MIN`).
+⛔ Числа списков у рта НЕ спрашиваем и вилок не задаём — их место в коде. Пороги страницы
+живут ЗДЕСЬ же, ниже: `PAGE_MIN` и `PAGE_MAX`.
 
 Оба шага ДОБИРАЮТ работу: размеченные мухи пропускаются, корпус пишется чекпоинтами, поэтому
 повторный запуск ключей не тратит, а СТОП между пачками не теряет сделанного.
@@ -18,14 +18,13 @@
 
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ⛔ Тракт НЕ импортирует отменённую схему (`facet`, `dedup`): чтение корпуса и
 # вектора живут своими модулями, чтобы старый код не попадался под руку (рамка 24.08).
-import slugs  # noqa: E402  адрес — существующей транслитерацией, второй копии нет
-import tail_taxonomy as tax  # noqa: E402
 import vectors  # noqa: E402
 from corpus import load_flies  # noqa: E402
 from keybroker import call  # noqa: E402
@@ -40,9 +39,91 @@ TESTS = "tests"
 # Судить порог по протоколу схлопывания (`tests/dedup/<гео>.txt`), а не по счётчику.
 COLLAPSE_THR = 0.93
 
-# Верх страницы — канон §0.19 («на странице от 4 до 15 пунктов»). Низ живёт в
-# `tail_taxonomy.PAGE_MIN` и здесь НЕ дублируется.
+# Верх страницы: толще пятнадцати абзацев страниц не бывает (правило юзера). Низ —
+# `PAGE_MIN` ниже, в справочнике тракта.
 PAGE_MAX = 15
+
+# ── СПРАВОЧНИК ТРАКТА: темы, пороги, запреты. Всё своё, из старой таксономии сюда
+# перенесены ровно три вещи, которыми пользовался тракт (27.08).
+#
+# ТЕМЫ — тринадцать плиток хаба. Ключ идёт в адрес и роту, русское имя — заголовок русской
+# страницы. Остальные языки покупает звено 6 в `themes.json`.
+THEMES = [
+    ("border", "Пограничный и миграционный контроль"),
+    ("visa", "Визовые процедуры"),
+    ("finance", "Финансы и банковские услуги"),
+    ("transport", "Транспорт и логистика"),
+    ("docs", "Документальное сопровождение"),
+    ("safety", "Региональная безопасность и риски"),
+    ("customs", "Таможенные правила"),
+    ("digital", "Цифровая среда и связь"),
+    ("tourism", "Туризм и досуг"),
+    ("housing", "Жильё и аренда"),
+    ("shopping", "Покупки и сервисы"),
+    ("work", "Работа, учёба и сообщества"),
+    ("health", "Здоровье и медицина"),
+]
+THEME_KEYS = [k for k, _n in THEMES]
+THEME_NAME_RU = {k: n for k, n in THEMES}
+
+# Порог «есть ли ветка»: пачка меньше — идёт в остаток. К делению уже названной ветки
+# отношения НЕ имеет (PLAN.md, «Ветвление одной темы»).
+PAGE_MIN = 4
+
+# Сборные имена: ими рот прикрывает лень нарезки, и под таким именем собирается корзина.
+# ⛔ Список АНГЛИЙСКИЙ — имена рождаются по-английски с 25.08. Русский список остался в
+# архиве вместе с русской эпохой.
+JUNK_NAMES = (
+    "other",
+    "others",
+    "miscellaneous",
+    "misc",
+    "general",
+    "general information",
+    "general info",
+    "general tips",
+    "general advice",
+    "useful information",
+    "useful tips",
+    "additional information",
+    "additional info",
+    "various",
+    "various questions",
+    "everything else",
+    "life abroad",
+    "living abroad",
+    "tips for travellers",
+    "tips for travelers",
+    "advice for tourists",
+)
+
+
+def bad_name(z):
+    """Имя — брак нарезки? Возвращает причину строкой или None.
+
+    Причину возвращаем, а не True: она уходит в лог. Молчаливый отсев на этом проекте уже
+    прятал 33 пустых хаба целый год.
+    """
+    t = (z or "").strip().lower()
+    if not t:
+        return "пустое имя"
+    core = t.strip(" .:;!?-—()[]«»\"'")
+    for w in JUNK_NAMES:
+        if core == w or core.startswith(w + " ") or core.startswith(w + ","):
+            return f"сборное слово: {w}"
+    if core in {k.replace("_", " ") for k in THEME_KEYS}:
+        return "имя повторяет тему"
+    return None
+
+
+def slug(t):
+    """Адрес из английского имени. Пусто — значит адреса НЕТ, и страницу не публикуем.
+
+    ⛔ Фолбэка вроде «tema» тут не будет: он давал всем страницам гео ОДИН адрес, и они
+    молча затирали друг друга — 90 страниц на язык вместо 1843 (случай 08.08).
+    """
+    return re.sub(r"[^a-z0-9]+", "-", (t or "").lower()).strip("-")[:40]
+
 
 # Остаток темы, набравшийся на ветку, выходит служебной веткой.
 # ⛔ Имя АНГЛИЙСКОЕ, как и все имена прохода А: русское «Разное» уехало бы в корпус и
@@ -62,7 +143,7 @@ def mark_sys():
     название. Ключи латинские и говорят сами за себя (`visa`, `transport`, `housing`),
     поэтому список идёт роту как есть.
     """
-    names_map = ", ".join(k for k, _n, _d in tax.SHELVES)
+    names_map = ", ".join(k for k in THEME_KEYS)
     return (
         "You are a MARKER of a ready advice, NOT an author. Do not rewrite, shorten "
         "or summarise the advice.\n"
@@ -237,7 +318,7 @@ def mark(geo, limit=None):
         print(f"{geo}: размечать нечего (уже есть {len(done)})", flush=True)
         return
     print(f"{geo}: к разметке {len(flies)} мух, пачка {MARK_BATCH}", flush=True)
-    keys = {k for k, _n, _d in tax.SHELVES}
+    keys = set(THEME_KEYS)
     for st in range(0, len(flies), MARK_BATCH):
         if os.path.exists("RUNNER_STOP"):
             print(f"  стоп на {st}/{len(flies)}", flush=True)
@@ -336,14 +417,14 @@ def summarize(geo):
         names = []
         for raw in (res or {}).get("names") or []:
             nm = str(raw or "").strip()
-            if nm and not tax.bad_label(nm) and nm not in names:
+            if nm and not bad_name(nm) and nm not in names:
                 names.append(nm)
         names = names[:NAMES_MAX]
         if not names:
             print(f"  тема {tema}: список имён не получен, пропуск", flush=True)
             continue
         for nm in names:
-            directory.setdefault(nm, {"slug": slugs.slug(nm)})
+            directory.setdefault(nm, {"slug": slug(nm)})
 
         # ── ПРОХОД Б: присваивание из закрытого списка ─────────────────────────────
         # ⛔ Нумерация имён С ЕДИНИЦЫ: «0» занят под «ни одно не подошло» (так в
@@ -454,7 +535,7 @@ def build_corpus(geo):
     flies = [r for r in tagged if r["id"] in texts]
     directory = load_names()
     kratko = _load_json(f"{TESTS}/kratko/{geo}.json", {})
-    shelf_names = {k: n for k, n, _d in tax.SHELVES}
+    shelf_names = dict(THEMES)
 
     po_kanonu = {}
     for r in flies:
@@ -470,10 +551,10 @@ def build_corpus(geo):
         items = [
             {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
-        if not (name and len(items) >= tax.PAGE_MIN and not tax.bad_label(name)):
+        if not (name and len(items) >= PAGE_MIN and not bad_name(name)):
             leftovers.setdefault(shelf, []).extend(items)
             continue
-        base = (directory.get(name) or {}).get("slug") or slugs.slug(name)
+        base = (directory.get(name) or {}).get("slug") or slug(name)
         parts = branch(
             name,
             base,
@@ -494,7 +575,7 @@ def build_corpus(geo):
     # ⛔ Тем же вызовом, что и имена: отдельного правила для остатка НЕТ, иначе назавтра
     # они разойдутся. «Разное» — не исключение, а такая же ветка (PLAN.md, 27.08).
     for shelf, items in list(leftovers.items()):
-        if len(items) < tax.PAGE_MIN:
+        if len(items) < PAGE_MIN:
             continue  # мелочь веткой не становится — остаётся списком на странице темы
         views.extend(
             branch(MISC_TITLE, MISC_SLUG, items, theme_by_shelf.get(shelf), shelf)

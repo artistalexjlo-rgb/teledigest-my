@@ -22,9 +22,9 @@ PSEO = pathlib.Path(__file__).resolve().parent.parent
 # и обычный импорт приносит его, а не наш файл. Поймано этим же сторожем 27.08.
 PROBE = """
 import sys, importlib.util
-sys.path[:0] = [r"{pseo}", r"{pseo}/builder"]
+sys.path[:0] = [r"{pseo}", r"{pseo}/tract"]
 import render
-_s = importlib.util.spec_from_file_location("sitebuild", r"{pseo}/builder/site.py")
+_s = importlib.util.spec_from_file_location("sitebuild", r"{pseo}/tract/site.py")
 _m = importlib.util.module_from_spec(_s); _s.loader.exec_module(_m)
 print(str(render.DATA))
 print(str(_m.DATA))
@@ -68,11 +68,11 @@ def test_builder_writes_where_data_points(tmp_path, monkeypatch):
     monkeypatch.setenv("PSEO_DATA", str(target))
     for mod in ("sitebuild",):
         sys.modules.pop(mod, None)
-    sys.path[:0] = [str(PSEO / "builder")]
+    sys.path[:0] = [str(PSEO / "tract")]
     import importlib.util
 
     _spec = importlib.util.spec_from_file_location(
-        "sitebuild", str(PSEO / "builder" / "site.py")
+        "sitebuild", str(PSEO / "tract" / "site.py")
     )
     site = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(site)

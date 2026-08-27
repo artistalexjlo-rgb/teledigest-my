@@ -9,7 +9,7 @@ WORKDIR /app
 COPY pseo/combine/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Пульт: бот, дубли ртов (builder/), тесты, README.
+# Пульт: бот, дубли модулей тракта (tract/), тесты, README.
 COPY pseo/combine/ /app/
 
 # Рендер-половина — БЕЗ дублей в git, забираем из pseo/ по месту жительства.
@@ -24,7 +24,8 @@ COPY pseo/mirror_static/ /app/mirror_static/
 # `country_codes.py` — справочник стран рядом со сборщиком (249 стран, имена и флаги).
 # Копия файла бота, дословная; сторож `test_country_codes_copy` не даст ей отстать. В образ
 # едет как обычный модуль builder — никакого захода в `src/` и никаких путей вне /app.
-COPY pseo/builder/site.py pseo/builder/translation.py pseo/builder/readycheck.py pseo/builder/country_codes.py pseo/builder/countries.json /app/builder/
+COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/countries.json /app/tract/
+COPY pseo/builder/readycheck.py /app/builder/
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.
 CMD ["python", "-u", "bot.py"]

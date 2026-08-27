@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import tail_taxonomy as tax  # noqa: E402
+import tract  # noqa: E402
 from country_codes import COUNTRIES  # noqa: E402
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
@@ -34,7 +34,7 @@ BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
 # Имена тем для заголовков. Русские лежат в таксономии, остальные языки покупает звено 6
 # ОДИН раз на язык и кладёт в `themes.json` — платить за них в каждой стране незачем.
-THEME_NAME = {k: n for k, n, _d in tax.SHELVES}
+THEME_NAME = dict(tract.THEMES)
 
 
 def theme_names(lang):
@@ -44,7 +44,7 @@ def theme_names(lang):
     if lang == "ru":
         return THEME_NAME
     mp = (_load(f"{BUILT}/themes.json") or {}).get(lang) or {}
-    return {k: mp.get(k) or k.replace("_", " ") for k, _n, _d in tax.SHELVES}
+    return {k: mp.get(k) or k.replace("_", " ") for k in tract.THEME_KEYS}
 
 
 def _load(path):
@@ -306,7 +306,7 @@ def build_geo(geo, lang="ru"):
 
 def _theme_by_name(name):
     """Человеческое имя полки → ключ темы. Корпус несёт имя, адресу нужен ключ."""
-    for k, n, _d in tax.SHELVES:
+    for k, n in tract.THEMES:
         if n == name:
             return k
     return None

@@ -13,7 +13,6 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import tail_taxonomy as tax  # noqa: E402
 import tract  # noqa: E402
 
 
@@ -64,7 +63,7 @@ def test_tail_stays_in_its_own_branch(tmp_path, monkeypatch):
     out = _geo(tmp_path, monkeypatch, 16)
     assert [len(v["items"]) for v in out["views_by_task"]] == [15, 1]
     assert not out["shelves"], "хвост ветки уехал в остаток"
-    assert tax.PAGE_MIN == 4  # порог входа в ветку, к делению отношения не имеет
+    assert tract.PAGE_MIN == 4  # порог входа в ветку, к делению отношения не имеет
 
 
 def test_single_page_keeps_its_plain_name(tmp_path, monkeypatch):

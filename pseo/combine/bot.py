@@ -30,7 +30,7 @@ CHAT = int(os.environ.get("ADMIN_ID") or os.environ["COMBINE_CHAT_ID"])
 # Данные монтируются в контейнер ПО ТЕМ ЖЕ путям, что на хосте (/root/pseo_builder,
 # /home/teledigest/data, /root/embed_ab) — дубли ртов несут абсолютные пути, не правим их.
 BRAIN = os.environ.get("BRAIN_DIR", "/root/pseo_builder")
-BUILDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "builder")
+TRACT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tract")
 API = f"https://api.telegram.org/bot{TOKEN}"
 REPORT_EVERY = int(os.environ.get("COMBINE_REPORT_EVERY", "50"))  # попыток мозга
 # сколько ждём вежливого выхода рта после стоп-флага (один вызов к Gemini + запись;
@@ -60,12 +60,10 @@ STOP_FLAGS = [
 # Меню: kind → (кнопка, argv дубля; {geo} подставляется). cwd=BRAIN — данные хоста.
 # Версия таксономии — из ТОГО ЖЕ модуля, по которому раскладывают рты. Литералом нельзя:
 # на копиях чисел этот проект уже горел (DEAD_AT разъехался по трём файлам).
-sys.path.insert(0, BUILDER)
-import tail_taxonomy as _tax  # noqa: E402
+sys.path.insert(0, TRACT)
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 
-_TAX_VERSION = _tax.VERSION
-_TAX_NAMES = set(_tax.SHELF_NAMES)
+_THEME_NAMES = set(dict(_tract.THEMES).values())
 
 
 MENU = {
@@ -75,25 +73,25 @@ MENU = {
     # от съеденного содержимого, а ровно на этом порог 0.86 и прокололся.
     "collapse": (
         "Схлопывание <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--collapse"],
+        ["python", "-u", f"{TRACT}/tract.py", "{geo}", "--collapse"],
     ),
     # ШАГ 3. Разметка: муха → перевод + тема из 13 + подтема. Пачка 25, добирает неразмеченных.
     # «гео» или «гео:сколько» — второе для пробного куска.
     "mark": (
         "Разметка <гео[:сколько]>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--mark", "{shelf}"],
+        ["python", "-u", f"{TRACT}/tract.py", "{geo}", "--mark", "{shelf}"],
     ),
     # ШАГ 4. Обобщение (канон §0.19, звено 4): ОДИН вызов на тему — справочник имён,
     # деление толстых подтем, короткий ответ. Пачками рот придумывает имена заново в каждой:
     # 22.08 тема виз Греции дала 36 страниц пятью параллельными наборами имён.
     "summarize": (
         "Обобщение <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--summarize"],
+        ["python", "-u", f"{TRACT}/tract.py", "{geo}", "--summarize"],
     ),
     # ШАГ 5. Корпус по справочнику — код, ключей не тратит.
     "build_corpus": (
         "Корпус по справочнику <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--build"],
+        ["python", "-u", f"{TRACT}/tract.py", "{geo}", "--build"],
     ),
     # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `site.py`
     # превращает корпус в страницы дерева, `render.py` рендерит уже готовые. 21.08 кнопка
@@ -110,9 +108,9 @@ MENU = {
             "bash",
             "-lc",
             f"BUILT_DIR={BRAIN}/{TESTS} PSEO_DATA={BRAIN}/{TESTS}/data "
-            f"python -u {BUILDER}/site.py --all "
+            f"python -u {TRACT}/site.py --all "
             f"&& PSEO_DATA={BRAIN}/{TESTS}/data PSEO_OUT={BRAIN}/{TESTS}/out "
-            f"python -u {BUILDER}/../render.py --all",
+            f"python -u {TRACT}/../render.py --all",
         ],
     ),
     # ШАГ 6. Переводы: английский корпус → 13 языков, включая русский. Английская версия
@@ -125,7 +123,7 @@ MENU = {
         [
             "bash",
             "-lc",
-            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/translation.py " + "{geo}",
+            f"BUILT_DIR={BRAIN}/{TESTS} python -u {TRACT}/translation.py " + "{geo}",
         ],
     ),
 }
@@ -393,8 +391,8 @@ def pipeline_state():
         "views": 0,
         "langs": [],
     }
-    if BUILDER not in _sys.path:
-        _sys.path.insert(0, BUILDER)
+    if TRACT not in _sys.path:
+        _sys.path.insert(0, TRACT)
     try:
         import corpus as _facet
     except Exception as e:  # без билдера состояние не посчитать — честно скажем
@@ -1002,7 +1000,7 @@ def start_cycle(job):
         # разметка: пачка MARK_BATCH, worst-case 4 запроса к Google на вызов (keybroker)
         est += -(-n // _tract.MARK_BATCH) * 4
         # обобщение: ОДИН вызов на тему (канон §0.19), тем не больше тринадцати
-        est += len(_tax.SHELVES) * 4
+        est += len(_tract.THEMES) * 4
     # схлопывание ключей не тратит (вектора готовые), сборка и рендер — тоже
     est += sum((m + st_) * 3 for _, m, st_ in (s.get("langs") or []))
     plan = " → ".join(
