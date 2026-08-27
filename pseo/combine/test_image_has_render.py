@@ -23,7 +23,14 @@ DOCKERFILE = HERE / "Dockerfile"
 # Точки входа рендера. Всё остальное вычисляется из их импортов.
 # ⛔ `site.py`, а не `pages.py`: старый сборщик строит отменённое дерево (мостик `/s/`,
 # плоский адрес страницы) и в образ пульта больше не едет (26.08).
-ENTRIES = ["render.py", "builder/site.py", "builder/readycheck.py"]
+ENTRIES = [
+    "render.py",
+    "builder/site.py",
+    # ⛔ Переводчик тракта — `perevod.py`. Старый `facet_lang.py` уехал в legacy 27.08:
+    # он переводил С РУССКОГО и ждал корпус отменённой схемы.
+    "builder/perevod.py",
+    "builder/readycheck.py",
+]
 
 # Каталоги, которые рендер читает ПО ИМЕНИ в рантайме (ast их не видит):
 # шаблоны — FileSystemLoader, словари — load_i18n, ассеты — copy_assets, site-конфиг.
@@ -138,7 +145,7 @@ def test_local_imports_copied():
 #   keybroker.py  — свой `get_keys` (ключи приходят из env контейнера);
 #   lang_runner.py — `PY=sys.executable` (хостового venv в контейнере нет) и раздельные
 #                    HERE (каталог дублей) / DATA (примонтированные данные хоста).
-DIVERGING = {"keybroker.py", "lang_runner.py"}
+DIVERGING = {"keybroker.py"}
 
 
 def test_duplicates_identical():

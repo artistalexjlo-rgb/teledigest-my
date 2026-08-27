@@ -32,8 +32,19 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
-# Имена тем для заголовков берём из таксономии — второго списка не заводим.
+# Имена тем для заголовков. Русские лежат в таксономии, остальные языки покупает звено 6
+# ОДИН раз на язык и кладёт в `temy.json` — платить за них в каждой стране незачем.
 TEMA_NAME = {k: n for k, n, _d in tax.SHELVES}
+
+
+def tema_imena(lang):
+    """Имена тринадцати тем на языке страницы. Нет перевода — берём ключ, а не русское
+    имя: английский `visa` на японской странице честнее русских «Визовых процедур».
+    """
+    if lang == "ru":
+        return TEMA_NAME
+    mp = (_load(f"{BUILT}/temy.json") or {}).get(lang) or {}
+    return {k: mp.get(k) or k.replace("_", " ") for k, _n, _d in tax.SHELVES}
 
 
 def _load(path):
@@ -94,6 +105,7 @@ def stranica(page_data, geo, lang, vetka=()):
     ветка выходит на тему ОДНОЙ плиткой (PLAN.md, «Ветвление одной темы»): попасть во
     вторую часть можно только отсюда.
     """
+    imena = tema_imena(lang)
     tema = page_data["tema"]
     adres = page_data["adres"]
     path = f"/{lang}/{geo}/{tema}/{adres}/"
@@ -122,7 +134,7 @@ def stranica(page_data, geo, lang, vetka=()):
         "geo": geo,
         "geo_name": _geo_name(geo, lang),
         "shelf_url": f"/{lang}/{geo}/{tema}/",
-        "shelf_name": TEMA_NAME.get(tema, tema),
+        "shelf_name": imena.get(tema, tema),
         "intent_name": page_data["zadacha"],
         "h1": page_data["zadacha"],
         "title": (
@@ -152,7 +164,8 @@ def po_vetkam(stranicy):
 
 
 def tema_stranica(tema, stranicy, ostatok, geo, lang):
-    """Тема: кнопки страниц сверху, остаток списком ниже. Своего текста не несёт."""
+    """Тема: кнопки веток сверху, мелочь остатка списком ниже. Своего текста не несёт."""
+    imena = tema_imena(lang)
     path = f"/{lang}/{geo}/{tema}/"
     # ⛔ ОДНА ПЛИТКА НА ВЕТКУ (PLAN.md, 27.08). Группируем по полю `branch`, а не по имени
     # (оно переводится) и не разбором суффикса `-2` (он следствие, а не признак).
@@ -174,10 +187,10 @@ def tema_stranica(tema, stranicy, ostatok, geo, lang):
         "shared_tail": True,
         "geo": geo,
         "geo_name": _geo_name(geo, lang),
-        "h1": TEMA_NAME.get(tema, tema),
-        "title": f"{TEMA_NAME.get(tema, tema)} — {_geo_name(geo, lang)}",
+        "h1": imena.get(tema, tema),
+        "title": f"{imena.get(tema, tema)} — {_geo_name(geo, lang)}",
         "tiles": tiles,
-        "search_title": TEMA_NAME.get(tema, tema),
+        "search_title": imena.get(tema, tema),
     }
     if ostatok:
         # Остаток — то, чему имени не нашлось. Показываем списком, чтобы советы не пропали.
@@ -196,10 +209,11 @@ def tema_stranica(tema, stranicy, ostatok, geo, lang):
 def hub(geo, temy, lang):
     """Хаб страны: плитки тем со счётчиком страниц."""
     path = f"/{lang}/{geo}/"
+    imena = tema_imena(lang)
     tiles = [
         {
             "icon": "",
-            "title": TEMA_NAME.get(t, t),
+            "title": imena.get(t, t),
             "blurb": f"{n}",
             "url": f"/{lang}/{geo}/{t}/",
         }

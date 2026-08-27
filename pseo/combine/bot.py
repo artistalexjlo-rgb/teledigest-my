@@ -117,12 +117,18 @@ MENU = {
             f"python -u {BUILDER}/../render.py --all",
         ],
     ),
-    # ШАГ 6. Переводы на 13 языков.
-    "translate": ("Переводы (очередь)", ["python", "-u", f"{BUILDER}/lang_runner.py"]),
-    # АДРЕСА страниц: ДО переводов (перевод несёт `key` из русского файла).
-    "stamp": (
-        "Адреса страниц <гео>",
-        ["python", "-u", f"{BUILDER}/facet_lang.py", "--stamp-keys", "{geo}"],
+    # ШАГ 6. Переводы: английский корпус → 13 языков, включая русский. Английская версия
+    # копируется бесплатно. ⛔ Модуль — `perevod.py`, а не `facet_lang.py`: тот переводил
+    # С РУССКОГО и ждал корпус отменённой схемы (27.08).
+    # ⛔ Кнопки «Адреса страниц» больше нет: адрес рождается в звене 4, штамповать ротом
+    # нечего — шаг снят вместе со `stamp_keys`.
+    "translate": (
+        "Переводы <гео>",
+        [
+            "bash",
+            "-lc",
+            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/perevod.py " + "{geo}",
+        ],
     ),
 }
 
@@ -385,6 +391,7 @@ def pipeline_state():
         "obobshi": [],
         "sborka": [],
         "geos": 0,
+        "sobrano": [],  # гео, у которых корпус уже собран: их и переводим
         "views": 0,
         "langs": [],
     }
@@ -474,6 +481,9 @@ def pipeline_state():
         except Exception:
             continue
         st["geos"] += 1
+        st["sobrano"].append(
+            os.path.basename(fn)[:-5]
+        )  # гео с корпусом — работа переводам
         st["views"] += len(d.get("views_by_task") or [])
     return st
 
@@ -556,9 +566,9 @@ def pipeline_steps(s):
         },
         {
             "kind": "translate",
-            "jobs": [],
-            "label": "6. Переводы",
-            "note": "запускать после сборки",
+            "jobs": [(g, None) for g in s.get("sobrano") or []],
+            "label": "6. Переводы — 13 языков",
+            "note": "ключи; английский бесплатно",
         },
     ]
 
