@@ -8,7 +8,7 @@
 
 - `bot.py` — пульт+исполнитель: long-poll ТГ, whitelist chat_id, jobs-аудит
   (`combine_jobs.db` рядом с мозгом), spawn дублей, отчётчик, стоп через флаги+SIGTERM.
-- `builder/` — дубли ртов (keybroker, facet, facet_lang, dedup, lang_runner,
+- `builder/` — дубли тракта (keybroker, tract, site, translation,
   tail_taxonomy) с ветки feat/brain-serial-queue (капы сняты). Синк дублей — руками,
   осознанно, НЕ автоматом.
 - Стоп: ставятся `RUNNER_STOP` + `LANG_RUNNER_STOP` (рты чтут сами) + SIGTERM группе.
@@ -26,7 +26,7 @@
 
    ⚠️ **Оба поля обязательны, и это правка существующего сервиса** (раньше стояло
    Build Path `pseo/combine`). Причина: в образ нужна рендер-половина сайта —
-   `pseo/render.py`, `templates/`, `i18n/`, `static/`, `config/`, `builder/pages.py`,
+   `pseo/render.py`, `templates/`, `i18n/`, `static/`, `config/`, `builder/site.py`,
    `builder/readycheck.py`. Из контекста `pseo/combine` эти файлы недостижимы, и их
    пришлось бы держать вторыми копиями в git — на копиях этот проект горел трижды.
    Пока поля не поменяны, сборка падает на `COPY` (громко, не молча).
@@ -50,13 +50,13 @@
 
 ## Границы
 
-- **Рендер-половина теперь В ОБРАЗЕ** (`render.py`, `builder/pages.py`,
+- **Рендер-половина теперь В ОБРАЗЕ** (`render.py`, `builder/site.py`,
   `builder/readycheck.py`, `templates/`, `i18n/`, `static/`, `config/`) — это шаг 1 схемы
   «ПУБЛИКАЦИЯ БЕЗ АССИСТЕНТА» из `pseo/docs/PROCESSES.md`. Дублей в git не появилось:
   файлы едут из `pseo/` благодаря контексту сборки в корне репо.
   ⚠️ Самой публикации ещё НЕТ: шага в пульте и каталога сайта не существует, кнопки нет.
   Пока это только наличие рендера в образе.
-- Git-транспорт (`ship.py`, репо страниц, доступ к Cloudflare) остаётся на десктопе и в
+- Git-транспорт (репо страниц, доступ к Cloudflare) снят 27.08 вместе со `ship.py`; в
   целевую схему не входит: пульт будет писать в примонтированный каталог, не в git.
 - Прод-бот bots-grab не затронут. Осиротевших процессов нет: рты — дети контейнера,
   умирают вместе с ним (start_new_session + killpg на стопе).
