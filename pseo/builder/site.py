@@ -78,12 +78,19 @@ def _write(name, page):
         json.dump(page, fh, ensure_ascii=False, indent=1)
 
 
-def _geo_name(geo, lang):
-    """Имя страны. Справочник хранит пару (имя, флаг) — берём имя, флаг для плиток.
+# Имена стран по языкам — из Unicode CLDR, снято в файл. Это СПРАВОЧНИК, а не перевод:
+# у рта их не покупаем, и на сайте они совпадают с тем, что человек видит в телефоне.
+COUNTRY_NAMES = (
+    _load(f"{os.path.dirname(os.path.abspath(__file__))}/countries.json") or {}
+)
 
-    Имена в справочнике русские: перевод названий стран — работа звена 6, не сборщика.
-    """
-    pair = COUNTRIES.get(geo)
+
+def _geo_name(geo, lang):
+    """Имя страны на языке страницы. Нет в таблице — русское из справочника, нет и там — код."""
+    nm = (COUNTRY_NAMES.get(lang) or {}).get(geo)
+    if nm:
+        return nm
+    pair = COUNTRIES.get(geo)  # флаг и код живут там же, имена там русские
     return pair[0] if pair else geo.upper()
 
 

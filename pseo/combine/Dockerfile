@@ -24,7 +24,7 @@ COPY pseo/mirror_static/ /app/mirror_static/
 # `country_codes.py` — справочник стран рядом со сборщиком (249 стран, имена и флаги).
 # Копия файла бота, дословная; сторож `test_country_codes_copy` не даст ей отстать. В образ
 # едет как обычный модуль builder — никакого захода в `src/` и никаких путей вне /app.
-COPY pseo/builder/site.py pseo/builder/translation.py pseo/builder/readycheck.py pseo/builder/country_codes.py /app/builder/
+COPY pseo/builder/site.py pseo/builder/translation.py pseo/builder/readycheck.py pseo/builder/country_codes.py pseo/builder/countries.json /app/builder/
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.
 CMD ["python", "-u", "bot.py"]
