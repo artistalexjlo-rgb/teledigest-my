@@ -1,13 +1,14 @@
 """Сторож: каталог вывода — ОДНО определение на весь тракт.
 
-⛔ Зачем. `BASE/out` было выписано трижды: в `render.py`, `readycheck.py` и `ship.py`. Пока
-все трое бегут на десктопе, копии совпадают и проблема невидима. Но публикация переезжает в
+⛔ Зачем. `BASE/out` было выписано в нескольких местах. Пока все они бегут на десктопе,
+копии совпадают и проблема невидима. (`ship.py` уехал в legacy 27.08 вместе со старым
+сборщиком — осталось двое.) Но публикация переезжает в
 пульт, где рендер обязан писать в примонтированный каталог (`PSEO_OUT`): с тремя копиями
 рендер напишет в маунт, гейт проверит пустой `/app/out` и отрапортует «готово 0» при
 собранном сайте, а push уедет с третьим. Это ровно та болезнь, которая на этом проекте
 стоила месяца публикации, — одно знание в нескольких местах.
 
-Проверяем поведением, в отдельном процессе: подсовываем `PSEO_OUT` и смотрим, что все три
+Проверяем поведением, в отдельном процессе: подсовываем `PSEO_OUT` и смотрим, что оба
 модуля показывают ОДИН путь. Грепом по исходникам такое не поймать — копия может быть
 вычислена иначе и всё равно совпасть текстом.
 """
@@ -22,10 +23,9 @@ PSEO = pathlib.Path(__file__).resolve().parent.parent
 PROBE = """
 import sys
 sys.path[:0] = [r"{pseo}", r"{pseo}/builder"]
-import render, readycheck, ship
+import render, readycheck
 print(str(render.OUT))
 print(str(readycheck.OUT))
-print(str(ship.OUT))
 """
 
 
@@ -48,15 +48,15 @@ def _probe(env_out: str | None) -> list[str]:
 def test_default_is_out_next_to_pseo():
     """Без переменной поведение прежнее — `pseo/out`, чтобы десктопный тракт не поехал."""
     got = _probe(None)
-    assert len(got) == 3
+    assert len(got) == 2
     assert all(p == (PSEO / "out").as_posix() for p in got), got
 
 
-def test_env_moves_all_three(tmp_path):
+def test_env_moves_both(tmp_path):
     """С `PSEO_OUT` переезжают ВСЕ трое. Если хоть один остался на своём — тест красный."""
     target = (tmp_path / "site").as_posix()
     got = _probe(target)
-    assert got == [target, target, target], got
+    assert got == [target, target], got
 
 
 def test_render_writes_where_out_points(tmp_path, monkeypatch):
