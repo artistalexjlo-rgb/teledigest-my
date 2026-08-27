@@ -26,13 +26,12 @@ import translation  # noqa: E402
 def _korpus(tmp_path, monkeypatch, views, shelves=()):
     monkeypatch.setattr(translation, "BUILT", str(tmp_path))
     themes_file = tmp_path / "theme_names.json"
-    # Как в бою: themes.json приезжает с сидом ru+en, звену 6 незачем покупать русский.
-    themes_file.write_text(
-        json.dumps(
-            {"ru": {"visa": "Визовые процедуры"}, "en": {"visa": "Visa Procedures"}}
-        ),
-        encoding="utf-8",
-    )
+    if not themes_file.exists():
+        # Как в бою: themes.json несёт только АНГЛИЙСКИЙ источник. Русский — обычный
+        # язык перевода, как и советы, и покупается ротом наравне с прочими тринадцатью.
+        themes_file.write_text(
+            json.dumps({"en": {"visa": "Visa Procedures"}}), encoding="utf-8"
+        )
     monkeypatch.setattr(translation, "THEMES_FILE", str(themes_file))
     os.makedirs(tmp_path / "out_facet", exist_ok=True)
     with open(tmp_path / "out_facet" / "gr.json", "w", encoding="utf-8") as fh:
@@ -121,7 +120,11 @@ def test_second_run_buys_only_what_changed(tmp_path, monkeypatch):
 
 
 def test_branch_name_is_bought_once_for_all_its_parts(tmp_path, monkeypatch):
-    """Имя одно на ветку: три части не значат три покупки заголовка."""
+    """Имя одно на ветку: три части не значат три покупки заголовка.
+
+    Тема на русском заранее в файле — тест смотрит на ветки, а не на темы, и имя темы
+    покупается отдельным, уже проверенным путём (см. purchase-тест звена тем).
+    """
     _korpus(
         tmp_path,
         monkeypatch,
@@ -143,6 +146,12 @@ def test_branch_name_is_bought_once_for_all_its_parts(tmp_path, monkeypatch):
                 parts=2,
             ),
         ],
+    )
+    (tmp_path / "theme_names.json").write_text(
+        json.dumps(
+            {"en": {"visa": "Visa Procedures"}, "ru": {"visa": "Визовые процедуры"}}
+        ),
+        encoding="utf-8",
     )
     schet = {}
     _rot(monkeypatch, schet)
@@ -201,3 +210,25 @@ def test_the_small_remainder_is_translated_too(tmp_path, monkeypatch):
     translation.translate_geo("gr", "ru")
     out = _out(tmp_path)
     assert out["shelves"][0]["items"][0]["text"] == "ru:leftover"
+
+
+def test_theme_names_are_bought_from_english_and_cached(tmp_path, monkeypatch):
+    """Имена тем: русский — обычный язык перевода, ни особого пути, ни готового текста.
+
+    Юзер 27.08: «схема — все переводим с английского»; готовый русский в файле рядом с
+    покупными двенадцатью языками — та же узкая классификация другими словами.
+    """
+    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a"])])
+    schet = {}
+    _rot(monkeypatch, schet)
+    translation.translate_geo("gr", "ru")
+    assert "border" in schet["labels"], "источником для темы был не английский список"
+    themes = json.loads((tmp_path / "theme_names.json").read_text(encoding="utf-8"))
+    assert themes["ru"]["visa"] == "ru:Visa Procedures"
+
+    schet2 = {}
+    _rot(monkeypatch, schet2)
+    translation.translate_geo("gr", "ru")
+    assert "labels" not in schet2 or "border" not in schet2.get(
+        "labels", []
+    ), "второй прогон купил темы заново — кэш не сработал"
