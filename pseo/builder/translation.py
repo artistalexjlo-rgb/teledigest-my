@@ -60,7 +60,7 @@ LANGS = [
 
 # Имена тринадцати тем на каждом языке. Они одни на весь сайт, поэтому переводятся ОДИН
 # раз на язык и лежат отдельно от стран: платить за них в каждом гео незачем.
-TEMY_FILE = f"{BUILT}/temy.json"
+THEMES_FILE = f"{BUILT}/themes.json"
 
 
 def _load(path, default=None):
@@ -79,7 +79,7 @@ def _save(path, obj):
     os.replace(tmp, path)  # атомарно: оборванный прогон не оставит полфайла
 
 
-def otpechatok(text):
+def fingerprint(text):
     """Короткий отпечаток АНГЛИЙСКОГО оригинала.
 
     По нему видно, что источник переписали и перевод устарел. Без отпечатка устаревший
@@ -107,15 +107,15 @@ def names_sys(lang):
     )
 
 
-def _pachkami(pary, sysprompt, consumer, batch):
+def _by_batches(pairs, sysprompt, consumer, batch):
     """Пары (ключ, английский текст) → {ключ: перевод}. Рту уходят НОМЕРА пачки.
 
     Возвращает (перевод, причина остановки). Причина не None — пул ключей не отдаёт, и
     прогон честно останавливается, не устроив шторма запросов.
     """
     out = {}
-    for i in range(0, len(pary), batch):
-        chunk = pary[i : i + batch]
+    for i in range(0, len(pairs), batch):
+        chunk = pairs[i : i + batch]
         payload = {str(j): en for j, (_k, en) in enumerate(chunk)}
         res = None
         for _ in range(RETRY):
@@ -133,73 +133,73 @@ def _pachkami(pary, sysprompt, consumer, batch):
     return out, None
 
 
-def temy(lang):
+def theme_names(lang):
     """Имена тринадцати тем на языке. Один раз на язык, дальше берётся готовое."""
-    vse = _load(TEMY_FILE, {}) or {}
+    vse = _load(THEMES_FILE, {}) or {}
     if lang == "ru":  # имена тем в таксономии УЖЕ русские — переводить нечего
         return {k: n for k, n, _d in tax.SHELVES}
     if vse.get(lang):
         return vse[lang]
     # ⛔ Источник — АНГЛИЙСКИЙ ключ темы (`visa`, `local_life`), а не русское имя из
     # таксономии: рот в этом звене переводит с английского, и второго направления у нас нет.
-    pary = [(k, k.replace("_", " ")) for k, _n, _d in tax.SHELVES]
-    mp, stop = _pachkami(pary, names_sys(lang), "labels", NAME_BATCH)
+    pairs = [(k, k.replace("_", " ")) for k, _n, _d in tax.SHELVES]
+    mp, stop = _by_batches(pairs, names_sys(lang), "labels", NAME_BATCH)
     if stop:
         print(f"  темы {lang}: {stop}", flush=True)
         return {}
     vse[lang] = mp
-    _save(TEMY_FILE, vse)
-    print(f"темы {lang}: {len(mp)} имён -> {TEMY_FILE}", flush=True)
+    _save(THEMES_FILE, vse)
+    print(f"темы {lang}: {len(mp)} имён -> {THEMES_FILE}", flush=True)
     return mp
 
 
-def korpus(geo, lang=""):
+def corpus(geo, lang=""):
     d = "out_facet" if not lang or lang == "en" else f"out_facet_{lang}"
     return _load(f"{BUILT}/{d}/{geo}.json")
 
 
-def _vse_teksty(src):
+def _all_texts(src):
     """Все тексты гео, которые увидит читатель: советы страниц и мелочь остатка."""
-    pary = []
+    pairs = []
     for v in src.get("views_by_task") or []:
-        pary += [(it["id"], it.get("text") or "") for it in v.get("items") or []]
+        pairs += [(it["id"], it.get("text") or "") for it in v.get("items") or []]
     for sh in src.get("shelves") or []:
-        pary += [(it["id"], it.get("text") or "") for it in sh.get("items") or []]
-    return pary
+        pairs += [(it["id"], it.get("text") or "") for it in sh.get("items") or []]
+    return pairs
 
 
-def _gotovoe(old):
+def _ready(old):
     """Что уже переведено и не устарело: {id: (отпечаток, перевод)} и имена веток."""
-    teksty, imena = {}, {}
+    teksty, names = {}, {}
     for v in (old or {}).get("views_by_task") or []:
-        if v.get("src_name") and v.get("zadacha"):
-            imena[v["src_name"]] = v["zadacha"]
+        if v.get("source_title") and v.get("title"):
+            names[v["source_title"]] = v["title"]
         for it in v.get("items") or []:
-            if it.get("src"):
-                teksty[it["id"]] = (it["src"], it.get("text") or "")
+            if it.get("source"):
+                teksty[it["id"]] = (it["source"], it.get("text") or "")
     for sh in (old or {}).get("shelves") or []:
         for it in sh.get("items") or []:
-            if it.get("src"):
-                teksty[it["id"]] = (it["src"], it.get("text") or "")
-    return teksty, imena
+            if it.get("source"):
+                teksty[it["id"]] = (it["source"], it.get("text") or "")
+    return teksty, names
 
 
-def _perelozhit(items, teksty, ist):
+def _retext(items, teksty, source_by_id):
     """Пункты страницы на язык: текст из перевода, отпечаток — от английского оригинала."""
     return [
         {
             **it,
             "text": teksty[it["id"]],
-            "src": otpechatok(ist.get(it["id"], "")),
+            "source": fingerprint(source_by_id.get(it["id"], "")),
         }
         for it in items or []
         if it["id"] in teksty
     ]
 
 
-def perevedi(geo, lang):
+def translate_geo(geo, lang):
     """Один гео на один язык. Платим ТОЛЬКО за новое и за переписанное."""
-    src = korpus(geo)
+    src = corpus(geo)
     if not src:
         print(f"{geo}: английского корпуса нет", flush=True)
         return 0
@@ -208,75 +208,75 @@ def perevedi(geo, lang):
         print(f"{geo} en: копия оригинала, ключей 0", flush=True)
         return 0
 
-    pary = _vse_teksty(src)
-    ist = dict(pary)
-    staroe, imena_gotovye = _gotovoe(korpus(geo, lang))
+    pairs = _all_texts(src)
+    source_by_id = dict(pairs)
+    ready, imena_gotovye = _ready(corpus(geo, lang))
     # Платим за то, чего нет, и за то, чей ОРИГИНАЛ переписали. Остальное уже куплено.
-    nado = [(i, en) for i, en in pary if staroe.get(i, ("", ""))[0] != otpechatok(en)]
+    todo = [(i, en) for i, en in pairs if ready.get(i, ("", ""))[0] != fingerprint(en)]
 
     imena_en = []
     for v in src.get("views_by_task") or []:
-        nm = v.get("zadacha") or ""
+        nm = v.get("title") or ""
         if nm and nm not in imena_en:
             imena_en.append(nm)  # имя ОДНО на ветку: части его делят, платим один раз
     imena_nado = [(n, n) for n in imena_en if n not in imena_gotovye]
 
-    novye, stop = _pachkami(nado, text_sys(lang), "translate", TEXT_BATCH)
+    bought, stop = _by_batches(todo, text_sys(lang), "translate", TEXT_BATCH)
     imena_novye, stop_imen = {}, None
     if not stop and imena_nado:
-        imena_novye, stop_imen = _pachkami(
+        imena_novye, stop_imen = _by_batches(
             imena_nado, names_sys(lang), "labels", NAME_BATCH
         )
 
-    teksty = {i: t for i, (_h, t) in staroe.items() if i in ist}
-    teksty.update(novye)
-    imena = dict(imena_gotovye)
-    imena.update(imena_novye)
+    teksty = {i: t for i, (_h, t) in ready.items() if i in source_by_id}
+    teksty.update(bought)
+    names = dict(imena_gotovye)
+    names.update(imena_novye)
 
     out = {k: v for k, v in src.items() if k not in ("views_by_task", "shelves")}
     out["lang"] = lang
     out["views_by_task"] = []
     for v in src.get("views_by_task") or []:
-        items = _perelozhit(v.get("items"), teksty, ist)
+        items = _retext(v.get("items"), teksty, source_by_id)
         if not items:
             continue  # страница без единого переведённого пункта — не страница
         nv = dict(v)
         # ⛔ Английское имя остаётся ПОЛЕМ: по нему находится готовый перевод на следующем
         # прогоне, и по нему же видно, что имя в звене 4 переписали.
-        nv["src_name"] = v.get("zadacha") or ""
-        nv["zadacha"] = imena.get(nv["src_name"], nv["src_name"])
+        nv["source_title"] = v.get("title") or ""
+        nv["title"] = names.get(nv["source_title"], nv["source_title"])
         nv["items"] = items
         out["views_by_task"].append(nv)
     out["shelves"] = []
     for sh in src.get("shelves") or []:
-        items = _perelozhit(sh.get("items"), teksty, ist)
+        items = _retext(sh.get("items"), teksty, source_by_id)
         if items:
             out["shelves"].append({**sh, "items": items})
     _save(f"{BUILT}/out_facet_{lang}/{geo}.json", out)
-    temy(lang)  # имена тем — один раз на язык, отдельным файлом
+    theme_names(lang)  # имена тем — один раз на язык, отдельным файлом
 
-    beda = stop or stop_imen
+    trouble = stop or stop_imen
     print(
-        f"{geo} {lang}: советов {len(teksty)} из {len(pary)} (куплено {len(novye)}), "
-        f"имён {len(imena)} из {len(imena_en)}" + (f" ⛔ {beda}" if beda else ""),
+        f"{geo} {lang}: советов {len(teksty)} из {len(pairs)} (куплено {len(bought)}), "
+        f"имён {len(names)} из {len(imena_en)}" + (f" ⛔ {trouble}" if trouble else ""),
         flush=True,
     )
-    return len(novye)
+    return len(bought)
 
 
-def perevedi_vse(geo, langs=None):
+def translate_all(geo, langs=None):
     """Все языки одного гео. СТОП проверяется между языками — оплаченное уже на диске."""
     for lang in langs or LANGS:
         if os.path.exists("RUNNER_STOP"):
             print(f"  стоп перед языком {lang}", flush=True)
             break
-        perevedi(geo, lang)
+        translate_geo(geo, lang)
 
 
 if __name__ == "__main__":
     _geo = sys.argv[1] if len(sys.argv) > 1 else ""
     _langs = [x for x in sys.argv[2:] if x in LANG_NAME] or None
     if not _geo:
-        print("нужен гео: python perevod.py <гео> [языки]")
+        print("нужен гео: python translation.py <гео> [языки]")
     else:
-        perevedi_vse(_geo, _langs)
+        translate_all(_geo, _langs)

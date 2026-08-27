@@ -29,15 +29,15 @@ def _tags(tmp_path, rows):
 
 def _row(i, podtema, tema="visa"):
     """Запись разметки: id, тема, подтема, счётчик. Текста в тегах НЕТ — он в базе."""
-    return {"id": f"hash-{i}", "tema": tema, "podtema": podtema, "n": 1}
+    return {"id": f"hash-{i}", "theme": tema, "subtheme": podtema, "n": 1}
 
 
 def _texts(monkeypatch, rows):
     """Сторожу база не нужна — нужен текст по id, поэтому чтение корпуса подменяется."""
     # ⛔ Текст НЕ содержит id: иначе проверка «настоящий хеш роту не уходит» была бы
     # ложной — хеш приезжал бы в запрос внутри самого текста.
-    pary = [(r["id"], f"advice number {j}") for j, r in enumerate(rows)]
-    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pary))
+    pairs = [(r["id"], f"advice number {j}") for j, r in enumerate(rows)]
+    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
 
 
 def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch):
@@ -56,7 +56,7 @@ def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch)
         return {"map": {k: ("0" if int(k) >= 3 else "1") for k in adv}}
 
     monkeypatch.setattr(tract, "call", fake_call)
-    tract.obobshi("gr")
+    tract.summarize("gr")
 
     # проход А получил МЕТКИ с массами, проход Б — список имён и советы
     assert set(seen) == {"canon", "assign"}, seen
@@ -67,12 +67,12 @@ def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch)
     }
 
     tagged = json.load(open(tmp_path / "tests" / "tags" / "gr.json", encoding="utf-8"))
-    imena = [r.get("kanon") for r in tagged]
-    assert imena.count("visa documents") == 3, imena
-    assert imena.count(None) == 3, "«0» не должен давать имя"
+    names = [r.get("name") for r in tagged]
+    assert names.count("visa documents") == 3, names
+    assert names.count(None) == 3, "«0» не должен давать имя"
 
     canon = json.load(open(tmp_path / "tests" / "canon.json", encoding="utf-8"))
-    assert canon["visa documents"]["adres"] == "visa-documents", canon
+    assert canon["visa documents"]["slug"] == "visa-documents", canon
 
 
 def test_name_outside_the_list_is_dropped(tmp_path, monkeypatch):
@@ -88,9 +88,9 @@ def test_name_outside_the_list_is_dropped(tmp_path, monkeypatch):
         return {"map": {"0": "1", "1": "7", "2": "нет"}}  # 7 и «нет» — мимо списка
 
     monkeypatch.setattr(tract, "call", fake_call)
-    tract.obobshi("gr")
+    tract.summarize("gr")
     tagged = json.load(open(tmp_path / "tests" / "tags" / "gr.json", encoding="utf-8"))
-    assert [r.get("kanon") for r in tagged] == ["visa documents", None, None]
+    assert [r.get("name") for r in tagged] == ["visa documents", None, None]
 
 
 def test_real_ids_never_reach_the_mouth(tmp_path, monkeypatch):
@@ -108,7 +108,7 @@ def test_real_ids_never_reach_the_mouth(tmp_path, monkeypatch):
         return {"map": {"0": "1", "1": "1", "2": "1"}}
 
     monkeypatch.setattr(tract, "call", fake_call)
-    tract.obobshi("gr")
+    tract.summarize("gr")
     assert payloads, "рот не звался"
     for p in payloads:
         assert "hash-" not in p, p[:200]
@@ -119,12 +119,12 @@ def test_advice_without_a_name_goes_to_the_remainder(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     rows = [_row(i, "своя метка") for i in range(5)]
     for r in rows[:4]:
-        r["kanon"] = "visa documents"
+        r["name"] = "visa documents"
     _tags(tmp_path, rows)
     _texts(monkeypatch, rows)
-    tract.sborka("gr")
+    tract.build_corpus("gr")
     out = json.load(
         open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
     )
-    assert [v["zadacha"] for v in out["views_by_task"]] == ["visa documents"]
+    assert [v["title"] for v in out["views_by_task"]] == ["visa documents"]
     assert sum(len(s["items"]) for s in out["shelves"]) == 1, "безымянный не в остатке"

@@ -38,7 +38,7 @@ TESTS = "tests"
 # до четверти содержимого (в одной группе из 44 советов Черногории слиплись налог,
 # регистрация и ответственность владельца жилья), 0.93 берёт 3,5% — настоящие почти-копии.
 # Судить порог по протоколу схлопывания (`tests/dedup/<гео>.txt`), а не по счётчику.
-SGUSTOK_THR = 0.93
+COLLAPSE_THR = 0.93
 
 # Верх страницы — канон §0.19 («на странице от 4 до 15 пунктов»). Низ живёт в
 # `tail_taxonomy.PAGE_MIN` и здесь НЕ дублируется.
@@ -50,7 +50,7 @@ PAGE_MAX = 15
 # это перевод, и появляется он там же, где остальные заголовки.
 # ⛔ Запрет сборных имён (`bad_label`) — про имена ОТ РТА: ими он прикрывал лень нарезки.
 # Здесь имя ставит код и честно называет то, что не сложилось, — это не то же самое.
-MISC_NAME, MISC_ADRES = "Other", "misc"
+MISC_TITLE, MISC_SLUG = "Other", "misc"
 
 MARK_BATCH = 25  # мух в запрос разметки: 25 переводов ≈ 10К символов ответа
 
@@ -62,17 +62,17 @@ def mark_sys():
     название. Ключи латинские и говорят сами за себя (`visa`, `transport`, `housing`),
     поэтому список идёт роту как есть.
     """
-    spisok = ", ".join(k for k, _n, _d in tax.SHELVES)
+    names_map = ", ".join(k for k, _n, _d in tax.SHELVES)
     return (
         "You are a MARKER of a ready advice, NOT an author. Do not rewrite, shorten "
         "or summarise the advice.\n"
         'Input is JSON {"0": "<advice>", ...}. Mark EVERY one.\n'
         'Return STRICT JSON: {"rows": [{"i": "<index>", '
-        '"tema": "…", "podtema": "…"}, ...]}\n'
+        '"theme": "…", "subtheme": "…"}, ...]}\n'
         "  Each advice is a SEPARATE object: a broken record costs one advice, "
         "not the whole batch.\n"
         "  i       — the key of the advice from the input.\n"
-        f"  tema    — EXACTLY ONE key from this list: {spisok}.\n"
+        f"  tema    — EXACTLY ONE key from this list: {names_map}.\n"
         "  podtema — 2-6 words IN ENGLISH: what a person comes for. Like a human "
         'query: "car rental", "paying for a taxi", "airport transfer". '
         "FORBIDDEN: repeating the theme name and broad rubric words "
@@ -84,10 +84,10 @@ def mark_sys():
 # Имён в теме: границы из старого промпта (`DEALS_MAX = 15`, «дел от 5 до 15») — число
 # не выдумано заново, оно бегало в проде. Больше 15 — это уже не список, а простыня.
 NAMES_MIN, NAMES_MAX = 5, 15
-RASKLAD_BATCH = 90  # советов в запрос прохода Б: тексты в один запрос не влезают
+ASSIGN_BATCH = 90  # советов в запрос прохода Б: тексты в один запрос не влезают
 
 
-def spisok_sys():
+def names_sys():
     """Проход А: закрытый список имён темы. Дословно `DEALS_SYS`, по-английски."""
     return (
         "Below are task labels from ONE theme of a country guide (number: label), with "
@@ -103,7 +103,7 @@ def spisok_sys():
     )
 
 
-def rasklad_sys():
+def assign_sys():
     """Проход Б: присваивание из закрытого списка. Дословно `DEAL_ASSIGN_SYS`."""
     return (
         "Below is a CLOSED list of names (number: name), then advices (number: text). "
@@ -113,11 +113,11 @@ def rasklad_sys():
     )
 
 
-def sgustok_path(geo):
+def collapsed_path(geo):
     return f"{TESTS}/dedup/{geo}.json"
 
 
-def sgusti(geo):
+def collapse(geo):
     """Шаг 2: схлопнуть почти-копии гео ДО разметки — размечать будем представителей.
 
     Ключей НЕ тратит: вектора готовые, из `local_vec.db` свипера.
@@ -132,7 +132,7 @@ def sgusti(geo):
     ids = [i for i, _ in flies]
     vv = vectors.load_vecs(ids)
     no_vec = [i for i in ids if i not in vv]
-    groups = vectors.groups_all(ids, vv, SGUSTOK_THR)
+    groups = vectors.groups_all(ids, vv, COLLAPSE_THR)
     multi = [g for g in groups if len(g) > 1]
     swallowed = sum(len(g) - 1 for g in multi)
     recs = []
@@ -141,15 +141,15 @@ def sgusti(geo):
         recs.append({"rep": rep, "ids": g})
 
     os.makedirs(f"{TESTS}/dedup", exist_ok=True)
-    with open(sgustok_path(geo), "w", encoding="utf-8") as fh:
+    with open(collapsed_path(geo), "w", encoding="utf-8") as fh:
         json.dump(
-            {"geo": geo, "thr": SGUSTOK_THR, "no_vec": len(no_vec), "groups": recs},
+            {"geo": geo, "thr": COLLAPSE_THR, "no_vec": len(no_vec), "groups": recs},
             fh,
             ensure_ascii=False,
         )
     proto = f"{TESTS}/dedup/{geo}.txt"
     with open(proto, "w", encoding="utf-8") as fh:
-        print(f"# {geo}: схлопывание почти-копий, порог {SGUSTOK_THR}", file=fh)
+        print(f"# {geo}: схлопывание почти-копий, порог {COLLAPSE_THR}", file=fh)
         print(
             f"# мух {len(ids)}, без вектора {len(no_vec)}, "
             f"склеек {len(multi)}, схлопнуто {swallowed}",
@@ -217,7 +217,7 @@ def mark(geo, limit=None):
     fn = f"{TESTS}/tags/{geo}.json"
     done = json.load(open(fn, encoding="utf-8")) if os.path.exists(fn) else []
     za_rep = {}
-    sp = sgustok_path(geo)
+    sp = collapsed_path(geo)
     if os.path.exists(sp):
         sg = json.load(open(sp, encoding="utf-8"))
         za_rep = {g["rep"]: len(g["ids"]) for g in sg.get("groups") or []}
@@ -248,22 +248,22 @@ def mark(geo, limit=None):
             json.dumps(idx, ensure_ascii=False),
             mark_sys(),
             consumer="mark",  # звено 3, канон §0.4
-            salvage=("rows", "podtema"),
+            salvage=("rows", "subtheme"),
         )
         rows = (res or {}).get("rows") or []
         by_i = {str(r.get("i")).strip(): r for r in rows if isinstance(r, dict)}
         for j, (fid, _lesson) in enumerate(chunk):
             r = by_i.get(str(j))
-            if not r or not str(r.get("podtema") or "").strip():
+            if not r or not str(r.get("subtheme") or "").strip():
                 continue
-            tema = str(r.get("tema") or "").strip()
+            tema = str(r.get("theme") or "").strip()
             done.append(
                 {
                     "id": fid,
                     # ⛔ Тема вне закрытых 13 — не выдумка рта, а парковка: пусть лежит
                     # видимой кучей, а не растворяется по чужим темам.
-                    "tema": tema if tema in keys else "prochee",
-                    "podtema": str(r.get("podtema")).strip(),
+                    "theme": tema if tema in keys else "prochee",
+                    "subtheme": str(r.get("subtheme")).strip(),
                     # сколько мух стоит за представителем (1 — если схлопывания не было)
                     "n": za_rep.get(fid, 1),
                 }
@@ -275,7 +275,7 @@ def mark(geo, limit=None):
     print(f"{geo}: размечено всего {len(done)} -> {fn}", flush=True)
 
 
-def canon_path(base=""):
+def names_path(base=""):
     """Справочник имён: «имя подтемы → канон + латинский адрес».
 
     Канон §0.19 держит его в git как `pseo/site/canon.json` и правит РУКАМИ; прогон в
@@ -285,11 +285,27 @@ def canon_path(base=""):
     return os.path.join(base, TESTS, "canon.json")
 
 
-def load_canon(base=""):
-    return _load_json(canon_path(base), {})
+def load_names(base=""):
+    return _load_json(names_path(base), {})
 
 
-def obobshi(geo):
+# Имена полей разметки до 27.08 были транслитом. Файлы `tags/<гео>.json` — единственное,
+# за что ключи уплачены БЕЗВОЗВРАТНО, поэтому переписывать их незачем: читатель понимает
+# оба написания, а пишет всегда новое.
+OLD_FIELDS = {"tema": "theme", "podtema": "subtheme", "kanon": "name"}
+
+
+def load_tags(geo):
+    """Разметка гео. Старые имена полей приводятся к новым ПРИ ЧТЕНИИ, файл не трогаем."""
+    rows = _load_json(f"{TESTS}/tags/{geo}.json", None)
+    for r in rows or []:
+        for old, new in OLD_FIELDS.items():
+            if old in r and new not in r:
+                r[new] = r.pop(old)
+    return rows
+
+
+def summarize(geo):
     """Звено 4 ОБОБЩЕНИЕ: два прохода на тему (канон §0.19, PLAN.md).
 
     А — из меток темы с массами закрытый СПИСОК ИМЁН (это корзины страниц).
@@ -303,7 +319,7 @@ def obobshi(geo):
     ⛔ Рту идут НОМЕРА, не id (сквозное правило PLAN.md): и метки, и советы, и имена.
     """
     fn = f"{TESTS}/tags/{geo}.json"
-    tagged = _load_json(fn, None)
+    tagged = load_tags(geo)
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
@@ -313,23 +329,23 @@ def obobshi(geo):
     by_tema = {}
     for r in tagged:
         if r["id"] in texts:
-            by_tema.setdefault(r.get("tema") or "prochee", []).append(r)
+            by_tema.setdefault(r.get("theme") or "prochee", []).append(r)
 
-    imena = load_canon()
+    directory = load_names()
     for tema, group in sorted(by_tema.items(), key=lambda kv: -len(kv[1])):
         if os.path.exists("RUNNER_STOP"):
             print(f"  стоп на теме {tema}", flush=True)
             break
 
         # ── ПРОХОД А: закрытый список имён темы ────────────────────────────────────
-        massy = {}
+        masses = {}
         for r in group:
-            massy[r["podtema"]] = massy.get(r["podtema"], 0) + 1
-        metki = sorted(massy.items(), key=lambda kv: -kv[1])
-        idx = {str(j): f"{m} ({n})" for j, (m, n) in enumerate(metki)}
+            masses[r["subtheme"]] = masses.get(r["subtheme"], 0) + 1
+        labels = sorted(masses.items(), key=lambda kv: -kv[1])
+        idx = {str(j): f"{m} ({n})" for j, (m, n) in enumerate(labels)}
         res = call(
             json.dumps(idx, ensure_ascii=False),
-            spisok_sys(),
+            names_sys(),
             consumer="canon",
             salvage=("names", "names"),
         )
@@ -343,48 +359,48 @@ def obobshi(geo):
             print(f"  тема {tema}: список имён не получен, пропуск", flush=True)
             continue
         for nm in names:
-            imena.setdefault(nm, {"adres": slugs.slug(nm)})
+            directory.setdefault(nm, {"slug": slugs.slug(nm)})
 
         # ── ПРОХОД Б: присваивание из закрытого списка ─────────────────────────────
         # ⛔ Нумерация имён С ЕДИНИЦЫ: «0» занят под «ни одно не подошло» (так в
         # исходном промпте). С нуля ноль значил бы и первое имя, и отказ.
-        spisok = {str(k): nm for k, nm in enumerate(names, start=1)}
+        names_map = {str(k): nm for k, nm in enumerate(names, start=1)}
         vzyato = 0
-        for st in range(0, len(group), RASKLAD_BATCH):
+        for st in range(0, len(group), ASSIGN_BATCH):
             if os.path.exists("RUNNER_STOP"):
                 print(f"  стоп на теме {tema}, пачка {st}", flush=True)
                 break
-            chunk = group[st : st + RASKLAD_BATCH]
+            chunk = group[st : st + ASSIGN_BATCH]
             user = json.dumps(
                 {
-                    "names": spisok,
+                    "names": names_map,
                     "advices": {str(j): texts[r["id"]] for j, r in enumerate(chunk)},
                 },
                 ensure_ascii=False,
             )
-            res = call(user, rasklad_sys(), consumer="assign", salvage=("map", "map"))
+            res = call(user, assign_sys(), consumer="assign", salvage=("map", "map"))
             mp = (res or {}).get("map") or {}
             for j, r in enumerate(chunk):
                 nom = str(mp.get(str(j), "0")).strip()
                 # ⛔ Номер вне списка — не «новое имя», а промах: совет остаётся без имени
                 # и уйдёт в остаток. Список закрыт, придумать шестнадцатое нельзя.
-                if nom in spisok:
-                    r["kanon"] = spisok[nom]
+                if nom in names_map:
+                    r["name"] = names_map[nom]
                     vzyato += 1
             _save_json(fn, tagged)  # чекпоинт: СТОП не съедает уплаченное
-            _save_json(canon_path(), imena)
+            _save_json(names_path(), directory)
         print(
-            f"  тема {tema}: советов {len(group)}, меток {len(metki)} -> имён "
+            f"  тема {tema}: советов {len(group)}, меток {len(labels)} -> имён "
             f"{len(names)}, разложено {vzyato}",
             flush=True,
         )
     print(
-        f"обобщение {geo}: справочник {len(imena)} имён -> {canon_path()}",
+        f"обобщение {geo}: справочник {len(directory)} имён -> {names_path()}",
         flush=True,
     )
 
 
-def kanon_mukhi(r, imena=None):
+def page_name(r, directory=None):
     """Имя страницы для совета. ОДНО место правила.
 
     Имя ставит проход Б звена 4 и кладёт его совету полем `kanon`. Нет поля — значит рот
@@ -392,10 +408,10 @@ def kanon_mukhi(r, imena=None):
     идёт в ОСТАТОК темы, а не заводит собственную корзину из своей подтемы. Иначе корзины
     начнут плодиться по одной на совет — ровно то, из-за чего звено 4 переписано.
     """
-    return r.get("kanon") or ""
+    return r.get("name") or ""
 
 
-def podeli(items, limit):
+def split(items, limit):
     """Пачка больше `limit` → куски по `limit` подряд, последний неполный.
 
     38 при пороге 15 → 15/15/8. Ровнять части (13/13/12) юзер не просил, и выдумывать это
@@ -404,7 +420,7 @@ def podeli(items, limit):
     return [items[i : i + limit] for i in range(0, len(items), limit)] or [items]
 
 
-def vetvi(imya, base, items, tema, shelf, extra=None):
+def branch(title, base, items, tema, shelf, extra=None):
     """Пачка → страницы ОДНОЙ ВЕТКИ. Единственное место нарезки: и имена, и остаток.
 
     Ветвление одной темы (PLAN.md, слова юзера 27.08): тема — это список ВЕТОК, а ветка —
@@ -417,28 +433,28 @@ def vetvi(imya, base, items, tema, shelf, extra=None):
     ⛔ Номер части живёт ПОЛЕМ (`part`), а не в имени: имя переводится в звене 6, и «(2)»
     внутри заголовка размножилось бы по четырнадцати языкам.
     """
-    chasti = podeli(items, PAGE_MAX)
+    parts = split(items, PAGE_MAX)
     return [
         {
-            "zadacha": imya,
+            "title": title,
             # ⛔ КЛЮЧ темы, а не человеческое имя: ключ — сегмент адреса (`/ru/gr/visa/…`),
             # и сборщику незачем угадывать его обратно по имени.
-            "tema": tema,
+            "theme": tema,
             "shelf": shelf,
-            "items": chast,
-            "adres": base if nom == 1 else f"{base}-{nom}",
+            "items": part,
+            "slug": base if nom == 1 else f"{base}-{nom}",
             # ⛔ Сборщик группирует части по ЭТОМУ полю, а не по имени и не разбором
             # суффикса: имя на 14 языках разное, суффикс — следствие, а не признак.
             "branch": base,
             "part": nom,
-            "parts": len(chasti),
+            "parts": len(parts),
             **(extra or {}),
         }
-        for nom, chast in enumerate(chasti, start=1)
+        for nom, part in enumerate(parts, start=1)
     ]
 
 
-def sborka(geo):
+def build_corpus(geo):
     """Звено 5 СБОРКА: код, ключей НЕ тратит.
 
     Группируем советы по канону; подтема от PAGE_MIN пунктов — страница, остальное в
@@ -446,66 +462,68 @@ def sborka(geo):
     одном месте, на странице от 4 до 15 пунктов. Нарушение печатается и правится рукой
     в справочнике — не перепрогоном рта.
     """
-    tagged = _load_json(f"{TESTS}/tags/{geo}.json", None)
+    tagged = load_tags(geo)
     if not tagged:
         print(f"{geo}: разметки нет", flush=True)
         return
     texts = dict(load_flies(geo))
     flies = [r for r in tagged if r["id"] in texts]
-    imena = load_canon()
+    directory = load_names()
     kratko = _load_json(f"{TESTS}/kratko/{geo}.json", {})
-    names = {k: n for k, n, _d in tax.SHELVES}
+    shelf_names = {k: n for k, n, _d in tax.SHELVES}
 
     po_kanonu = {}
     for r in flies:
-        po_kanonu.setdefault((r.get("tema") or "prochee", kanon_mukhi(r)), []).append(r)
+        po_kanonu.setdefault((r.get("theme") or "prochee", page_name(r)), []).append(r)
 
-    views, ostatki = [], {}
-    tem_po_shelf = {}  # человеческое имя полки → ключ темы: ключ нужен адресу «Разного»
-    for (tema, kan), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
-        shelf = names.get(tema, tema)
-        tem_po_shelf[shelf] = tema
+    views, leftovers = [], {}
+    theme_by_shelf = (
+        {}
+    )  # человеческое имя полки → ключ темы: ключ нужен адресу «Разного»
+    for (tema, name), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
+        shelf = shelf_names.get(tema, tema)
+        theme_by_shelf[shelf] = tema
         items = [
             {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
-        if not (kan and len(items) >= tax.PAGE_MIN and not tax.bad_label(kan)):
-            ostatki.setdefault(shelf, []).extend(items)
+        if not (name and len(items) >= tax.PAGE_MIN and not tax.bad_label(name)):
+            leftovers.setdefault(shelf, []).extend(items)
             continue
-        base = (imena.get(kan) or {}).get("adres") or slugs.slug(kan)
-        chasti = vetvi(
-            kan,
+        base = (directory.get(name) or {}).get("slug") or slugs.slug(name)
+        parts = branch(
+            name,
             base,
             items,
             tema,
             shelf,
-            {"kratko": kratko[kan]} if kratko.get(kan) else None,
+            {"kratko": kratko[name]} if kratko.get(name) else None,
         )
-        views.extend(chasti)
-        if len(chasti) > 1:
+        views.extend(parts)
+        if len(parts) > 1:
             print(
-                f"  «{kan}»: {len(items)} пунктов -> {len(chasti)} страниц "
-                f"{[len(c['items']) for c in chasti]}",
+                f"  «{name}»: {len(items)} пунктов -> {len(parts)} страниц "
+                f"{[len(c['items']) for c in parts]}",
                 flush=True,
             )
 
     # ── ОСТАТОК: набралось на ветку — делаем служебную, нет — оставляем на теме ────────
     # ⛔ Тем же вызовом, что и имена: отдельного правила для остатка НЕТ, иначе назавтра
     # они разойдутся. «Разное» — не исключение, а такая же ветка (PLAN.md, 27.08).
-    for shelf, items in list(ostatki.items()):
+    for shelf, items in list(leftovers.items()):
         if len(items) < tax.PAGE_MIN:
             continue  # мелочь веткой не становится — остаётся списком на странице темы
         views.extend(
-            vetvi(MISC_NAME, MISC_ADRES, items, tem_po_shelf.get(shelf), shelf)
+            branch(MISC_TITLE, MISC_SLUG, items, theme_by_shelf.get(shelf), shelf)
         )
-        ostatki.pop(shelf)
+        leftovers.pop(shelf)
 
     vse = [it["id"] for v in views for it in v["items"]]
-    vse += [it["id"] for x in ostatki.values() for it in x]
+    vse += [it["id"] for x in leftovers.values() for it in x]
     tolstye = [
-        (v["zadacha"], len(v["items"])) for v in views if len(v["items"]) > PAGE_MAX
+        (v["title"], len(v["items"])) for v in views if len(v["items"]) > PAGE_MAX
     ]
     print(
-        f"сборка {geo}: страниц {len(views)}, тем с остатком {len(ostatki)}, "
+        f"сборка {geo}: страниц {len(views)}, тем с остатком {len(leftovers)}, "
         f"пунктов {len(vse)} из {len(flies)} размеченных",
         flush=True,
     )
@@ -523,7 +541,7 @@ def sborka(geo):
     out = {
         "geo": geo,
         "views_by_task": views,
-        "shelves": [{"shelf": k, "items": v} for k, v in ostatki.items()],
+        "shelves": [{"shelf": k, "items": v} for k, v in leftovers.items()],
         "prochee": [],
     }
     with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
@@ -546,17 +564,17 @@ def _save_json(path, obj):
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         raise SystemExit(
-            "нужно: tract.py <гео> --sgusti | --mark [сколько] | --obobshi | --sborka"
+            "нужно: tract.py <гео> --collapse | --mark [сколько] | --summarize | --build"
         )
     _geo = sys.argv[1]
-    if "--sgusti" in sys.argv:
-        sgusti(_geo)
+    if "--collapse" in sys.argv:
+        collapse(_geo)
     elif "--mark" in sys.argv:
         _i = sys.argv.index("--mark")
         mark(_geo, sys.argv[_i + 1] if len(sys.argv) > _i + 1 else None)
-    elif "--obobshi" in sys.argv:
-        obobshi(_geo)
-    elif "--sborka" in sys.argv:
-        sborka(_geo)
+    elif "--summarize" in sys.argv:
+        summarize(_geo)
+    elif "--build" in sys.argv:
+        build_corpus(_geo)
     else:
         raise SystemExit("неизвестный шаг")

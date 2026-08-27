@@ -34,10 +34,10 @@ SNYATO = {
 def test_new_steps_are_in_the_menu():
     """Шаги тракта зовут НОВЫЙ модуль, а не старый facet."""
     for kind, flag in (
-        ("sgusti", "--sgusti"),
+        ("collapse", "--collapse"),
         ("mark", "--mark"),
-        ("obobshi", "--obobshi"),
-        ("sborka", "--sborka"),
+        ("summarize", "--summarize"),
+        ("build_corpus", "--build"),
     ):
         assert kind in bot.MENU, kind
         argv = bot.MENU[kind][1]
@@ -64,18 +64,18 @@ def test_steps_go_in_tract_order():
             {
                 "mark": [],
                 "mark_n": 0,
-                "obobshi": [],
-                "sborka": [],
+                "summarize": [],
+                "build_corpus": [],
                 "geos": 0,
                 "views": 0,
             }
         )
     ]
     assert kinds == [
-        "sgusti",
+        "collapse",
         "mark",
-        "obobshi",
-        "sborka",
+        "summarize",
+        "build_corpus",
         "build",
         "translate",
     ], kinds
@@ -89,11 +89,11 @@ def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
     (tmp_path / "tests" / "tags").mkdir(parents=True)
     (tmp_path / "tests" / "tags" / "cz.json").write_text(
-        '[{"id": "a", "perevod": "текст", "tema": "transport", "podtema": "аренда"}]',
+        '[{"id": "a", "perevod": "текст", "theme": "transport", "subtheme": "аренда"}]',
         encoding="utf-8",
     )
     st = bot.pipeline_state()
-    assert "cz" in st["obobshi"], st["obobshi"]
+    assert "cz" in st["summarize"], st["summarize"]
 
 
 def test_menu_builds_on_a_live_state(monkeypatch):
@@ -111,8 +111,8 @@ def test_menu_builds_on_a_live_state(monkeypatch):
         lambda: {
             "mark": [{"geo": "cz", "n": 191}],
             "mark_n": 191,
-            "obobshi": ["cz"],
-            "sborka": ["cz"],
+            "summarize": ["cz"],
+            "build_corpus": ["cz"],
             "geos": 1,
             "views": 12,
             "langs": [],
@@ -136,11 +136,11 @@ def test_every_geo_step_gets_its_own_rows(monkeypatch):
         bot,
         "pipeline_state",
         lambda: {
-            "sgusti": ["gr", "me"],
+            "collapse": ["gr", "me"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "obobshi": [],
-            "sborka": [],
+            "summarize": [],
+            "build_corpus": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -148,8 +148,8 @@ def test_every_geo_step_gets_its_own_rows(monkeypatch):
     )
     bot.send_menu(None)
     text = str(sent[-1][1])
-    assert "run:sgusti:gr" in text, text
-    assert "run:sgusti:me" in text, text
+    assert "run:collapse:gr" in text, text
+    assert "run:collapse:me" in text, text
     assert "run:mark:gr" in text, text
 
 
@@ -170,11 +170,11 @@ def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
         bot,
         "pipeline_state",
         lambda: {
-            "sgusti": ["gr"],
+            "collapse": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "obobshi": [],
-            "sborka": [],
+            "summarize": [],
+            "build_corpus": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -182,9 +182,9 @@ def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
     )
     bot.send_menu(None)
     text = str(sent[-1][1])
-    assert "run:sgusti:gr" in text and "run:mark:gr" in text, text
+    assert "run:collapse:gr" in text and "run:mark:gr" in text, text
     for chuzhoy in ("br", "kr", "vn", "any"):
-        assert f"run:sgusti:{chuzhoy}" not in text, chuzhoy
+        assert f"run:collapse:{chuzhoy}" not in text, chuzhoy
     assert "проба: gr" in text, text
 
     bot.set_test_geo("-")  # снятие возвращает счёт по всему корпусу
@@ -206,11 +206,11 @@ def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
         "pipeline_state",
         lambda: {
             "all_geos": [{"geo": "br", "n": 3011}, {"geo": "gr", "n": 765}],
-            "sgusti": ["gr"],
+            "collapse": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "obobshi": [],
-            "sborka": [],
+            "summarize": [],
+            "build_corpus": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -238,11 +238,11 @@ def test_cycle_counts_the_current_tract(monkeypatch):
         "pipeline_state",
         lambda: {
             "all_geos": [{"geo": "gr", "n": 765}],
-            "sgusti": ["gr"],
+            "collapse": ["gr"],
             "mark": [{"geo": "gr", "n": 765}],
             "mark_n": 765,
-            "obobshi": [],
-            "sborka": [],
+            "summarize": [],
+            "build_corpus": [],
             "geos": 0,
             "views": 0,
             "langs": [],
@@ -257,7 +257,7 @@ def test_cycle_counts_the_current_tract(monkeypatch):
 
     j = FakeJob()
     bot.start_cycle(j)
-    assert j.started == ("sgusti", "gr"), getattr(j, "started", None)
+    assert j.started == ("collapse", "gr"), getattr(j, "started", None)
     text = " ".join(said)
     assert "весь тракт" in text, text
     # разметка 765/25=31 вызов, списки ≤(13+8) вызовов, по 4 запроса worst-case

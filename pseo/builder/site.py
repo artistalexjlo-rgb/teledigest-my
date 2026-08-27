@@ -13,7 +13,7 @@
 Половина его 3 100 строк — про сущности, которых в тракте нет. Разбирать это построчно
 дороже, чем собрать нужное дерево заново: тут четыре уровня и никакой отменённой схемы.
 
-⛔ АДРЕС НЕСЁТ КОРПУС. Хвост берётся из поля `adres`, который звено 4 кладёт в справочник
+⛔ АДРЕС НЕСЁТ КОРПУС. Хвост берётся из поля `slug`, который звено 4 кладёт в справочник
 имён, и он ОДИНАКОВ во всех языках. Слаг из заголовка тут не считается: заголовок
 локализован, и адрес получался бы свой в каждом языке — на этом уже горели.
 """
@@ -33,17 +33,17 @@ DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
 # Имена тем для заголовков. Русские лежат в таксономии, остальные языки покупает звено 6
-# ОДИН раз на язык и кладёт в `temy.json` — платить за них в каждой стране незачем.
-TEMA_NAME = {k: n for k, n, _d in tax.SHELVES}
+# ОДИН раз на язык и кладёт в `themes.json` — платить за них в каждой стране незачем.
+THEME_NAME = {k: n for k, n, _d in tax.SHELVES}
 
 
-def tema_imena(lang):
+def theme_names(lang):
     """Имена тринадцати тем на языке страницы. Нет перевода — берём ключ, а не русское
     имя: английский `visa` на японской странице честнее русских «Визовых процедур».
     """
     if lang == "ru":
-        return TEMA_NAME
-    mp = (_load(f"{BUILT}/temy.json") or {}).get(lang) or {}
+        return THEME_NAME
+    mp = (_load(f"{BUILT}/themes.json") or {}).get(lang) or {}
     return {k: mp.get(k) or k.replace("_", " ") for k, _n, _d in tax.SHELVES}
 
 
@@ -92,30 +92,30 @@ def _geo_flag(geo):
     return pair[1] if pair else ""
 
 
-def korpus(geo, lang="ru"):
+def corpus(geo, lang="ru"):
     """Корпус гео: страницы и остатки тем. Читается то, что положило звено 5."""
     d = "out_facet" if lang == "ru" else f"out_facet_{lang}"
     return _load(f"{BUILT}/{d}/{geo}.json")
 
 
-def stranica(page_data, geo, lang, vetka=()):
+def advice_page(page_data, geo, lang, siblings=()):
     """Страница советов: `/<язык>/<страна>/<тема>/<страница>/`.
 
-    `vetka` — все части этой же ветки по порядку. Части знают друг о друге, потому что
+    `siblings` — все части этой же ветки по порядку. Части знают друг о друге, потому что
     ветка выходит на тему ОДНОЙ плиткой (PLAN.md, «Ветвление одной темы»): попасть во
     вторую часть можно только отсюда.
     """
-    imena = tema_imena(lang)
-    tema = page_data["tema"]
-    adres = page_data["adres"]
-    path = f"/{lang}/{geo}/{tema}/{adres}/"
-    chasti = [
+    names = theme_names(lang)
+    theme = page_data["theme"]
+    slug = page_data["slug"]
+    path = f"/{lang}/{geo}/{theme}/{slug}/"
+    parts = [
         {
             "n": p.get("part", 1),
-            "url": f"/{lang}/{geo}/{tema}/{p['adres']}/",
-            "current": p["adres"] == adres,
+            "url": f"/{lang}/{geo}/{theme}/{p['slug']}/",
+            "current": p["slug"] == slug,
         }
-        for p in vetka
+        for p in siblings
     ]
     faqs = [
         {
@@ -133,51 +133,51 @@ def stranica(page_data, geo, lang, vetka=()):
         "shared_tail": True,  # хвост общий: он из справочника, а не из заголовка
         "geo": geo,
         "geo_name": _geo_name(geo, lang),
-        "shelf_url": f"/{lang}/{geo}/{tema}/",
-        "shelf_name": imena.get(tema, tema),
-        "intent_name": page_data["zadacha"],
-        "h1": page_data["zadacha"],
+        "shelf_url": f"/{lang}/{geo}/{theme}/",
+        "shelf_name": names.get(theme, theme),
+        "intent_name": page_data["title"],
+        "h1": page_data["title"],
         "title": (
-            f"{page_data['zadacha']} — {_geo_name(geo, lang)}"
-            if len(chasti) < 2
-            else f"{page_data['zadacha']} {page_data.get('part', 1)}"
-            f"/{len(chasti)} — {_geo_name(geo, lang)}"
+            f"{page_data['title']} — {_geo_name(geo, lang)}"
+            if len(parts) < 2
+            else f"{page_data['title']} {page_data.get('part', 1)}"
+            f"/{len(parts)} — {_geo_name(geo, lang)}"
         ),
         "faqs": faqs,
         "chips": [],
         # ⛔ Номер части — в заголовке ОКНА, а не в `h1`: имя одно на всю ветку, а
         # поисковику части разными видеть надо.
-        "chasti": chasti if len(chasti) > 1 else [],
-        "search_title": page_data["zadacha"],
+        "parts": parts if len(parts) > 1 else [],
+        "search_title": page_data["title"],
     }
 
 
-def po_vetkam(stranicy):
+def by_branch(pages):
     """Страницы темы → ветки: список списков, части внутри по порядку.
 
     Ключ — поле `branch` от звена 5. Страницы без него (старый корпус) — ветка сама себе.
     """
     vetki = {}
-    for p in stranicy:
-        vetki.setdefault(p.get("branch") or p["adres"], []).append(p)
+    for p in pages:
+        vetki.setdefault(p.get("branch") or p["slug"], []).append(p)
     return [sorted(v, key=lambda p: p.get("part", 1)) for v in vetki.values()]
 
 
-def tema_stranica(tema, stranicy, ostatok, geo, lang):
+def theme_page(theme, pages, leftover, geo, lang):
     """Тема: кнопки веток сверху, мелочь остатка списком ниже. Своего текста не несёт."""
-    imena = tema_imena(lang)
-    path = f"/{lang}/{geo}/{tema}/"
+    names = theme_names(lang)
+    path = f"/{lang}/{geo}/{theme}/"
     # ⛔ ОДНА ПЛИТКА НА ВЕТКУ (PLAN.md, 27.08). Группируем по полю `branch`, а не по имени
     # (оно переводится) и не разбором суффикса `-2` (он следствие, а не признак).
     tiles = []
-    for chasti in po_vetkam(stranicy):
-        pervaya = chasti[0]
+    for parts in by_branch(pages):
+        first = parts[0]
         tiles.append(
             {
                 "icon": "",
-                "title": pervaya["zadacha"],
-                "blurb": f"{sum(len(p['items']) for p in chasti)}",
-                "url": f"/{lang}/{geo}/{tema}/{pervaya['adres']}/",
+                "title": first["title"],
+                "blurb": f"{sum(len(p['items']) for p in parts)}",
+                "url": f"/{lang}/{geo}/{theme}/{first['slug']}/",
             }
         )
     page = {
@@ -187,12 +187,12 @@ def tema_stranica(tema, stranicy, ostatok, geo, lang):
         "shared_tail": True,
         "geo": geo,
         "geo_name": _geo_name(geo, lang),
-        "h1": imena.get(tema, tema),
-        "title": f"{imena.get(tema, tema)} — {_geo_name(geo, lang)}",
+        "h1": names.get(theme, theme),
+        "title": f"{names.get(theme, theme)} — {_geo_name(geo, lang)}",
         "tiles": tiles,
-        "search_title": imena.get(tema, tema),
+        "search_title": names.get(theme, theme),
     }
-    if ostatok:
+    if leftover:
         # Остаток — то, чему имени не нашлось. Показываем списком, чтобы советы не пропали.
         page["faqs"] = [
             {
@@ -201,23 +201,23 @@ def tema_stranica(tema, stranicy, ostatok, geo, lang):
                 "n": it.get("n", 1),
                 "n_word": "",
             }
-            for it in ostatok
+            for it in leftover
         ]
     return path, page
 
 
-def hub(geo, temy, lang):
+def hub(geo, themes, lang):
     """Хаб страны: плитки тем со счётчиком страниц."""
     path = f"/{lang}/{geo}/"
-    imena = tema_imena(lang)
+    names = theme_names(lang)
     tiles = [
         {
             "icon": "",
-            "title": imena.get(t, t),
+            "title": names.get(t, t),
             "blurb": f"{n}",
             "url": f"/{lang}/{geo}/{t}/",
         }
-        for t, n in temy
+        for t, n in themes
     ]
     return path, {
         "lang": lang,
@@ -233,7 +233,7 @@ def hub(geo, temy, lang):
     }
 
 
-def glavnaya(geos, lang):
+def home(geos, lang):
     """Главная языка: список стран, у которых есть хотя бы одна страница."""
     path = f"/{lang}/"
     tiles = [
@@ -257,45 +257,47 @@ def glavnaya(geos, lang):
     }
 
 
-def sobrat_geo(geo, lang="ru"):
+def build_geo(geo, lang="ru"):
     """Одна страна: страницы тем и советов. Возвращает (сколько страниц, темы со счётом)."""
-    d = korpus(geo, lang)
+    d = corpus(geo, lang)
     if not d:
         return 0, []
-    po_teme = {}
+    by_theme = {}
     for v in d.get("views_by_task") or []:
         # ⛔ Тема нужна СЕГМЕНТОМ адреса, поэтому берём ключ, а не человеческое имя полки.
-        tema = v.get("tema") or _tema_po_imeni(v.get("shelf"))
-        if not tema or not v.get("adres"):
+        theme = v.get("theme") or _theme_by_name(v.get("shelf"))
+        if not theme or not v.get("slug"):
             continue
-        po_teme.setdefault(tema, []).append(v)
-    ostatki = {}
+        by_theme.setdefault(theme, []).append(v)
+    leftovers = {}
     for sh in d.get("shelves") or []:
-        t = _tema_po_imeni(sh.get("shelf"))
+        t = _theme_by_name(sh.get("shelf"))
         if t:
-            ostatki[t] = sh.get("items") or []
+            leftovers[t] = sh.get("items") or []
 
     n = 0
-    for tema, stranicy in po_teme.items():
-        for p in stranicy:
-            p["tema"] = tema
-        for chasti in po_vetkam(stranicy):
-            for p in chasti:
-                _, page = stranica(p, geo, lang, chasti)
-                _write(f"{lang}_{geo}_{tema}_{p['adres']}.json", page)
+    for theme, pages in by_theme.items():
+        for p in pages:
+            p["theme"] = theme
+        for parts in by_branch(pages):
+            for p in parts:
+                _, page = advice_page(p, geo, lang, parts)
+                _write(f"{lang}_{geo}_{theme}_{p['slug']}.json", page)
                 n += 1
-        _, page = tema_stranica(tema, stranicy, ostatki.get(tema), geo, lang)
-        _write(f"{lang}_{geo}_{tema}.json", page)
+        _, page = theme_page(theme, pages, leftovers.get(theme), geo, lang)
+        _write(f"{lang}_{geo}_{theme}.json", page)
         n += 1
-    temy = [(t, len(v)) for t, v in sorted(po_teme.items(), key=lambda kv: -len(kv[1]))]
-    if temy:
-        _, page = hub(geo, temy, lang)
+    themes = [
+        (t, len(v)) for t, v in sorted(by_theme.items(), key=lambda kv: -len(kv[1]))
+    ]
+    if themes:
+        _, page = hub(geo, themes, lang)
         _write(f"{lang}_{geo}.json", page)
         n += 1
-    return n, temy
+    return n, themes
 
 
-def _tema_po_imeni(name):
+def _theme_by_name(name):
     """Человеческое имя полки → ключ темы. Корпус несёт имя, адресу нужен ключ."""
     for k, n, _d in tax.SHELVES:
         if n == name:
@@ -303,28 +305,28 @@ def _tema_po_imeni(name):
     return None
 
 
-def sobrat_vse(lang="ru"):
+def build_all(lang="ru"):
     """Все гео, у которых есть корпус. Печатает числа, чтобы прогон был проверяем."""
     d = "out_facet" if lang == "ru" else f"out_facet_{lang}"
-    geos, vsego = [], 0
+    geos, total = [], 0
     for path in sorted(glob.glob(f"{BUILT}/{d}/*.json")):
         geo = os.path.basename(path)[:-5]
-        n, temy = sobrat_geo(geo, lang)
+        n, themes = build_geo(geo, lang)
         if n:
-            geos.append((geo, sum(x for _t, x in temy)))
-            vsego += n
-            print(f"  {geo}: {n} страниц-data, тем {len(temy)}", flush=True)
+            geos.append((geo, sum(x for _t, x in themes)))
+            total += n
+            print(f"  {geo}: {n} страниц-data, тем {len(themes)}", flush=True)
     if geos:
-        _, page = glavnaya(geos, lang)
+        _, page = home(geos, lang)
         _write(f"{lang}.json", page)
-        vsego += 1
-    print(f"ИТОГО {lang}: {vsego} страниц-data -> {DATA}", flush=True)
-    return vsego
+        total += 1
+    print(f"ИТОГО {lang}: {total} страниц-data -> {DATA}", flush=True)
+    return total
 
 
 if __name__ == "__main__":
     _lang = sys.argv[2] if len(sys.argv) > 2 else "ru"
     if len(sys.argv) > 1 and sys.argv[1] != "--all":
-        sobrat_geo(sys.argv[1], _lang)
+        build_geo(sys.argv[1], _lang)
     else:
-        sobrat_vse(_lang)
+        build_all(_lang)

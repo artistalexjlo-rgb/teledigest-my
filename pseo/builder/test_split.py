@@ -19,24 +19,24 @@ import tract  # noqa: E402
 
 def test_pack_is_cut_by_the_threshold():
     """Режем по порогу подряд, последняя часть неполная: 38 → 15/15/8."""
-    assert [len(c) for c in tract.podeli(list(range(38)), 15)] == [15, 15, 8]
-    assert [len(c) for c in tract.podeli(list(range(15)), 15)] == [15]
-    assert [len(c) for c in tract.podeli(list(range(45)), 15)] == [15, 15, 15]
-    assert [len(c) for c in tract.podeli(list(range(4)), 15)] == [4]
+    assert [len(c) for c in tract.split(list(range(38)), 15)] == [15, 15, 8]
+    assert [len(c) for c in tract.split(list(range(15)), 15)] == [15]
+    assert [len(c) for c in tract.split(list(range(45)), 15)] == [15, 15, 15]
+    assert [len(c) for c in tract.split(list(range(4)), 15)] == [4]
 
 
 def _geo(tmp_path, monkeypatch, n, kanon="visa documents"):
     monkeypatch.chdir(tmp_path)
     rows = [
-        {"id": f"h{i}", "tema": "visa", "podtema": "label", "n": 1, "kanon": kanon}
+        {"id": f"h{i}", "theme": "visa", "subtheme": "label", "n": 1, "name": kanon}
         for i in range(n)
     ]
     os.makedirs(tmp_path / "tests" / "tags", exist_ok=True)
     with open(tmp_path / "tests" / "tags" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(rows, fh, ensure_ascii=False)
-    pary = [(r["id"], f"advice {j}") for j, r in enumerate(rows)]
-    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pary))
-    tract.sborka("gr")
+    pairs = [(r["id"], f"advice {j}") for j, r in enumerate(rows)]
+    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
+    tract.build_corpus("gr")
     return json.load(
         open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
     )
@@ -47,7 +47,7 @@ def test_thick_name_becomes_several_pages(tmp_path, monkeypatch):
     out = _geo(tmp_path, monkeypatch, 38)
     views = out["views_by_task"]
     assert [len(v["items"]) for v in views] == [15, 15, 8], views
-    assert [v["adres"] for v in views] == [
+    assert [v["slug"] for v in views] == [
         "visa-documents",
         "visa-documents-2",
         "visa-documents-3",
@@ -71,14 +71,14 @@ def test_single_page_keeps_its_plain_name(tmp_path, monkeypatch):
     """Пачка влезла целиком — имя и адрес без суффиксов и без «(1)»."""
     out = _geo(tmp_path, monkeypatch, 12)
     v = out["views_by_task"][0]
-    assert v["zadacha"] == "visa documents" and v["adres"] == "visa-documents"
+    assert v["title"] == "visa documents" and v["slug"] == "visa-documents"
 
 
 def test_parts_share_one_clean_name_and_carry_their_number(tmp_path, monkeypatch):
     """Номер части живёт ПОЛЕМ, а не в имени: имя переводится, «(2)» уехало бы в 14 языков."""
     out = _geo(tmp_path, monkeypatch, 38)
     views = out["views_by_task"]
-    assert {v["zadacha"] for v in views} == {"visa documents"}
+    assert {v["title"] for v in views} == {"visa documents"}
     assert [(v["branch"], v["part"], v["parts"]) for v in views] == [
         ("visa-documents", 1, 3),
         ("visa-documents", 2, 3),
@@ -92,23 +92,23 @@ def _geo_mix(tmp_path, monkeypatch, bez_imeni, s_imenem=0, tema="visa"):
     rows = [
         {
             "id": f"y{i}",
-            "tema": tema,
-            "podtema": "label",
+            "theme": tema,
+            "subtheme": "label",
             "n": 1,
-            "kanon": "visa documents",
+            "name": "visa documents",
         }
         for i in range(s_imenem)
     ]
     rows += [
-        {"id": f"n{i}", "tema": tema, "podtema": "label", "n": 1}
+        {"id": f"n{i}", "theme": tema, "subtheme": "label", "n": 1}
         for i in range(bez_imeni)
     ]
     os.makedirs(tmp_path / "tests" / "tags", exist_ok=True)
     with open(tmp_path / "tests" / "tags" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(rows, fh, ensure_ascii=False)
-    pary = [(r["id"], f"advice {j}") for j, r in enumerate(rows)]
-    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pary))
-    tract.sborka("gr")
+    pairs = [(r["id"], f"advice {j}") for j, r in enumerate(rows)]
+    monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
+    tract.build_corpus("gr")
     return json.load(
         open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
     )
@@ -121,10 +121,10 @@ def test_remainder_is_a_branch_like_any_other(tmp_path, monkeypatch):
     деления одно на всё, отдельного для остатка нет.
     """
     out = _geo_mix(tmp_path, monkeypatch, bez_imeni=33)
-    misc = [v for v in out["views_by_task"] if v.get("branch") == tract.MISC_ADRES]
+    misc = [v for v in out["views_by_task"] if v.get("branch") == tract.MISC_SLUG]
     assert [len(v["items"]) for v in misc] == [15, 15, 3], misc
-    assert [v["adres"] for v in misc] == ["misc", "misc-2", "misc-3"]
-    assert {v["zadacha"] for v in misc} == {"Other"}, "имя ветки должно быть английским"
+    assert [v["slug"] for v in misc] == ["misc", "misc-2", "misc-3"]
+    assert {v["title"] for v in misc} == {"Other"}, "имя ветки должно быть английским"
     assert not out["shelves"], "остаток остался кучей на теме"
 
 
@@ -132,7 +132,7 @@ def test_small_remainder_stays_on_the_theme(tmp_path, monkeypatch):
     """Меньше порога страницы — остаётся списком на теме, страницей не становится."""
     out = _geo_mix(tmp_path, monkeypatch, bez_imeni=2)
     assert not [
-        v for v in out["views_by_task"] if v["adres"].startswith(tract.MISC_ADRES)
+        v for v in out["views_by_task"] if v["slug"].startswith(tract.MISC_SLUG)
     ]
     assert sum(len(sh["items"]) for sh in out["shelves"]) == 2
 
@@ -143,3 +143,37 @@ def test_nothing_is_lost_between_pages_and_the_theme(tmp_path, monkeypatch):
     na_stranicah = sum(len(v["items"]) for v in out["views_by_task"])
     na_teme = sum(len(sh["items"]) for sh in out["shelves"])
     assert na_stranicah + na_teme == 54, (na_stranicah, na_teme)
+
+
+def test_paid_markup_in_the_old_spelling_is_still_read(tmp_path, monkeypatch):
+    """Разметка со старыми именами полей читается: за неё уже уплачено ключами.
+
+    До 27.08 поля назывались транслитом (`tema`, `podtema`, `kanon`). Переименование не
+    должно обесценивать файлы `tags/<гео>.json` — единственное место, за которое ключи
+    потрачены безвозвратно. Поэтому читатель понимает оба написания, а пишет новое.
+    """
+    monkeypatch.chdir(tmp_path)
+    rows = [
+        {
+            "id": f"o{i}",
+            "tema": "visa",
+            "podtema": "label",
+            "n": 1,
+            "kanon": "visa fees",
+        }
+        for i in range(5)
+    ]
+    os.makedirs(tmp_path / "tests" / "tags", exist_ok=True)
+    with open(tmp_path / "tests" / "tags" / "gr.json", "w", encoding="utf-8") as fh:
+        json.dump(rows, fh, ensure_ascii=False)
+    monkeypatch.setattr(
+        tract,
+        "load_flies",
+        lambda geo: [(r["id"], f"advice {j}") for j, r in enumerate(rows)],
+    )
+    tract.build_corpus("gr")
+    out = json.load(
+        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
+    )
+    assert [v["title"] for v in out["views_by_task"]] == ["visa fees"]
+    assert out["views_by_task"][0]["theme"] == "visa"

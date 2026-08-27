@@ -26,9 +26,9 @@ DOCKERFILE = HERE / "Dockerfile"
 ENTRIES = [
     "render.py",
     "builder/site.py",
-    # ⛔ Переводчик тракта — `perevod.py`. Старый `facet_lang.py` уехал в legacy 27.08:
+    # ⛔ Переводчик тракта — `translation.py`. Старый `facet_lang.py` уехал в legacy 27.08:
     # он переводил С РУССКОГО и ждал корпус отменённой схемы.
-    "builder/perevod.py",
+    "builder/translation.py",
     "builder/readycheck.py",
 ]
 

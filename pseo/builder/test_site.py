@@ -48,10 +48,10 @@ def _korpus(tmp_path, monkeypatch, views, shelves=()):
 
 def _view(zadacha, adres, tema="visa", n=5, branch=None, part=1, parts=1):
     return {
-        "zadacha": zadacha,
-        "tema": tema,
+        "title": zadacha,
+        "theme": tema,
         "shelf": "Визовые процедуры",
-        "adres": adres,
+        "slug": adres,
         "branch": branch or adres,
         "part": part,
         "parts": parts,
@@ -89,7 +89,7 @@ def _pages(tmp_path):
 def test_tree_has_four_levels(tmp_path, monkeypatch):
     """Главная, хаб, тема, страница — и адрес страницы содержит СЕГМЕНТ ТЕМЫ."""
     _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents")])
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     paths = set(_pages(tmp_path))
     assert "/ru/" in paths
     assert "/ru/gr/" in paths
@@ -101,7 +101,7 @@ def test_address_comes_from_the_corpus_not_from_the_title(tmp_path, monkeypatch)
     """Адрес берётся из поля корпуса. Заголовок русский — адрес всё равно английский."""
     v = _view("сроки рассмотрения визы", "visa-processing-time")
     _korpus(tmp_path, monkeypatch, [v])
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     page = _pages(tmp_path)["/ru/gr/visa/visa-processing-time/"]
     assert page["h1"] == "сроки рассмотрения визы"
     assert (
@@ -122,7 +122,7 @@ def test_theme_page_lists_pages_and_keeps_the_remainder(tmp_path, monkeypatch):
             }
         ],
     )
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     tema = _pages(tmp_path)["/ru/gr/visa/"]
     assert [t["url"] for t in tema["tiles"]] == [
         "/ru/gr/visa/visa-documents/",
@@ -135,7 +135,7 @@ def test_page_without_address_is_skipped(tmp_path, monkeypatch):
     """Нет адреса — нет страницы. Выдумывать хвост нельзя: страницы затрут друг друга."""
     v = _view("visa documents", "")
     _korpus(tmp_path, monkeypatch, [v])
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     assert not [p for p in _pages(tmp_path) if p.startswith("/ru/gr/visa/")]
 
 
@@ -146,7 +146,7 @@ def test_branch_is_one_tile_on_the_theme(tmp_path, monkeypatch):
     соседи по витрине. Подпись плитки — сумма по всем частям.
     """
     _korpus(tmp_path, monkeypatch, _vetka("visa documents", "visa-documents", 3))
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     tema = _pages(tmp_path)["/ru/gr/visa/"]
     assert [t["url"] for t in tema["tiles"]] == ["/ru/gr/visa/visa-documents/"]
     assert tema["tiles"][0]["blurb"] == "15", "подпись плитки — сумма всех частей"
@@ -156,15 +156,15 @@ def test_branch_is_one_tile_on_the_theme(tmp_path, monkeypatch):
 def test_parts_link_to_each_other(tmp_path, monkeypatch):
     """Во вторую часть можно попасть только из первой — значит части знают сестёр."""
     _korpus(tmp_path, monkeypatch, _vetka("visa documents", "visa-documents", 3))
-    site.sobrat_vse("ru")
+    site.build_all("ru")
     pages = _pages(tmp_path)
     p2 = pages["/ru/gr/visa/visa-documents-2/"]
-    assert [c["url"] for c in p2["chasti"]] == [
+    assert [c["url"] for c in p2["parts"]] == [
         "/ru/gr/visa/visa-documents/",
         "/ru/gr/visa/visa-documents-2/",
         "/ru/gr/visa/visa-documents-3/",
     ]
-    assert [c["current"] for c in p2["chasti"]] == [False, True, False]
+    assert [c["current"] for c in p2["parts"]] == [False, True, False]
     assert p2["h1"] == "visa documents", "номер части в имя не лезет"
     assert (
         "2/3" in p2["title"]
@@ -174,5 +174,5 @@ def test_parts_link_to_each_other(tmp_path, monkeypatch):
 def test_single_page_has_no_part_nav(tmp_path, monkeypatch):
     """Ветка в одну страницу переходов не показывает — нечего перелистывать."""
     _korpus(tmp_path, monkeypatch, [_view("visa fees", "visa-fees")])
-    site.sobrat_vse("ru")
-    assert _pages(tmp_path)["/ru/gr/visa/visa-fees/"]["chasti"] == []
+    site.build_all("ru")
+    assert _pages(tmp_path)["/ru/gr/visa/visa-fees/"]["parts"] == []

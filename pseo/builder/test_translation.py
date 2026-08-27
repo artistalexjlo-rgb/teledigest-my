@@ -20,12 +20,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import perevod  # noqa: E402
+import translation  # noqa: E402
 
 
 def _korpus(tmp_path, monkeypatch, views, shelves=()):
-    monkeypatch.setattr(perevod, "BUILT", str(tmp_path))
-    monkeypatch.setattr(perevod, "TEMY_FILE", str(tmp_path / "temy.json"))
+    monkeypatch.setattr(translation, "BUILT", str(tmp_path))
+    monkeypatch.setattr(translation, "THEMES_FILE", str(tmp_path / "theme_names.json"))
     os.makedirs(tmp_path / "out_facet", exist_ok=True)
     with open(tmp_path / "out_facet" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(
@@ -37,10 +37,10 @@ def _korpus(tmp_path, monkeypatch, views, shelves=()):
 
 def _view(zadacha, adres, texts, tema="visa", branch=None, part=1, parts=1):
     return {
-        "zadacha": zadacha,
-        "tema": tema,
+        "title": zadacha,
+        "theme": tema,
         "shelf": "Визовые процедуры",
-        "adres": adres,
+        "slug": adres,
         "branch": branch or adres,
         "part": part,
         "parts": parts,
@@ -60,7 +60,7 @@ def _rot(monkeypatch, schet=None):
         metka = "ru" if "Russian" in sysprompt else "xx"
         return {k: f"{metka}:{v}" for k, v in payload.items()}
 
-    monkeypatch.setattr(perevod, "call", fake_call)
+    monkeypatch.setattr(translation, "call", fake_call)
 
 
 def _out(tmp_path, lang="ru"):
@@ -75,10 +75,10 @@ def test_russian_is_an_ordinary_target_language(tmp_path, monkeypatch):
     )
     schet = {}
     _rot(monkeypatch, schet)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
     out = _out(tmp_path)
     assert [it["text"] for it in out["views_by_task"][0]["items"]] == ["ru:a", "ru:b"]
-    assert out["views_by_task"][0]["zadacha"] == "ru:visa documents"
+    assert out["views_by_task"][0]["title"] == "ru:visa documents"
     assert sorted(schet) == ["labels", "translate"]
 
 
@@ -87,7 +87,7 @@ def test_english_costs_nothing(tmp_path, monkeypatch):
     _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a"])])
     schet = {}
     _rot(monkeypatch, schet)
-    perevod.perevedi("gr", "en")
+    translation.translate_geo("gr", "en")
     assert schet == {}, "за английский заплатили"
     assert _out(tmp_path, "en")["views_by_task"][0]["items"][0]["text"] == "a"
 
@@ -98,7 +98,7 @@ def test_second_run_buys_only_what_changed(tmp_path, monkeypatch):
         tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a", "b"])]
     )
     _rot(monkeypatch)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
 
     # источник переписали в одном совете, имя ветки поменяли
     _korpus(
@@ -106,7 +106,7 @@ def test_second_run_buys_only_what_changed(tmp_path, monkeypatch):
     )
     schet = {}
     _rot(monkeypatch, schet)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
     assert schet["translate"] == ["B-2"], schet
     assert schet["labels"] == ["visa papers"], schet
     out = _out(tmp_path)
@@ -139,7 +139,7 @@ def test_branch_name_is_bought_once_for_all_its_parts(tmp_path, monkeypatch):
     )
     schet = {}
     _rot(monkeypatch, schet)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
     assert schet["labels"] == ["visa documents"], schet
 
 
@@ -168,9 +168,9 @@ def test_addresses_and_branches_survive_translation(tmp_path, monkeypatch):
         ],
     )
     _rot(monkeypatch)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
     out = _out(tmp_path)
-    assert [v["adres"] for v in out["views_by_task"]] == [
+    assert [v["slug"] for v in out["views_by_task"]] == [
         "visa-documents",
         "visa-documents-2",
     ]
@@ -192,6 +192,6 @@ def test_the_small_remainder_is_translated_too(tmp_path, monkeypatch):
         ],
     )
     _rot(monkeypatch)
-    perevod.perevedi("gr", "ru")
+    translation.translate_geo("gr", "ru")
     out = _out(tmp_path)
     assert out["shelves"][0]["items"][0]["text"] == "ru:leftover"

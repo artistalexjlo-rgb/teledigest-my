@@ -73,9 +73,9 @@ MENU = {
     # Пишет протокол `tests/dedup/<гео>.txt`: кто остаётся и кого проглотил. Числа в отчёт
     # идут строкой, протокол — файлом: счётчик «схлопнуто N» не отличает настоящий повтор
     # от съеденного содержимого, а ровно на этом порог 0.86 и прокололся.
-    "sgusti": (
+    "collapse": (
         "Схлопывание <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--sgusti"],
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--collapse"],
     ),
     # ШАГ 3. Разметка: муха → перевод + тема из 13 + подтема. Пачка 25, добирает неразмеченных.
     # «гео» или «гео:сколько» — второе для пробного куска.
@@ -86,14 +86,14 @@ MENU = {
     # ШАГ 4. Обобщение (канон §0.19, звено 4): ОДИН вызов на тему — справочник имён,
     # деление толстых подтем, короткий ответ. Пачками рот придумывает имена заново в каждой:
     # 22.08 тема виз Греции дала 36 страниц пятью параллельными наборами имён.
-    "obobshi": (
+    "summarize": (
         "Обобщение <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--obobshi"],
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--summarize"],
     ),
     # ШАГ 5. Корпус по справочнику — код, ключей не тратит.
-    "sborka": (
+    "build_corpus": (
         "Корпус по справочнику <гео>",
-        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--sborka"],
+        ["python", "-u", f"{BUILDER}/tract.py", "{geo}", "--build"],
     ),
     # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `site.py`
     # превращает корпус в страницы дерева, `render.py` рендерит уже готовые. 21.08 кнопка
@@ -118,7 +118,7 @@ MENU = {
         ],
     ),
     # ШАГ 6. Переводы: английский корпус → 13 языков, включая русский. Английская версия
-    # копируется бесплатно. ⛔ Модуль — `perevod.py`, а не `facet_lang.py`: тот переводил
+    # копируется бесплатно. ⛔ Модуль — `translation.py`, а не `facet_lang.py`: тот переводил
     # С РУССКОГО и ждал корпус отменённой схемы (27.08).
     # ⛔ Кнопки «Адреса страниц» больше нет: адрес рождается в звене 4, штамповать ротом
     # нечего — шаг снят вместе со `stamp_keys`.
@@ -127,7 +127,7 @@ MENU = {
         [
             "bash",
             "-lc",
-            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/perevod.py " + "{geo}",
+            f"BUILT_DIR={BRAIN}/{TESTS} python -u {BUILDER}/translation.py " + "{geo}",
         ],
     ),
 }
@@ -385,11 +385,11 @@ def pipeline_state():
 
     st = {
         "all_geos": [],
-        "sgusti": [],
+        "collapse": [],
         "mark": [],
         "mark_n": 0,
-        "obobshi": [],
-        "sborka": [],
+        "summarize": [],
+        "build_corpus": [],
         "geos": 0,
         "sobrano": [],  # гео, у которых корпус уже собран: их и переводим
         "views": 0,
@@ -451,7 +451,7 @@ def pipeline_state():
     # Работа шага = «что МОЖНО сделать»: гео, которое ждёт разметки и не схлопнуто.
     for x in st["mark"]:
         if not os.path.exists(f"{BRAIN}/{TESTS}/dedup/{x['geo']}.json"):
-            st["sgusti"].append(x["geo"])
+            st["collapse"].append(x["geo"])
 
     # ── списки: разметка есть, а корпус старше её или отсутствует ──────────────────────
     only = test_geo()
@@ -464,7 +464,7 @@ def pipeline_state():
         if not os.path.exists(canon) or os.path.getmtime(canon) < os.path.getmtime(
             tags_fn
         ):
-            st["obobshi"].append(geo)
+            st["summarize"].append(geo)
         # корпус: собран раньше разметки или справочника
         corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
         svezhee = max(
@@ -472,7 +472,7 @@ def pipeline_state():
             os.path.getmtime(canon) if os.path.exists(canon) else 0,
         )
         if not os.path.exists(corpus) or os.path.getmtime(corpus) < svezhee:
-            st["sborka"].append(geo)
+            st["build_corpus"].append(geo)
 
     # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
     for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet/*.json")):
@@ -505,26 +505,26 @@ def state_card():
     if s["mark"]:
         worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["mark"][:6])
         lines.append(f"1) разметка: {len(s['mark'])} гео, {s['mark_n']} мух — {worst}")
-    if s.get("obobshi"):
+    if s.get("summarize"):
         lines.append(
-            f"2) обобщение: {len(s['obobshi'])} гео — {', '.join(s['obobshi'][:6])}"
+            f"2) обобщение: {len(s['summarize'])} гео — {', '.join(s['summarize'][:6])}"
         )
-    if s.get("sborka"):
+    if s.get("build_corpus"):
         lines.append(
-            f"3) корпус: {len(s['sborka'])} гео — {', '.join(s['sborka'][:6])}"
+            f"3) корпус: {len(s['build_corpus'])} гео — {', '.join(s['build_corpus'][:6])}"
         )
-    if not s["mark"] and not s.get("obobshi") and not s.get("sborka"):
+    if not s["mark"] and not s.get("summarize") and not s.get("build_corpus"):
         lines.append("всё разобрано: можно собирать сайт")
     return chr(10).join(lines), None
 
 
 def pipeline_steps(s):
     """Шаги В ПОРЯДКЕ ИСПОЛНЕНИЯ: [{kind, jobs, label}]. Пустой jobs = делать нечего."""
-    sg = s.get("sgusti") or []
+    sg = s.get("collapse") or []
     return [
         {
-            "kind": "sgusti",
-            "jobs": [("sgusti", g) for g in sg],
+            "kind": "collapse",
+            "jobs": [("collapse", g) for g in sg],
             "label": (f"1. Схлопывание — {len(sg)} гео" if sg else "1. Схлопывание"),
             "note": "ключей не тратит; смотреть протокол tests/dedup/<гео>.txt",
         },
@@ -539,21 +539,21 @@ def pipeline_steps(s):
             "note": "",
         },
         {
-            "kind": "obobshi",
-            "jobs": [("obobshi", g) for g in (s.get("obobshi") or [])],
+            "kind": "summarize",
+            "jobs": [("summarize", g) for g in (s.get("summarize") or [])],
             "label": (
-                f"3. Обобщение — {len(s.get('obobshi') or [])} гео"
-                if s.get("obobshi")
+                f"3. Обобщение — {len(s.get('summarize') or [])} гео"
+                if s.get("summarize")
                 else "3. Обобщение"
             ),
             "note": "один вызов на тему; справочник имён tests/canon.json",
         },
         {
-            "kind": "sborka",
-            "jobs": [("sborka", g) for g in (s.get("sborka") or [])],
+            "kind": "build_corpus",
+            "jobs": [("build_corpus", g) for g in (s.get("build_corpus") or [])],
             "label": (
-                f"4. Корпус по справочнику — {len(s.get('sborka') or [])} гео"
-                if s.get("sborka")
+                f"4. Корпус по справочнику — {len(s.get('build_corpus') or [])} гео"
+                if s.get("build_corpus")
                 else "4. Корпус по справочнику"
             ),
             "note": "ключей не тратит",

@@ -63,9 +63,9 @@ def test_tract_steps_ask_for_salvage():
     на тему) плюс проход Б (присваивание пачками).
     """
     src = (HERE / "tract.py").read_text(encoding="utf-8")
-    mk = src[src.index("def mark(") : src.index("def obobshi(")]
-    assert 'salvage=("rows", "podtema")' in mk, "разметка не просит спасения"
-    ob = src[src.index("def obobshi(") :]
+    mk = src[src.index("def mark(") : src.index("def summarize(")]
+    assert 'salvage=("rows", "subtheme")' in mk, "разметка не просит спасения"
+    ob = src[src.index("def summarize(") :]
     # звено 4 = два прохода, и спасать обязаны ОБА: битое тело стоит одной пачки, а не темы
     assert 'salvage=("names", "names")' in ob, "проход А не просит спасения"
     assert 'salvage=("map", "map")' in ob, "проход Б не просит спасения"
