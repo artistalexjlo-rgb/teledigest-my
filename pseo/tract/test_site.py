@@ -50,7 +50,6 @@ def _view(zadacha, adres, tema="visa", n=5, branch=None, part=1, parts=1):
     return {
         "title": zadacha,
         "theme": tema,
-        "shelf": "Визовые процедуры",
         "slug": adres,
         "branch": branch or adres,
         "part": part,
@@ -117,7 +116,7 @@ def test_theme_page_lists_pages_and_keeps_the_remainder(tmp_path, monkeypatch):
         [_view("visa documents", "visa-documents"), _view("visa fees", "visa-fees")],
         shelves=[
             {
-                "shelf": "Визовые процедуры",
+                "theme": "visa",
                 "items": [{"id": "x1", "text": "leftover advice. tail", "n": 1}],
             }
         ],

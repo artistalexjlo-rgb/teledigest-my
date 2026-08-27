@@ -485,7 +485,7 @@ def split(items, limit):
     return [items[i : i + limit] for i in range(0, len(items), limit)] or [items]
 
 
-def branch(title, base, items, tema, shelf, extra=None):
+def branch(title, base, items, theme, extra=None):
     """Пачка → страницы ОДНОЙ ВЕТКИ. Единственное место нарезки: и имена, и остаток.
 
     Ветвление одной темы (PLAN.md, слова юзера 27.08): тема — это список ВЕТОК, а ветка —
@@ -502,10 +502,10 @@ def branch(title, base, items, tema, shelf, extra=None):
     return [
         {
             "title": title,
-            # ⛔ КЛЮЧ темы, а не человеческое имя: ключ — сегмент адреса (`/ru/gr/visa/…`),
-            # и сборщику незачем угадывать его обратно по имени.
-            "theme": tema,
-            "shelf": shelf,
+            # ⛔ ТОЛЬКО ключ темы. Человеческое имя тут лежало русским, и сборщик переводил
+            # его обратно в ключ — круг «ключ → русское → ключ». Имя темы на языке страницы
+            # ставит сборщик: русское из справочника тракта, прочие из `themes.json`.
+            "theme": theme,
             "items": part,
             "slug": base if nom == 1 else f"{base}-{nom}",
             # ⛔ Сборщик группирует части по ЭТОМУ полю, а не по имени и не разбором
@@ -535,32 +535,25 @@ def build_corpus(geo):
     flies = [r for r in tagged if r["id"] in texts]
     directory = load_names()
     kratko = _load_json(f"{TESTS}/kratko/{geo}.json", {})
-    shelf_names = dict(THEMES)
 
     po_kanonu = {}
     for r in flies:
         po_kanonu.setdefault((r.get("theme") or "prochee", page_name(r)), []).append(r)
 
     views, leftovers = [], {}
-    theme_by_shelf = (
-        {}
-    )  # человеческое имя полки → ключ темы: ключ нужен адресу «Разного»
-    for (tema, name), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
-        shelf = shelf_names.get(tema, tema)
-        theme_by_shelf[shelf] = tema
+    for (theme, name), group in sorted(po_kanonu.items(), key=lambda kv: -len(kv[1])):
         items = [
             {"id": r["id"], "text": texts[r["id"]], "n": r.get("n", 1)} for r in group
         ]
         if not (name and len(items) >= PAGE_MIN and not bad_name(name)):
-            leftovers.setdefault(shelf, []).extend(items)
+            leftovers.setdefault(theme, []).extend(items)
             continue
         base = (directory.get(name) or {}).get("slug") or slug(name)
         parts = branch(
             name,
             base,
             items,
-            tema,
-            shelf,
+            theme,
             {"kratko": kratko[name]} if kratko.get(name) else None,
         )
         views.extend(parts)
@@ -574,13 +567,11 @@ def build_corpus(geo):
     # ── ОСТАТОК: набралось на ветку — делаем служебную, нет — оставляем на теме ────────
     # ⛔ Тем же вызовом, что и имена: отдельного правила для остатка НЕТ, иначе назавтра
     # они разойдутся. «Разное» — не исключение, а такая же ветка (PLAN.md, 27.08).
-    for shelf, items in list(leftovers.items()):
+    for theme, items in list(leftovers.items()):
         if len(items) < PAGE_MIN:
             continue  # мелочь веткой не становится — остаётся списком на странице темы
-        views.extend(
-            branch(MISC_TITLE, MISC_SLUG, items, theme_by_shelf.get(shelf), shelf)
-        )
-        leftovers.pop(shelf)
+        views.extend(branch(MISC_TITLE, MISC_SLUG, items, theme))
+        leftovers.pop(theme)
 
     vse = [it["id"] for v in views for it in v["items"]]
     vse += [it["id"] for x in leftovers.values() for it in x]
@@ -606,7 +597,8 @@ def build_corpus(geo):
     out = {
         "geo": geo,
         "views_by_task": views,
-        "shelves": [{"shelf": k, "items": v} for k, v in leftovers.items()],
+        # ⛔ Остаток адресуется КЛЮЧОМ темы: сборщику не нужно узнавать тему по имени.
+        "shelves": [{"theme": k, "items": v} for k, v in leftovers.items()],
         "prochee": [],
     }
     with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:

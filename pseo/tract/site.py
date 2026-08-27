@@ -272,13 +272,13 @@ def build_geo(geo, lang="ru"):
     by_theme = {}
     for v in d.get("views_by_task") or []:
         # ⛔ Тема нужна СЕГМЕНТОМ адреса, поэтому берём ключ, а не человеческое имя полки.
-        theme = v.get("theme") or _theme_by_name(v.get("shelf"))
+        theme = v.get("theme")
         if not theme or not v.get("slug"):
             continue
         by_theme.setdefault(theme, []).append(v)
     leftovers = {}
     for sh in d.get("shelves") or []:
-        t = _theme_by_name(sh.get("shelf"))
+        t = sh.get("theme")
         if t:
             leftovers[t] = sh.get("items") or []
 
@@ -302,14 +302,6 @@ def build_geo(geo, lang="ru"):
         _write(f"{lang}_{geo}.json", page)
         n += 1
     return n, themes
-
-
-def _theme_by_name(name):
-    """Человеческое имя полки → ключ темы. Корпус несёт имя, адресу нужен ключ."""
-    for k, n in tract.THEMES:
-        if n == name:
-            return k
-    return None
 
 
 def build_all(lang="ru"):

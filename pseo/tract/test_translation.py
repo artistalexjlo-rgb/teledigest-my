@@ -39,7 +39,6 @@ def _view(zadacha, adres, texts, tema="visa", branch=None, part=1, parts=1):
     return {
         "title": zadacha,
         "theme": tema,
-        "shelf": "Визовые процедуры",
         "slug": adres,
         "branch": branch or adres,
         "part": part,
@@ -186,7 +185,6 @@ def test_the_small_remainder_is_translated_too(tmp_path, monkeypatch):
         [_view("visa documents", "visa-documents", ["a"])],
         shelves=[
             {
-                "shelf": "Визовые процедуры",
                 "items": [{"id": "x1", "text": "leftover", "n": 1}],
             }
         ],
