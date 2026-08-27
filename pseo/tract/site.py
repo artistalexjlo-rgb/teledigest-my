@@ -32,18 +32,17 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
-# Имена тем для заголовков. Русские лежат в таксономии, остальные языки покупает звено 6
-# ОДИН раз на язык и кладёт в `themes.json` — платить за них в каждой стране незачем.
-THEME_NAME = dict(tract.THEMES)
+# `themes.json` живёт РЯДОМ С КОДОМ, как и `countries.json` — не в BUILT_DIR (это
+# монтируемые данные прогона, а имена тем те же для всех стран и прогонов).
+THEMES_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/themes.json"
 
 
 def theme_names(lang):
-    """Имена тринадцати тем на языке страницы. Нет перевода — берём ключ, а не русское
-    имя: английский `visa` на японской странице честнее русских «Визовых процедур».
+    """Имена тринадцати тем на языке страницы — ОДИН путь для любого языка, включая
+    русский: все имена живут в `themes.json` (27.08, не в коде). Языка ещё нет в файле —
+    честный фолбэк на ключ, а не выдумка.
     """
-    if lang == "ru":
-        return THEME_NAME
-    mp = (_load(f"{BUILT}/themes.json") or {}).get(lang) or {}
+    mp = (_load(THEMES_FILE) or {}).get(lang) or {}
     return {k: mp.get(k) or k.replace("_", " ") for k in tract.THEME_KEYS}
 
 

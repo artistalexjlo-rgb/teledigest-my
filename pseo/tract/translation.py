@@ -60,7 +60,9 @@ LANGS = [
 
 # Имена тринадцати тем на каждом языке. Они одни на весь сайт, поэтому переводятся ОДИН
 # раз на язык и лежат отдельно от стран: платить за них в каждом гео незачем.
-THEMES_FILE = f"{BUILT}/themes.json"
+# `themes.json` живёт РЯДОМ С КОДОМ, как и `countries.json` (27.08) — небольшой общий
+# справочник (13 ключей x языки), один на весь сайт, а не рантайм-данные прогона.
+THEMES_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/themes.json"
 
 
 def _load(path, default=None):
@@ -134,15 +136,16 @@ def _by_batches(pairs, sysprompt, consumer, batch):
 
 
 def theme_names(lang):
-    """Имена тринадцати тем на языке. Один раз на язык, дальше берётся готовое."""
+    """Имена тринадцати тем на языке. ОДИН путь для любого языка (27.08, без ru-ветки):
+    уже есть в файле — берём оттуда, нет — покупаем и дописываем файл.
+    """
     vse = _load(THEMES_FILE, {}) or {}
-    if lang == "ru":  # имена тем в таксономии УЖЕ русские — переводить нечего
-        return dict(tract.THEMES)
     if vse.get(lang):
         return vse[lang]
-    # ⛔ Источник — АНГЛИЙСКИЙ ключ темы (`visa`, `local_life`), а не русское имя из
-    # таксономии: рот в этом звене переводит с английского, и второго направления у нас нет.
-    pairs = [(k, k.replace("_", " ")) for k in tract.THEME_KEYS]
+    # Источник — АНГЛИЙСКОЕ имя из того же файла: английский тут такой же полноценный
+    # язык, как советы в корпусе, а не голый ключ (`visa`, `local_life`).
+    en = vse.get("en") or {}
+    pairs = [(k, en.get(k) or k.replace("_", " ")) for k in tract.THEME_KEYS]
     mp, stop = _by_batches(pairs, names_sys(lang), "labels", NAME_BATCH)
     if stop:
         print(f"  темы {lang}: {stop}", flush=True)

@@ -63,9 +63,6 @@ STOP_FLAGS = [
 sys.path.insert(0, TRACT)
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 
-_THEME_NAMES = set(dict(_tract.THEMES).values())
-
-
 MENU = {
     # ШАГ 2. Схлопывание почти-копий — ключей НЕ тратит (вектора готовые, от свипера).
     # Пишет протокол `tests/dedup/<гео>.txt`: кто остаётся и кого проглотил. Числа в отчёт
@@ -1000,7 +997,7 @@ def start_cycle(job):
         # разметка: пачка MARK_BATCH, worst-case 4 запроса к Google на вызов (keybroker)
         est += -(-n // _tract.MARK_BATCH) * 4
         # обобщение: ОДИН вызов на тему (канон §0.19), тем не больше тринадцати
-        est += len(_tract.THEMES) * 4
+        est += len(_tract.THEME_KEYS) * 4
     # схлопывание ключей не тратит (вектора готовые), сборка и рендер — тоже
     est += sum((m + st_) * 3 for _, m, st_ in (s.get("langs") or []))
     plan = " → ".join(

@@ -25,7 +25,15 @@ import translation  # noqa: E402
 
 def _korpus(tmp_path, monkeypatch, views, shelves=()):
     monkeypatch.setattr(translation, "BUILT", str(tmp_path))
-    monkeypatch.setattr(translation, "THEMES_FILE", str(tmp_path / "theme_names.json"))
+    themes_file = tmp_path / "theme_names.json"
+    # Как в бою: themes.json приезжает с сидом ru+en, звену 6 незачем покупать русский.
+    themes_file.write_text(
+        json.dumps(
+            {"ru": {"visa": "Визовые процедуры"}, "en": {"visa": "Visa Procedures"}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(translation, "THEMES_FILE", str(themes_file))
     os.makedirs(tmp_path / "out_facet", exist_ok=True)
     with open(tmp_path / "out_facet" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(
