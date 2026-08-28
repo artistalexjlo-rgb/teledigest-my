@@ -88,6 +88,29 @@ def test_steps_go_in_tract_order():
     ], kinds
 
 
+def test_job_tuples_are_kind_then_geo():
+    """Каждая работа шага — `(kind шага, гео-или-None)`. `job.start(kind, geo)` читает
+    именно в этом порядке.
+
+    ⛔ 28.08: у «переводов» стояло `(гео, None)` — кнопка звала `job.start("gr", None)`,
+    внутри `MENU["gr"]` — `KeyError`. Кнопка была первой некликнутой веткой нового шага,
+    и до реального прогона на VPS никто её не нажимал — сторож на форму кортежа не было.
+    """
+    s = {
+        "collapse": ["cz"],
+        "mark": [{"geo": "cz", "n": 5}],
+        "mark_n": 5,
+        "summarize": ["cz"],
+        "build_corpus": ["cz"],
+        "sobrano": ["cz"],
+        "geos": 1,
+        "views": 3,
+    }
+    for st in bot.pipeline_steps(s):
+        for job in st["jobs"]:
+            assert job[0] == st["kind"], f"{st['kind']}: job {job} не начинается с kind"
+
+
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     """Работа шага «списки» = гео, у которых разметка новее корпуса или корпуса нет.
 
