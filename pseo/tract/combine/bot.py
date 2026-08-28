@@ -587,7 +587,7 @@ def pipeline_steps(s):
         },
         {
             "kind": "translate",
-            "jobs": [(g, None) for g in s.get("sobrano") or []],
+            "jobs": [("translate", g) for g in s.get("sobrano") or []],
             "label": "5. Переводы — 13 языков",
             "note": "ключи; английский бесплатно",
         },
