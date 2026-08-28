@@ -53,10 +53,14 @@ def test_old_steps_are_gone():
 
 def test_steps_go_in_tract_order():
     """Вертикаль меню = порядок тракта (§0.19): схлопывание → разметка → обобщение →
-    корпус по справочнику → сборка сайта → переводы.
+    корпус по справочнику → переводы → сборка сайта.
 
     Схлопывание стоит ПЕРВЫМ не для красоты: размечать оно даёт представителей, и после
     разметки его звать поздно — рту уже заплачено за каждую почти-копию.
+
+    ⛔ Переводы ПЕРЕД сборкой (28.08, было наоборот): сборщик страниц (`site.py`) читает
+    `out_facet_<язык>`, который кладут переводы — раньше сборка бежала первой и заставала
+    только английский.
     """
     kinds = [
         st["kind"]
@@ -76,8 +80,8 @@ def test_steps_go_in_tract_order():
         "mark",
         "summarize",
         "build_corpus",
-        "build",
         "translate",
+        "build",
         "readiness",
     ], kinds
 
@@ -317,21 +321,24 @@ def test_tract_writes_only_into_tests():
 
 
 def test_build_assembles_pages_before_rendering():
-    """Сборка = страницы, потом рендер. Один рендер даёт `rendered=0` — это уже случалось."""
+    """Сборка = страницы КАЖДОГО языка, потом ОДИН рендер. `rendered=0` уже случалось —
+    и на пустом языке (собирали раньше переводов), и на едином рендере без сборки.
+    """
     cmd = " ".join(bot.MENU["build"][1])
     assert "site.py" in cmd and "render.py" in cmd, cmd
-    assert cmd.index("site.py") < cmd.index("render.py"), cmd
-    # ⛔ Каталог задаётся ПЕРЕМЕННЫМИ: `pages.py` читает корпус из BUILT_DIR, `render.py`
-    # пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено прогоном.
+    assert cmd.index("site.py") < cmd.rindex("site.py") < cmd.index("render.py"), cmd
+    # ⛔ Каталог задаётся ПЕРЕМЕННЫМИ: `site.py` читает корпус из BUILT_DIR/PSEO_DATA,
+    # `render.py` пишет в PSEO_OUT. С одним `cd` сборка брала бы боевой корпус — проверено
+    # прогоном 21.08.
     assert "BUILT_DIR=" in cmd and "/tests" in cmd, cmd
+    assert "PSEO_DATA=" in cmd and "/tests/data" in cmd, cmd
     assert "PSEO_OUT=" in cmd and "/tests/out" in cmd, cmd
-    # ⛔ И середина тракта — собранные страницы — тоже в `tests/`, ОБЕИМ половинам. Без
-    # `PSEO_DATA` они ложились в `/app/data` внутри образа: вне маунта, вне тестовой папки
-    # и насмерть при редеплое.
-    halves = cmd.split("&&")
-    assert len(halves) == 2, cmd
-    for half in halves:
-        assert "PSEO_DATA=" in half and "/tests/data" in half, half
+    # ⛔ ПО ВСЕМ ЯЗЫКАМ, не только ru (28.08): раньше `site.py --all` без языка собирал
+    # молча только русский, а тринадцать остальных не строились никогда.
+    assert cmd.count("site.py --all") == len(bot._SITE["languages"]), cmd
+    for lang in bot._SITE["languages"]:
+        assert f"site.py --all {lang}" in cmd, f"{lang} не собирается: {cmd}"
+    assert cmd.count("render.py --all") == 1, "render должен идти одним проходом"
 
 
 def test_state_counts_the_test_folder():

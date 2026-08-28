@@ -124,7 +124,7 @@ def test_advice_without_a_name_goes_to_the_remainder(tmp_path, monkeypatch):
     _texts(monkeypatch, rows)
     tract.build_corpus("gr")
     out = json.load(
-        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
+        open(tmp_path / "tests" / "out_facet_en" / "gr.json", encoding="utf-8")
     )
     assert [v["title"] for v in out["views_by_task"]] == ["visa documents"]
     assert sum(len(s["items"]) for s in out["shelves"]) == 1, "безымянный не в остатке"

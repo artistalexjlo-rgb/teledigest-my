@@ -63,6 +63,18 @@ STOP_FLAGS = [
 sys.path.insert(0, TRACT)
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 
+# ⛔ `config/` лежит на РАЗНОЙ глубине от `bot.py` в двух раскладках: в образе бот и
+# `config/` — соседи (`/app/bot.py`, `/app/config/`, Dockerfile кладёт их рядом), а в
+# репо между ними ещё каталог `combine/` (`pseo/combine/bot.py`, `pseo/config/`). Автовставка
+# каталога скрипта в sys.path кроет только образ; для репо добавляем корень `pseo/` явно —
+# без этого `pytest pseo/combine/` в одиночку падал: импорт молча работал, только пока
+# render.py (звено 7) уже успел вставить `pseo/` в sys.path раньше в том же прогоне.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Список языков сайта — ОДИН источник (`config/site.py`), не второй список тут же:
+# кнопка «Сборка» обязана строить те же 14 языков, что видит переключатель на странице.
+from config.site import SITE as _SITE  # noqa: E402
+
 MENU = {
     # ШАГ 2. Схлопывание почти-копий — ключей НЕ тратит (вектора готовые, от свипера).
     # Пишет протокол `tests/dedup/<гео>.txt`: кто остаётся и кого проглотил. Числа в отчёт
@@ -90,8 +102,26 @@ MENU = {
         "Корпус по справочнику <гео>",
         ["python", "-u", f"{TRACT}/tract.py", "{geo}", "--build"],
     ),
-    # ШАГ 5. Сборка страниц и рендер — код, ключей не тратит. ⛔ Именно ДВА шага: `site.py`
-    # превращает корпус в страницы дерева, `render.py` рендерит уже готовые. 21.08 кнопка
+    # ЗВЕНО 6. Переводы: английский корпус → 13 языков, включая русский. Английская версия
+    # НЕ копируется здесь — её сразу пишет звено 5 (`tract.py --build`, `out_facet_en`),
+    # звену 6 копировать нечего (28.08, ветка-копия снята). ⛔ Модуль — `translation.py`,
+    # а не `facet_lang.py`: тот переводил С РУССКОГО и ждал корпус отменённой схемы (27.08).
+    # ⛔ Кнопки «Адреса страниц» больше нет: адрес рождается в звене 4, штамповать ротом
+    # нечего — шаг снят вместе со `stamp_keys`.
+    # ⛔ КНОПКА ИДЁТ ПЕРЕД «Сборкой сайта» (28.08, было наоборот): сборщик страниц (звено 5,
+    # `site.py`) читает `out_facet_<язык>`, который кладёт ЭТОТ шаг (звено 6). Раньше кнопка
+    # сборки шла первой в пульте и заставала только `out_facet_en`.
+    "translate": (
+        "Переводы <гео>",
+        [
+            "bash",
+            "-lc",
+            f"BUILT_DIR={BRAIN}/{TESTS} python -u {TRACT}/translation.py " + "{geo}",
+        ],
+    ),
+    # ЗВЕНО 5 (вторая половина) + ЗВЕНО 7. Сборка страниц и рендер — код, ключей не тратит.
+    # ⛔ Именно ДВА звена одной кнопкой: `site.py` (звено 5, PLAN.md §5) превращает корпус
+    # в страницы дерева, `render.py` (звено 7, §7) рендерит уже готовые. 21.08 кнопка
     # звала один рендер, и прогон дал `rendered=0` — собирать было нечего.
     # ⛔ Каталоги задаются ПЕРЕМЕННЫМИ, а не `cd`: `site.py` читает корпус из `BUILT_DIR`,
     # обе половины кладут/берут страницы в `PSEO_DATA`, `render.py` пишет дерево в `PSEO_OUT`.
@@ -99,28 +129,20 @@ MENU = {
     # ⛔ `PSEO_DATA` нужен ОБЕИМ половинам: без него середина тракта (собранные страницы)
     # оставалась внутри образа (`/app/data`) — вне маунта и вне `tests/`, и пропадала при
     # редеплое, а посмотреть на неё снаружи было нечем.
+    # ⛔ ЦИКЛ ПО ВСЕМ ЯЗЫКАМ (28.08, было `site.py --all` без языка → молча только ru):
+    # `site.py --all <язык>` строит страницы ОДНОГО языка на всех гео сразу; список языков —
+    # из `config/site.py`, тот же, что рисует переключатель на странице, второго списка нет.
     "build": (
         "Сборка сайта (тест)",
         [
             "bash",
             "-lc",
-            f"BUILT_DIR={BRAIN}/{TESTS} PSEO_DATA={BRAIN}/{TESTS}/data "
-            f"python -u {TRACT}/site.py --all "
-            f"&& PSEO_DATA={BRAIN}/{TESTS}/data PSEO_OUT={BRAIN}/{TESTS}/out "
-            f"python -u {TRACT}/../render.py --all",
-        ],
-    ),
-    # ШАГ 6. Переводы: английский корпус → 13 языков, включая русский. Английская версия
-    # копируется бесплатно. ⛔ Модуль — `translation.py`, а не `facet_lang.py`: тот переводил
-    # С РУССКОГО и ждал корпус отменённой схемы (27.08).
-    # ⛔ Кнопки «Адреса страниц» больше нет: адрес рождается в звене 4, штамповать ротом
-    # нечего — шаг снят вместе со `stamp_keys`.
-    "translate": (
-        "Переводы <гео>",
-        [
-            "bash",
-            "-lc",
-            f"BUILT_DIR={BRAIN}/{TESTS} python -u {TRACT}/translation.py " + "{geo}",
+            f"export BUILT_DIR={BRAIN}/{TESTS} PSEO_DATA={BRAIN}/{TESTS}/data; "
+            + " && ".join(
+                f"python -u {TRACT}/site.py --all {lang}" for lang in _SITE["languages"]
+            )
+            + f" && export PSEO_OUT={BRAIN}/{TESTS}/out; "
+            f"python -u {TRACT}/render.py --all",
         ],
     ),
     # ШАГ 7 (готовность). НЕ публикация: боевого каталога раздачи сегодня нет (28.08,
@@ -470,7 +492,7 @@ def pipeline_state():
         ):
             st["summarize"].append(geo)
         # корпус: собран раньше разметки или справочника
-        corpus = f"{BRAIN}/{TESTS}/out_facet/{geo}.json"
+        corpus = f"{BRAIN}/{TESTS}/out_facet_en/{geo}.json"
         svezhee = max(
             os.path.getmtime(tags_fn),
             os.path.getmtime(canon) if os.path.exists(canon) else 0,
@@ -479,7 +501,7 @@ def pipeline_state():
             st["build_corpus"].append(geo)
 
     # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
-    for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet/*.json")):
+    for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet_en/*.json")):
         try:
             d = json.load(open(fn, encoding="utf-8"))
         except Exception:
@@ -563,16 +585,16 @@ def pipeline_steps(s):
             "note": "ключей не тратит",
         },
         {
-            "kind": "build",
-            "jobs": [("build", None)] if s["geos"] else [],
-            "label": f"5. Сборка сайта — {s['views']} страниц",
-            "note": "",
-        },
-        {
             "kind": "translate",
             "jobs": [(g, None) for g in s.get("sobrano") or []],
-            "label": "6. Переводы — 13 языков",
+            "label": "5. Переводы — 13 языков",
             "note": "ключи; английский бесплатно",
+        },
+        {
+            "kind": "build",
+            "jobs": [("build", None)] if s["geos"] else [],
+            "label": f"6. Сборка сайта — {s['views']} страниц",
+            "note": "",
         },
         {
             "kind": "readiness",

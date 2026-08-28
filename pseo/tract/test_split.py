@@ -37,7 +37,7 @@ def _geo(tmp_path, monkeypatch, n, kanon="visa documents"):
     monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
     tract.build_corpus("gr")
     return json.load(
-        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
+        open(tmp_path / "tests" / "out_facet_en" / "gr.json", encoding="utf-8")
     )
 
 
@@ -109,7 +109,7 @@ def _geo_mix(tmp_path, monkeypatch, bez_imeni, s_imenem=0, tema="visa"):
     monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
     tract.build_corpus("gr")
     return json.load(
-        open(tmp_path / "tests" / "out_facet" / "gr.json", encoding="utf-8")
+        open(tmp_path / "tests" / "out_facet_en" / "gr.json", encoding="utf-8")
     )
 
 

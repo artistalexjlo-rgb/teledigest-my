@@ -592,7 +592,13 @@ def build_corpus(geo):
             f"{tolstye[:5]}",
             flush=True,
         )
-    os.makedirs(f"{TESTS}/out_facet", exist_ok=True)
+    # ⛔ Пишем СРАЗУ в out_facet_en, не в безымянный out_facet. Звено 3/4 работают
+    # только по-английски (mark_sys/assign_sys, «перевода не просим»), и корпус звена 5 —
+    # уже готовый английский, а не язык-невидимка, который потом кто-то отгадывает
+    # сравнением строк (`site.py` угадывал через `lang == "ru"`, 27.08 пивот на английский
+    # источник это расхождение не поймал). Английский — обычный язык корпуса, назван как
+    # все; звену 6 копировать его отдельно незачем.
+    os.makedirs(f"{TESTS}/out_facet_en", exist_ok=True)
     out = {
         "geo": geo,
         "views_by_task": views,
@@ -600,9 +606,9 @@ def build_corpus(geo):
         "shelves": [{"theme": k, "items": v} for k, v in leftovers.items()],
         "prochee": [],
     }
-    with open(f"{TESTS}/out_facet/{geo}.json", "w", encoding="utf-8") as fh:
+    with open(f"{TESTS}/out_facet_en/{geo}.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False)
-    print(f"  -> {TESTS}/out_facet/{geo}.json", flush=True)
+    print(f"  -> {TESTS}/out_facet_en/{geo}.json", flush=True)
 
 
 def _load_json(path, default):

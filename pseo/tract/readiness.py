@@ -10,8 +10,9 @@ PLAN.md, звено 7: «рендер, карта сайта, выкладка �
 делает и не готовит: ни `rsync`, ни боевого каталога, ни второго домена тут нет.
 
 ⛔ **Модуль новый, живёт в `pseo/tract/`** — истина тракта только здесь. `readycheck.py`
-(гейт: битые ссылки, пустые страницы, кодировка) и `render.py` (HTML из страниц-data)
-писаны раньше и остаются на месте — переносить старое ради красоты не просили, звали.
+и `render.py` (28.08) тоже переписаны заново и живут рядом, в этом же каталоге — не
+перенесены, а переписаны: старый `readycheck.py` проверял только русский язык (см. его
+собственный докстринг и `test_readycheck.py`).
 """
 
 import json
@@ -19,8 +20,8 @@ import os
 import subprocess
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BASE = os.path.dirname(HERE)  # …/pseo — там же живут readycheck.py и render.py
+HERE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — тут же readycheck.py
+BASE = os.path.dirname(HERE)  # …/pseo
 
 
 def check(built_dir, data_dir, out_dir):
@@ -30,8 +31,8 @@ def check(built_dir, data_dir, out_dir):
     env["PSEO_DATA"] = data_dir
     env["PSEO_OUT"] = out_dir
     r = subprocess.run(
-        [sys.executable, f"{BASE}/builder/readycheck.py"],
-        cwd=BASE,
+        [sys.executable, f"{HERE}/readycheck.py"],
+        cwd=HERE,
         env=env,
         capture_output=True,
         text=True,

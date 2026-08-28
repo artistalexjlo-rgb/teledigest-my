@@ -21,17 +21,16 @@ ROOT = PSEO.parent  # корень репо = контекст сборки
 DOCKERFILE = HERE / "Dockerfile"
 
 # Точки входа рендера. Всё остальное вычисляется из их импортов.
-# плоский адрес страницы) и в образ пульта больше не едет (26.08).
 ENTRIES = [
-    "render.py",
+    # ⛔ render.py и readycheck.py — в tract/, переписаны заново 28.08 (не перенос: старый
+    # readycheck.py проверял только русский язык, см. test_readycheck.py).
+    "tract/render.py",
+    "tract/readycheck.py",
     "tract/site.py",
     # ⛔ Переводчик тракта — `translation.py`. Старый `facet_lang.py` уехал в legacy 27.08:
     # он переводил С РУССКОГО и ждал корпус отменённой схемы.
     "tract/translation.py",
-    # Звено 7: readiness.py (новый, тракт) зовёт readycheck.py (старый, остаётся на месте —
-    # переезжает только написанное свежее под план пульта, 28.08).
     "tract/readiness.py",
-    "builder/readycheck.py",
 ]
 
 # Каталоги, которые рендер читает ПО ИМЕНИ в рантайме (ast их не видит):

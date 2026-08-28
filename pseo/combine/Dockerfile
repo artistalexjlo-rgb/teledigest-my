@@ -13,9 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY pseo/combine/ /app/
 
 # Рендер-половина — БЕЗ дублей в git, забираем из pseo/ по месту жительства.
-# Пути внутри образа держим ТЕ ЖЕ, что на десктопе относительно pseo/: render.py считает
-# BASE от себя, site.py и readycheck.py — на уровень выше себя. Отсюда /app = pseo/.
-COPY pseo/render.py pseo/favicon.svg /app/
+# Пути внутри образа держим ТЕ ЖЕ, что на десктопе относительно pseo/: render.py (в tract/)
+# считает ROOT на уровень выше себя. Отсюда /app = pseo/, /app/tract = pseo/tract.
+# ⛔ favicon.svg НЕ копируем: его не читает ни render.py, ни readycheck.py (проверено
+# грепом 28.08) — отдаёт его тот, кто раздаёт ГОТОВЫЙ сайт, не пульт.
 COPY pseo/config/ /app/config/
 COPY pseo/templates/ /app/templates/
 COPY pseo/i18n/ /app/i18n/
@@ -27,8 +28,9 @@ COPY pseo/mirror_static/ /app/mirror_static/
 # ⛔ `themes.json` здесь — ТОЛЬКО СИД (английский источник, статика из git). Рабочий файл,
 # в который звено 6 дописывает купленные языки, живёт на смонтированном BRAIN_DIR и этой
 # копии не касается — иначе редеплой стирал бы покупки (28.08).
-COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/readiness.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
-COPY pseo/builder/readycheck.py /app/builder/
+# ⛔ `render.py` и `readycheck.py` — тут же, в tract/: переписаны заново 28.08, старые
+# копии в pseo/render.py и pseo/builder/readycheck.py сняты (в legacy).
+COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/render.py pseo/tract/readycheck.py pseo/tract/readiness.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.
 CMD ["python", "-u", "bot.py"]

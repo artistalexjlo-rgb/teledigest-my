@@ -33,8 +33,8 @@ def _korpus(tmp_path, monkeypatch, views, shelves=()):
             json.dumps({"en": {"visa": "Visa Procedures"}}), encoding="utf-8"
         )
     monkeypatch.setattr(translation, "THEMES_FILE", str(themes_file))
-    os.makedirs(tmp_path / "out_facet", exist_ok=True)
-    with open(tmp_path / "out_facet" / "gr.json", "w", encoding="utf-8") as fh:
+    os.makedirs(tmp_path / "out_facet_en", exist_ok=True)
+    with open(tmp_path / "out_facet_en" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(
             {"geo": "gr", "views_by_task": list(views), "shelves": list(shelves)},
             fh,
@@ -86,16 +86,6 @@ def test_russian_is_an_ordinary_target_language(tmp_path, monkeypatch):
     assert [it["text"] for it in out["views_by_task"][0]["items"]] == ["ru:a", "ru:b"]
     assert out["views_by_task"][0]["title"] == "ru:visa documents"
     assert sorted(schet) == ["labels", "translate"]
-
-
-def test_english_costs_nothing(tmp_path, monkeypatch):
-    """Английский — сам источник: копия без единого вызова рта."""
-    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a"])])
-    schet = {}
-    _rot(monkeypatch, schet)
-    translation.translate_geo("gr", "en")
-    assert schet == {}, "за английский заплатили"
-    assert _out(tmp_path, "en")["views_by_task"][0]["items"][0]["text"] == "a"
 
 
 def test_second_run_buys_only_what_changed(tmp_path, monkeypatch):
