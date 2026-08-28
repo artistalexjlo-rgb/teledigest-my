@@ -27,7 +27,7 @@ COPY pseo/mirror_static/ /app/mirror_static/
 # ⛔ `themes.json` здесь — ТОЛЬКО СИД (английский источник, статика из git). Рабочий файл,
 # в который звено 6 дописывает купленные языки, живёт на смонтированном BRAIN_DIR и этой
 # копии не касается — иначе редеплой стирал бы покупки (28.08).
-COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
+COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/readiness.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
 COPY pseo/builder/readycheck.py /app/builder/
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.

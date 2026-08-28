@@ -28,6 +28,9 @@ ENTRIES = [
     # ⛔ Переводчик тракта — `translation.py`. Старый `facet_lang.py` уехал в legacy 27.08:
     # он переводил С РУССКОГО и ждал корпус отменённой схемы.
     "tract/translation.py",
+    # Звено 7: readiness.py (новый, тракт) зовёт readycheck.py (старый, остаётся на месте —
+    # переезжает только написанное свежее под план пульта, 28.08).
+    "tract/readiness.py",
     "builder/readycheck.py",
 ]
 

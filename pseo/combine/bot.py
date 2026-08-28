@@ -123,6 +123,17 @@ MENU = {
             f"BUILT_DIR={BRAIN}/{TESTS} python -u {TRACT}/translation.py " + "{geo}",
         ],
     ),
+    # ШАГ 7 (готовность). НЕ публикация: боевого каталога раздачи сегодня нет (28.08,
+    # юзер — «сейчас есть только одна папка, тест»), это гейт над снимком в песочнице.
+    # `readiness.py` сам зовёт readycheck.py -> render.py, ключей не тратит.
+    "readiness": (
+        "Готовность снимка",
+        [
+            "bash",
+            "-lc",
+            f"BRAIN_DIR={BRAIN} python -u {TRACT}/readiness.py",
+        ],
+    ),
 }
 
 
@@ -562,6 +573,12 @@ def pipeline_steps(s):
             "jobs": [(g, None) for g in s.get("sobrano") or []],
             "label": "6. Переводы — 13 языков",
             "note": "ключи; английский бесплатно",
+        },
+        {
+            "kind": "readiness",
+            "jobs": [("readiness", None)] if s["geos"] else [],
+            "label": "7. Готовность снимка",
+            "note": "гейт над песочницей; каталога раздачи ещё нет — не публикация",
         },
     ]
 

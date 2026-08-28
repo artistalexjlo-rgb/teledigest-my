@@ -78,6 +78,7 @@ def test_steps_go_in_tract_order():
         "build_corpus",
         "build",
         "translate",
+        "readiness",
     ], kinds
 
 
