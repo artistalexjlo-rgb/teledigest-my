@@ -21,7 +21,6 @@ import os
 import re
 import socket
 import sqlite3
-import subprocess
 import sys
 import time
 import urllib.error
@@ -707,45 +706,45 @@ _KEYS = None
 
 
 def get_keys():
-    """Ключи из env бот-контейнера. Кэш на процесс — это чтение env, НЕ состояние пейсинга
+    """Ключи из СВОЕГО env. Кэш на процесс — это чтение env, НЕ состояние пейсинга
     (то в SQLite, переживает спавн).
 
     Порядок как у `config.gemini_api_keys_from_env` (CLAUDE.md): numbered `GEMINI_API_KEY_N`
     → legacy `GEMINI_API_KEYS` (comma) → single `GEMINI_API_KEY`. ⚠️ РАНЬШЕ грепал
     `startswith("GEMINI_API_KEY")` и хватал ЛЕГАСИ `GEMINI_API_KEYS` как ЛИШНИЙ богус-ключ →
     400 API_KEY_INVALID на ~1/N запросов (диагностика 2026-07-18). Теперь через precedence.
+
+    ⛔ До 28.08 ключи читались через `docker exec bots-grab printenv` — обходной путь из
+    времени, когда своих ключей в env ещё не было. Пульту их давно кладут напрямую (Dokploy
+    Environment, README «Деплой» шаг 4) — `docker exec` только падал (`docker` в образе нет,
+    сокет не смонтирован) и НИКОГДА не был нужен.
     """
     global _KEYS
     if _KEYS is None:
-        cid = subprocess.check_output(
-            "docker ps --format '{{.Names}}' | grep bots-grab | head -1",
-            shell=True,
-            text=True,
-        ).strip()
-        env = subprocess.check_output(["docker", "exec", cid, "printenv"], text=True)
-        vals = {}
-        for ln in env.splitlines():
-            if "=" in ln:
-                name, val = ln.split("=", 1)
-                vals[name] = val
         numbered = [
-            vals[k]
-            for k in sorted(
-                (k for k in vals if re.fullmatch(r"GEMINI_API_KEY_\d+", k)),
-                key=lambda k: int(k.rsplit("_", 1)[1]),
+            v
+            for k, v in sorted(
+                (
+                    (k, v)
+                    for k, v in os.environ.items()
+                    if re.fullmatch(r"GEMINI_API_KEY_\d+", k)
+                ),
+                key=lambda kv: int(kv[0].rsplit("_", 1)[1]),
             )
-            if vals[k].strip()
+            if v.strip()
         ]
         if numbered:  # numbered есть → легаси/single ИГНОРИРУЕМ (как хелпер)
             _KEYS = numbered
-        elif vals.get("GEMINI_API_KEYS", "").strip():
-            _KEYS = [k.strip() for k in vals["GEMINI_API_KEYS"].split(",") if k.strip()]
-        elif vals.get("GEMINI_API_KEY", "").strip():
-            _KEYS = [vals["GEMINI_API_KEY"].strip()]
+        elif os.environ.get("GEMINI_API_KEYS", "").strip():
+            _KEYS = [
+                k.strip() for k in os.environ["GEMINI_API_KEYS"].split(",") if k.strip()
+            ]
+        elif os.environ.get("GEMINI_API_KEY", "").strip():
+            _KEYS = [os.environ["GEMINI_API_KEY"].strip()]
         else:
             _KEYS = []
         if not _KEYS:
-            sys.exit("no GEMINI keys in container env")
+            sys.exit("no GEMINI keys in env")
     return _KEYS
 
 
