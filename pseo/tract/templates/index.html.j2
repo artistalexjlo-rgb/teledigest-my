@@ -35,11 +35,13 @@
   {%- endif %}
 
   {%- if page.faqs %}{# мелочь остатка темы: пунктов меньше порога ветки #}
+  <div class="faqs">
   {%- for f in page.faqs %}
   <details><summary><span class="sumq">{{ f.q }}</span><span></span></summary>
     <div class="a">{{ f.a | safe }}</div>
   </details>
   {%- endfor %}
+  </div>
   {%- endif %}
 
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
