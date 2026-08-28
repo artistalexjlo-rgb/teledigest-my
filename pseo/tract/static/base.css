@@ -71,6 +71,9 @@ h2{font-family:var(--font-display);font-weight:700;font-size:1.15rem;letter-spac
   text-transform:uppercase;color:var(--hud);margin-bottom:6px;display:block}
 .prose{font-size:1.02rem;line-height:1.7;margin:8px 0 4px}
 .prose p{margin:0 0 1em} .prose strong{color:var(--hud)}
+/* руками положенные картинки (28.08) — нет резервации места, появятся при пересборке */
+.hub-img,.page-img{display:block;width:100%;max-width:100%;height:auto;border-radius:4px;
+  border:1px solid var(--border);margin:.4em 0 1.2em}
 
 .plate{position:relative;isolation:isolate;margin:16px 0}
 .plate .pad{padding:18px 20px;position:relative}

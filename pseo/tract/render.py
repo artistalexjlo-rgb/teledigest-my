@@ -42,6 +42,10 @@ OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (HERE / "out"))
 # рендер из него читает — переменная одна на обоих, иначе испытательный прогон собрал бы
 # сайт из боевого корпуса, а тестовый остался бы лежать нетронутым.
 DATA = pathlib.Path(os.environ.get("PSEO_DATA") or (HERE / "data"))
+# Картинки — та же папка, что видел site.py при сборке страниц (PSEO_IMAGES), НЕ в git
+# (28.08). Рендер их только копирует в OUT — искал и решал, класть ли `page.image`
+# в данные, уже site.py.
+IMAGES = pathlib.Path(os.environ.get("PSEO_IMAGES") or (HERE / "images"))
 
 _env = Environment(
     loader=FileSystemLoader(str(HERE / "templates")),
@@ -167,6 +171,19 @@ def copy_assets() -> int:
     return n
 
 
+def copy_images() -> int:
+    """IMAGES/*.webp → out/images/. Не в git — папки может не быть вовсе."""
+    if not IMAGES.is_dir():
+        return 0
+    dst = OUT / "images"
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in sorted(IMAGES.glob("*.webp")):
+        (dst / f.name).write_bytes(f.read_bytes())
+        n += 1
+    return n
+
+
 def index_paths(data_dir=None) -> set[str]:
     """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы.
 
@@ -246,6 +263,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         data_dir
     )  # ДО рендера: hreflang опирается на собранное, а не на догадку
     n_assets = copy_assets()  # общие CSS/JS: один файл на сайт вместо копии в странице
+    copy_images()  # руками положенные картинки (28.08) — не в git, копия вслед за static/
     urls, n_rendered, n_noindex = [], 0, 0
     search = {}  # язык → [[заголовок, адрес], …] для поиска по заголовкам
     for jf in sorted(data_dir.glob("*.json")):

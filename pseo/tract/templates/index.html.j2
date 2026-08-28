@@ -17,6 +17,10 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
+  {%- if page.image %}
+  <img class="hub-img" src="/images/{{ page.image }}" alt="" loading="lazy">
+  {%- endif %}
+
   {%- if page.body %}{# служебная страница со своей прозой (about) — тема текста не несёт #}
   <div class="prose">{{ page.body | safe }}</div>
   {%- endif %}
