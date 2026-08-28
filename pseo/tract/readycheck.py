@@ -18,7 +18,6 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract
-ROOT = os.path.dirname(HERE)  # …/pseo
 sys.path.insert(0, HERE)
 # Каталог вывода объявлен ОДИН раз, в render.py — своего здесь не заводим.
 from render import OUT as _OUT  # noqa: E402
@@ -116,7 +115,7 @@ def main():
     }
     json.dump(
         rep,
-        open(f"{ROOT}/ready.json", "w", encoding="utf-8"),
+        open(f"{HERE}/ready.json", "w", encoding="utf-8"),
         ensure_ascii=False,
         indent=1,
     )

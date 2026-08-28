@@ -4,28 +4,23 @@
 
 Переводимые лейблы — НЕ здесь, а в i18n/{lang}.json.
 
-PSEO_DOMAIN (env) — оверрайд домена для зеркал: рендер зеркала (ship --mirror) шьёт
-canonical/sitemap/hreflang на СВОЙ домен (info.multyspeak.ru), иначе Яндекс видит
-канониклы на чужой .online и зеркало не индексирует."""
+⛔ Новый файл, не перенос (28.08, юзер: «создай новый рядом с рендер»). Старый
+pseo/config/site.py нёс mirror_domain/mirror_cta_url и env-оверрайд PSEO_DOMAIN/
+PSEO_CTA_URL — всё это питало только ship.py --mirror (зеркало-рендер), а ship.py уже
+в pseo/legacy/ как мёртвый код. Здесь — только то, что реально читает render.py и
+templates/ (grep подтвердил: domain, languages, cta_luky_url, telegram_url, year, brand,
+draft — семь полей, ни одного лишнего).
+"""
 
-import os
 import pathlib
 
 SITE = {
     # Бренд-имя = Luky (звучное имя). MultySpeak = суть/смысл (мульти-язык, любая
     # страна) — живёт в ДОМЕНЕ, не как второе видимое имя на странице.
     "brand": "Luky",
-    "domain": os.environ.get(
-        "PSEO_DOMAIN", "https://info.multyspeak.online"
-    ),  # сабдомен pSEO-портала; env — для рендера зеркала
-    "mirror_domain": "https://info.multyspeak.ru",  # зеркало (RU без VPN)
-    # CTA-дверь в Luky. База продукта = .online (.ru — локализация для РФ, редиректит
-    # на .online). Интерим: продуктовый лендинг. TODO: диплинк в комнату в РЕЖИМЕ
-    # ПОМОЩНИКА, когда появится URL-параметр режима (см. model_luky_funnel_cta).
-    "cta_luky_url": os.environ.get("PSEO_CTA_URL", "https://multyspeak.online"),
-    # дверь Luky у RU-зеркала: multyspeak.ru (РФ-доступность без VPN — иначе воронка
-    # зеркала ломается в точке конверсии). ship --mirror подставляет через PSEO_CTA_URL.
-    "mirror_cta_url": "https://multyspeak.ru",
+    "domain": "https://info.multyspeak.online",  # сабдомен pSEO-портала
+    # CTA-дверь в Luky. База продукта = .online. Интерим: продуктовый лендинг.
+    "cta_luky_url": "https://multyspeak.online",
     "telegram_url": "https://t.me/luky_channel",  # footer: канал + чат
     # ⛔ НЕ список руками. Языки = те, чем реально можно отрендерить, то есть у кого есть
     # `i18n/<lang>.json`. Руками тут стояло `["ru","en","es","pt"]`, и 08.08 это тихо

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tract  # noqa: E402
 from country_codes import COUNTRIES  # noqa: E402
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
+BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам site.py тут же
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 

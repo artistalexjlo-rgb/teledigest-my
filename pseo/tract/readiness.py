@@ -21,7 +21,6 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — тут же readycheck.py
-BASE = os.path.dirname(HERE)  # …/pseo
 
 
 def check(built_dir, data_dir, out_dir):
@@ -37,7 +36,7 @@ def check(built_dir, data_dir, out_dir):
         capture_output=True,
         text=True,
     )
-    ready_path = f"{BASE}/ready.json"
+    ready_path = f"{HERE}/ready.json"
     rep = None
     if os.path.exists(ready_path):
         rep = json.load(open(ready_path, encoding="utf-8"))

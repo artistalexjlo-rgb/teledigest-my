@@ -30,7 +30,13 @@ CHAT = int(os.environ.get("ADMIN_ID") or os.environ["COMBINE_CHAT_ID"])
 # Данные монтируются в контейнер ПО ТЕМ ЖЕ путям, что на хосте (/root/pseo_builder,
 # /home/teledigest/data, /root/embed_ab) — дубли ртов несут абсолютные пути, не правим их.
 BRAIN = os.environ.get("BRAIN_DIR", "/root/pseo_builder")
-TRACT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tract")
+# ⛔ TRACT = `pseo/tract/`, на уровень выше `bot.py` (`pseo/tract/combine/bot.py`) — НЕ
+# дубль-подпапка. До 28.08 тут стоял свой дубль `tract.py`/`corpus.py`/`keybroker.py`/
+# `vectors.py`/`country_codes.py` в `combine/tract/` — специально под старую сборку
+# образа, когда `bot.py` жил отдельно от остального тракта. Юзер: «старых сборок не
+# надо, и их детей» — дубль снят, `bot.py` переехал внутрь `tract/` и берёт оригиналы
+# напрямую, как весь остальной код тракта.
+TRACT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API = f"https://api.telegram.org/bot{TOKEN}"
 REPORT_EVERY = int(os.environ.get("COMBINE_REPORT_EVERY", "50"))  # попыток мозга
 # сколько ждём вежливого выхода рта после стоп-флага (один вызов к Gemini + запись;
@@ -59,17 +65,12 @@ STOP_FLAGS = [
 
 # Меню: kind → (кнопка, argv дубля; {geo} подставляется). cwd=BRAIN — данные хоста.
 # Версия таксономии — из ТОГО ЖЕ модуля, по которому раскладывают рты. Литералом нельзя:
-# на копиях чисел этот проект уже горел (DEAD_AT разъехался по трём файлам).
+# на копиях чисел этот проект уже горел (DEAD_AT разъехался по трём файлам). ОДНА вставка
+# в sys.path на весь файл: TRACT = `pseo/tract/`, там же лежат `config/`, `tract.py` и все
+# остальные модули — без пытства `pytest pseo/tract/combine/` в одиночку падал бы, как
+# падал до 28.08, когда `config/` и `tract.py` считались с разной глубины.
 sys.path.insert(0, TRACT)
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
-
-# ⛔ `config/` лежит на РАЗНОЙ глубине от `bot.py` в двух раскладках: в образе бот и
-# `config/` — соседи (`/app/bot.py`, `/app/config/`, Dockerfile кладёт их рядом), а в
-# репо между ними ещё каталог `combine/` (`pseo/combine/bot.py`, `pseo/config/`). Автовставка
-# каталога скрипта в sys.path кроет только образ; для репо добавляем корень `pseo/` явно —
-# без этого `pytest pseo/combine/` в одиночку падал: импорт молча работал, только пока
-# render.py (звено 7) уже успел вставить `pseo/` в sys.path раньше в том же прогоне.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Список языков сайта — ОДИН источник (`config/site.py`), не второй список тут же:
 # кнопка «Сборка» обязана строить те же 14 языков, что видит переключатель на странице.

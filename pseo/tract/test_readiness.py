@@ -29,7 +29,7 @@ def test_problem_reported_by_the_gate_fails_the_check(tmp_path, monkeypatch):
     def fake_run(cmd, cwd, env, capture_output, text):
         json.dump(
             {"страниц_всего": 5, "готово_к_деплою": 3, "проблем": 2},
-            open(f"{readiness.BASE}/ready.json", "w", encoding="utf-8"),
+            open(f"{readiness.HERE}/ready.json", "w", encoding="utf-8"),
         )
         return _Proc(1)
 
@@ -45,7 +45,7 @@ def test_clean_snapshot_passes(tmp_path, monkeypatch):
     def fake_run(cmd, cwd, env, capture_output, text):
         json.dump(
             {"страниц_всего": 5, "готово_к_деплою": 5, "проблем": 0},
-            open(f"{readiness.BASE}/ready.json", "w", encoding="utf-8"),
+            open(f"{readiness.HERE}/ready.json", "w", encoding="utf-8"),
         )
         return _Proc(0)
 
@@ -64,7 +64,7 @@ def test_directories_are_passed_through_env_untouched(monkeypatch):
         seen["PSEO_DATA"] = env["PSEO_DATA"]
         seen["PSEO_OUT"] = env["PSEO_OUT"]
         json.dump(
-            {"проблем": 0}, open(f"{readiness.BASE}/ready.json", "w", encoding="utf-8")
+            {"проблем": 0}, open(f"{readiness.HERE}/ready.json", "w", encoding="utf-8")
         )
         return _Proc(0)
 
@@ -79,7 +79,7 @@ def test_directories_are_passed_through_env_untouched(monkeypatch):
 
 def test_no_report_file_is_a_failure_not_a_silent_pass(monkeypatch, tmp_path):
     """readycheck не написал ready.json (упал раньше) — check() не считает это готовностью."""
-    old_ready = f"{readiness.BASE}/ready.json"
+    old_ready = f"{readiness.HERE}/ready.json"
     if os.path.exists(old_ready):
         os.remove(old_ready)
 

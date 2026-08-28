@@ -15,8 +15,11 @@ import pathlib
 import re
 import sys
 
-HERE = pathlib.Path(__file__).parent  # .../pseo/combine
-PSEO = HERE.parent  # .../pseo
+HERE = pathlib.Path(__file__).parent  # .../pseo/tract/combine
+PSEO = (
+    HERE.parent.parent
+)  # .../pseo — combine/ переехал внутрь tract/ 28.08, на уровень
+# глубже; ENTRIES ниже адресуются от pseo/, не от tract/, поэтому нужны ДВА .parent.
 ROOT = PSEO.parent  # корень репо = контекст сборки
 DOCKERFILE = HERE / "Dockerfile"
 
@@ -69,7 +72,8 @@ def _copied(rel_from_root: str) -> bool:
 
 def test_context_is_repo_root():
     """Все COPY адресуются ОТ КОРНЯ РЕПО. Это не стиль, а условие существования схемы: из
-    контекста `pseo/combine` файлы рендера недостижимы, и их пришлось бы дублировать.
+    контекста `pseo/tract/combine` файлы рендера-соседей (`pseo/tract/config` и т.п.)
+    недостижимы, и их пришлось бы дублировать.
 
     ⛔ Проверяем СВОЙСТВО, а не префикс. Сначала тут стояло «строка начинается с pseo/» — и
     правило покраснело на первом же законном пути из `src/`, хотя свойство соблюдалось.
@@ -95,16 +99,17 @@ def test_entries_copied():
 
 def test_runtime_dirs_copied():
     for d in RUNTIME_DIRS:
-        assert (PSEO / d).is_dir(), f"pseo/{d} нет в репо"
-        assert _copied(f"pseo/{d}"), f"каталог {d} не попадает в образ"
+        assert (PSEO / "tract" / d).is_dir(), f"pseo/tract/{d} нет в репо"
+        assert _copied(f"pseo/tract/{d}"), f"каталог {d} не попадает в образ"
 
 
 def _local_and_third_party(path: pathlib.Path):
     """Импорты файла, разложенные на «локальный модуль репо» и «сторонний пакет».
 
-    Локальный отдаётся СПИСКОМ мест, где модуль реально лежит: один и тот же `slugs`
-    существует и в `builder/`, и в дубле `combine/tract/`. В образе достаточно любого —
-    в `/app/builder/` они приезжают в одно место.
+    Локальный отдаётся СПИСКОМ мест, где модуль реально может лежать — точка входа
+    в `tract/` (`render.py`) видит соседей напрямую, точка входа в `tract/combine/`
+    (`bot.py`) видит их через родителя. Дубля `combine/tract/` больше нет (28.08, юзер:
+    «старых сборок не надо, и их детей») — образ несёт единственную копию.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     names = set()
@@ -121,8 +126,10 @@ def _local_and_third_party(path: pathlib.Path):
             f"pseo/{here}/{n}.py" if here else f"pseo/{n}.py",
             f"pseo/{n}.py",
             f"pseo/{n}/__init__.py",
-            f"pseo/combine/tract/{n}.py",
-            f"pseo/{n}" if (PSEO / n).is_dir() else "",  # пакет без __init__ (config/)
+            f"pseo/{n}" if (PSEO / n).is_dir() else "",  # пакет без __init__
+            (
+                f"pseo/{here}/{n}" if here and (PSEO / here / n).is_dir() else ""
+            ),  # пакет без __init__, рядом с точкой входа (tract/config/)
         ]
         found = [c for c in cands if c and (ROOT / c).exists()]
         if found:
@@ -140,34 +147,6 @@ def test_local_imports_copied():
             assert any(
                 _copied(p) for p in places
             ), f"{rel} импортирует {name} — ни одно из {places} не едет в образ"
-
-
-# Расходятся ОСМЫСЛЕННО, копировать целиком нельзя (28.07 чуть не сломало прод):
-#   keybroker.py  — свой `get_keys` (ключи приходят из env контейнера);
-#   lang_runner.py — `PY=sys.executable` (хостового venv в контейнере нет) и раздельные
-#                    HERE (каталог дублей) / DATA (примонтированные данные хоста).
-DIVERGING = {"keybroker.py"}
-
-
-def test_duplicates_identical():
-    """Дубли ртов, кроме двух осмысленно расходящихся, обязаны быть ДОСЛОВНЫМИ копиями.
-
-    ⛔ Правило «правишь одну копию — правь и вторую» до сих пор держалось на моей памяти,
-    и трижды не удержалось. Тут оно проверяется машиной: разъехался файл — падает тест,
-    а не прод. Осознанное расхождение добавляется в DIVERGING вместе с причиной.
-    """
-    drift = []
-    for src in sorted((PSEO / "combine" / "tract").glob("*.py")):
-        twin = PSEO / "tract" / src.name
-        if not twin.exists() or src.name in DIVERGING:
-            continue
-        a = twin.read_bytes().replace(b"\r\n", b"\n")
-        b = src.read_bytes().replace(b"\r\n", b"\n")
-        if a != b:
-            drift.append(src.name)
-    assert (
-        not drift
-    ), f"дубли разъехались: {drift} — синхронизировать или внести в DIVERGING"
 
 
 def test_third_party_in_requirements():

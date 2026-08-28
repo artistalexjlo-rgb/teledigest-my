@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tract  # noqa: E402
 from keybroker import call  # noqa: E402
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
+BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам файл тут же
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
 # Пачки: тексты длинные, имена короткие. Числа из старого тракта, они отработали.

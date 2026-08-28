@@ -26,9 +26,10 @@ from html import escape as html_escape
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-HERE = pathlib.Path(__file__).parent  # …/pseo/tract
-ROOT = HERE.parent  # …/pseo — templates/, i18n/, config/, static/ живут тут
-sys.path.insert(0, str(ROOT))
+HERE = pathlib.Path(__file__).parent  # …/pseo/tract — templates/, i18n/, config/,
+# static/ переехали сюда же 28.08 (юзер: «одна папка истина — тракт»); ROOT сняли,
+# второго уровня над ними больше нет.
+sys.path.insert(0, str(HERE))
 from config.site import SITE  # noqa: E402
 
 # ⭐ ЕДИНСТВЕННОЕ определение каталога вывода. `readycheck.py` берёт его отсюда импортом
@@ -36,14 +37,14 @@ from config.site import SITE  # noqa: E402
 # публикации в пульт рендер писал бы в примонтированный каталог, а гейт проверял пустой
 # `/app/out` и рапортовал «готово 0» при собранном сайте. Одно знание — одно место.
 # PSEO_OUT нужен именно пульту: писать сразу в маунт, а не копировать после рендера.
-OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (ROOT / "out"))
+OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (HERE / "out"))
 # ⭐ И ЕДИНСТВЕННОЕ определение каталога СОБРАННЫХ СТРАНИЦ. `site.py` в него пишет,
 # рендер из него читает — переменная одна на обоих, иначе испытательный прогон собрал бы
 # сайт из боевого корпуса, а тестовый остался бы лежать нетронутым.
-DATA = pathlib.Path(os.environ.get("PSEO_DATA") or (ROOT / "data"))
+DATA = pathlib.Path(os.environ.get("PSEO_DATA") or (HERE / "data"))
 
 _env = Environment(
-    loader=FileSystemLoader(str(ROOT / "templates")),
+    loader=FileSystemLoader(str(HERE / "templates")),
     autoescape=select_autoescape(["html", "j2"]),
     trim_blocks=False,
     lstrip_blocks=False,
@@ -51,7 +52,7 @@ _env = Environment(
 
 
 def load_i18n(lang: str) -> dict:
-    return json.loads((ROOT / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))
+    return json.loads((HERE / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))
 
 
 def _pick(pool: list, seed: str):
@@ -147,7 +148,7 @@ _PATHS: set[str] = set()
 # старый файл.
 def asset_version() -> str:
     h = hashlib.sha1()
-    d = ROOT / "static"
+    d = HERE / "static"
     for f in sorted(d.glob("*")) if d.is_dir() else []:
         h.update(f.read_bytes())
     return h.hexdigest()[:8]
@@ -155,7 +156,7 @@ def asset_version() -> str:
 
 def copy_assets() -> int:
     """static/ → out/assets/. Возвращает число файлов."""
-    src, dst = ROOT / "static", OUT / "assets"
+    src, dst = HERE / "static", OUT / "assets"
     if not src.is_dir():
         return 0
     dst.mkdir(parents=True, exist_ok=True)
@@ -169,7 +170,7 @@ def copy_assets() -> int:
 def index_paths(data_dir=None) -> set[str]:
     """Пути всех собранных страниц — по ним и только по ним объявляем альтернативы.
 
-    `data_dir` нужен сторожу: подменять `ROOT` нельзя — от него же берутся i18n, шаблоны
+    `data_dir` нужен сторожу: подменять `HERE` нельзя — от него же берутся i18n, шаблоны
     и ассеты, и тест ломался бы на них, а не проверял правило. Боевой и испытательный
     прогоны каталог не передают — берут `DATA` (`PSEO_DATA`).
     """
