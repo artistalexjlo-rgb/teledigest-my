@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import sys
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -136,7 +137,7 @@ def advice_page(page_data, geo, lang, siblings=()):
     ]
     faqs = [
         {
-            "q": it["text"].split(".")[0][:120],
+            "q": textwrap.shorten(it["text"].split(".")[0], 120, placeholder="…"),
             "a": it["text"],
             "n": it.get("n", 1),
             "n_word": "",
@@ -213,7 +214,7 @@ def theme_page(theme, pages, leftover, geo, lang):
         # Остаток — то, чему имени не нашлось. Показываем списком, чтобы советы не пропали.
         page["faqs"] = [
             {
-                "q": it["text"].split(".")[0][:120],
+                "q": textwrap.shorten(it["text"].split(".")[0], 120, placeholder="…"),
                 "a": it["text"],
                 "n": it.get("n", 1),
                 "n_word": "",
