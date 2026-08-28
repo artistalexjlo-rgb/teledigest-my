@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tract  # noqa: E402
 from country_codes import COUNTRIES  # noqa: E402
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
+BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам site.py тут же
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
@@ -102,10 +102,17 @@ def _geo_flag(geo):
     return pair[1] if pair else ""
 
 
-def corpus(geo, lang="ru"):
-    """Корпус гео: страницы и остатки тем. Читается то, что положило звено 5."""
-    d = "out_facet" if lang == "ru" else f"out_facet_{lang}"
-    return _load(f"{BUILT}/{d}/{geo}.json")
+def corpus(geo, lang="en"):
+    """Корпус гео: страницы и остатки тем. Читается то, что положило звено 5.
+
+    ⛔ Ни один язык, кроме `en`, тут не угадывается сравнением строк. `en` — не
+    привилегия кода, а факт: звено 5 (`tract.py --build`) пишет корпус сразу в
+    `out_facet_en`, потому что звенья 3/4 работают только по-английски. `ru` — такой
+    же перевод, как остальные двенадцать, и лежит в `out_facet_ru` (28.08, был спецслучай
+    `lang == "ru"` — читал английский корпус под видом русского, `out_facet_ru` не
+    трогал вовсе).
+    """
+    return _load(f"{BUILT}/out_facet_{lang}/{geo}.json")
 
 
 def advice_page(page_data, geo, lang, siblings=()):
@@ -320,7 +327,7 @@ def about_page(lang):
     }
 
 
-def build_geo(geo, lang="ru"):
+def build_geo(geo, lang="en"):
     """Одна страна: страницы тем и советов. Возвращает (сколько страниц, темы со счётом)."""
     d = corpus(geo, lang)
     if not d:
@@ -360,11 +367,10 @@ def build_geo(geo, lang="ru"):
     return n, themes
 
 
-def build_all(lang="ru"):
+def build_all(lang="en"):
     """Все гео, у которых есть корпус. Печатает числа, чтобы прогон был проверяем."""
-    d = "out_facet" if lang == "ru" else f"out_facet_{lang}"
     geos, total = [], 0
-    for path in sorted(glob.glob(f"{BUILT}/{d}/*.json")):
+    for path in sorted(glob.glob(f"{BUILT}/out_facet_{lang}/*.json")):
         geo = os.path.basename(path)[:-5]
         n, themes = build_geo(geo, lang)
         if n:
@@ -392,7 +398,7 @@ def build_all(lang="ru"):
 
 
 if __name__ == "__main__":
-    _lang = sys.argv[2] if len(sys.argv) > 2 else "ru"
+    _lang = sys.argv[2] if len(sys.argv) > 2 else "en"
     if len(sys.argv) > 1 and sys.argv[1] != "--all":
         build_geo(sys.argv[1], _lang)
     else:

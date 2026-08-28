@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """ЗВЕНО 6 ПЕРЕВОДЫ: английский корпус → корпус на каждом языке (PLAN.md, звено 6).
 
-ВХОД   `out_facet/<гео>.json` — то, что собрало звено 5: страницы веток и мелочь остатка.
+ВХОД   `out_facet_en/<гео>.json` — то, что собрало звено 5: страницы веток и мелочь остатка.
 ЧТО    рот `translate` переводит тексты советов, рот `labels` — имена веток.
 ВЫХОД  `out_facet_<язык>/<гео>.json` той же формы: адреса, ветки и части НЕ трогаются.
 
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tract  # noqa: E402
 from keybroker import call  # noqa: E402
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # …/pseo
+BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам файл тут же
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
 
 # Пачки: тексты длинные, имена короткие. Числа из старого тракта, они отработали.
@@ -165,9 +165,8 @@ def theme_names(lang):
     return mp
 
 
-def corpus(geo, lang=""):
-    d = "out_facet" if not lang or lang == "en" else f"out_facet_{lang}"
-    return _load(f"{BUILT}/{d}/{geo}.json")
+def corpus(geo, lang="en"):
+    return _load(f"{BUILT}/out_facet_{lang}/{geo}.json")
 
 
 def _all_texts(src):
@@ -210,14 +209,13 @@ def _retext(items, teksty, source_by_id):
 
 
 def translate_geo(geo, lang):
-    """Один гео на один язык. Платим ТОЛЬКО за новое и за переписанное."""
+    """Один гео на один язык (не `en` — его сразу пишет звено 5, переводить нечего).
+
+    Платим ТОЛЬКО за новое и за переписанное.
+    """
     src = corpus(geo)
     if not src:
         print(f"{geo}: английского корпуса нет", flush=True)
-        return 0
-    if lang == "en":
-        _save(f"{BUILT}/out_facet_en/{geo}.json", src)
-        print(f"{geo} en: копия оригинала, ключей 0", flush=True)
         return 0
 
     pairs = _all_texts(src)

@@ -35,8 +35,10 @@ _spec.loader.exec_module(site)
 
 def _korpus(tmp_path, monkeypatch, views, shelves=()):
     built = tmp_path / "built"
-    os.makedirs(built / "out_facet", exist_ok=True)
-    with open(built / "out_facet" / "gr.json", "w", encoding="utf-8") as fh:
+    # ⛔ `_ru` явным суффиксом: сторож зовёт `build_all("ru")` ниже, а с 28.08 `ru` — язык
+    # перевода как все прочие, свой безымянный каталог `out_facet` сборщик не угадывает.
+    os.makedirs(built / "out_facet_ru", exist_ok=True)
+    with open(built / "out_facet_ru" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(
             {"geo": "gr", "views_by_task": list(views), "shelves": list(shelves)},
             fh,
