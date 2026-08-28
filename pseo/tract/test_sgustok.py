@@ -113,7 +113,7 @@ def geo_probe(tmp_path, monkeypatch):
 def test_protocol_shows_what_was_swallowed(geo_probe, capsys):
     """В протоколе — текст представителя и ПОЛНЫЙ текст проглоченного. Судить порог по
     текстам, а не по числу."""
-    tract.sgusti("xx")
+    tract.collapse("xx")
     proto = open(os.path.join("tests", "dedup", "xx.txt"), encoding="utf-8").read()
     assert "Права меняют в течение первого года" in proto
     assert "Права нужно менять в первый год" in proto
@@ -126,7 +126,7 @@ def test_protocol_shows_what_was_swallowed(geo_probe, capsys):
 
 def test_mark_takes_only_representatives(geo_probe, monkeypatch):
     """После схлопывания рту достаются представители, и за каждым несётся число мух."""
-    tract.sgusti("xx")
+    tract.collapse("xx")
     sg = json.load(open(os.path.join("tests", "dedup", "xx.json"), encoding="utf-8"))
     reps = {g["rep"] for g in sg["groups"]}
     assert len(reps) == 3, sg["groups"]
@@ -138,7 +138,7 @@ def test_mark_takes_only_representatives(geo_probe, monkeypatch):
         seen.update(idx)
         return {
             "rows": [
-                {"i": k, "perevod": v, "tema": "docs", "podtema": "проба"}
+                {"i": k, "perevod": v, "theme": "docs", "subtheme": "проба"}
                 for k, v in idx.items()
             ]
         }

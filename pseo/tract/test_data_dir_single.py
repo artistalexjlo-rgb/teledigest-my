@@ -1,8 +1,8 @@
 """Сторож: каталог СОБРАННЫХ СТРАНИЦ — одно определение на обе половины сборки.
 
-⛔ Зачем. Сборка идёт в два шага: `pages.py` превращает корпус в страницы (json), `render.py`
+⛔ Зачем. Сборка идёт в два шага: `site.py` превращает корпус в страницы (json), `render.py`
 их рендерит. Каталог вывода рендера (`PSEO_OUT`) и каталог корпуса (`BUILT_DIR`) переменными
-задавались, а середина — нет: `pages.py` писал в `BASE/data` литералом с 11.07. В пульте это
+задавались, а середина — нет: сборщик писал в `BASE/data` литералом с 11.07. В пульте это
 `/app/data` ВНУТРИ образа: не в маунте, не в `tests/`, пропадает при редеплое, снаружи не
 посмотреть. Испытательный прогон новой схемы обязан жить в `tests/` целиком.
 
@@ -18,12 +18,16 @@ import sys
 
 PSEO = pathlib.Path(__file__).resolve().parent.parent
 
+# ⛔ Сборщик грузим ПО ПУТИ, а не `import site`: `site` — имя стандартного модуля Python,
+# и обычный импорт приносит его, а не наш файл. Поймано этим же сторожем 27.08.
 PROBE = """
-import sys
-sys.path[:0] = [r"{pseo}", r"{pseo}/builder"]
-import render, pages
+import sys, importlib.util
+sys.path[:0] = [r"{pseo}", r"{pseo}/tract"]
+import render
+_s = importlib.util.spec_from_file_location("sitebuild", r"{pseo}/tract/site.py")
+_m = importlib.util.module_from_spec(_s); _s.loader.exec_module(_m)
 print(str(render.DATA))
-print(str(pages.DATA))
+print(str(_m.DATA))
 """
 
 
@@ -52,22 +56,28 @@ def test_default_is_data_next_to_pseo():
 def test_env_moves_both_halves(tmp_path):
     """С `PSEO_DATA` переезжают ОБЕ. Осталась одна на своём — тест красный: рендер собрал бы
     сайт из боевого корпуса, а тестовые страницы остались бы лежать."""
-    target = (tmp_path / "pages").as_posix()
+    target = (tmp_path / "site").as_posix()
     got = _probe(target)
     assert got == [target, target], got
 
 
-def test_pages_writes_where_data_points(tmp_path, monkeypatch):
+def test_builder_writes_where_data_points(tmp_path, monkeypatch):
     """Не только константа совпадает, но и запись идёт туда же — и каталог заводится сам:
     в `tests/` его до первого прогона нет."""
-    target = tmp_path / "pages"
+    target = tmp_path / "site"
     monkeypatch.setenv("PSEO_DATA", str(target))
-    for mod in ("pages",):
+    for mod in ("sitebuild",):
         sys.modules.pop(mod, None)
-    sys.path[:0] = [str(PSEO / "builder")]
-    import pages
+    sys.path[:0] = [str(PSEO / "tract")]
+    import importlib.util
 
-    assert pathlib.Path(pages.DATA) == target
-    pages.write("proba.json", {"path": "/ru/gr/proba/", "title": "проба"})
+    _spec = importlib.util.spec_from_file_location(
+        "sitebuild", str(PSEO / "tract" / "site.py")
+    )
+    site = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(site)
+
+    assert pathlib.Path(site.DATA) == target
+    site._write("proba.json", {"path": "/ru/gr/proba/", "title": "проба"})
     assert (target / "proba.json").is_file(), "страница не легла в PSEO_DATA"
-    sys.modules.pop("pages", None)
+    sys.modules.pop("sitebuild", None)

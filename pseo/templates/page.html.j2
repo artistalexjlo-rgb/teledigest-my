@@ -14,29 +14,21 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
-  {%- if page.short_answer %}
-  <span class="section-label">{{ t.label_short_answer }}</span>
-  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.short_answer | safe }}</div></div>
+  {%- if page.parts %}
+  {# Переходы по частям ОДНОЙ ветки. Цифрами, без слов: ветка выходит на тему одной
+     плиткой, и новый ключ перевода на 14 языков ради «часть 2 из 3» тут не нужен. #}
+  <nav class="parts">
+    {%- for c in page.parts %}
+    {%- if c.current %}<b>{{ c.n }}</b>{% else %}<a href="{{ c.url }}">{{ c.n }}</a>{% endif %}
+    {%- endfor %}
+  </nav>
   {%- endif %}
 
-  <h2>{{ page.list_label or t.label_faq }}</h2>
   {%- for f in page.faqs %}
-  <details{% if loop.first %} open{% endif %}><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
-    <div class="a">{{ f.a | safe }}
-    <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
+  <details{% if loop.first %} open{% endif %}><summary><span class="sumq">{{ f.q }}</span><span></span></summary>
+    <div class="a">{{ f.a | safe }}</div>
   </details>
   {%- endfor %}
-
-  <h2>{{ t.label_related }}</h2>
-  <div class="chips">
-    {%- for c in page.chips %}
-    {%- if c.soon %}
-    <span class="chip soon">{{ oct(OCT_CHIP, 6, 2) }}<span>{{ c.icon }} {{ c.label }}</span></span>
-    {%- else %}
-    <a class="chip" href="{{ c.url }}">{{ oct(OCT_CHIP, 6, 2) }}<span>{{ c.icon }} {{ c.label }}</span></a>
-    {%- endif %}
-    {%- endfor %}
-  </div>
 
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
   {%- if cta %}

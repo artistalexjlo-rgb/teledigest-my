@@ -17,11 +17,7 @@
 {% block content %}
   <h1>{{ page.h1 }}</h1>
 
-  {%- if page.intro %}
-  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ page.intro | safe }}</div></div>
-  {%- endif %}
-
-  {%- if page.body %}
+  {%- if page.body %}{# служебная страница со своей прозой (about) — тема текста не несёт #}
   <div class="prose">{{ page.body | safe }}</div>
   {%- endif %}
 
@@ -38,21 +34,10 @@
   </div>
   {%- endif %}
 
-  {%- if page.questions %}{# хвост раздела БЕЗ дедупа: заметками, иначе пропали бы молча #}
-  {%- if page.faqs_label %}<h2>{{ page.faqs_label }}</h2>{% endif %}
-  <ul class="qlist">
-    {%- for q in page.questions %}
-    <li>{{ q }}</li>
-    {%- endfor %}
-  </ul>
-  {%- endif %}
-
-  {%- if page.faqs %}{# остаток полки-хаба: пункты вне веток (ветвление полок) #}
-  {%- if page.faqs_label %}<h2>{{ page.faqs_label }}</h2>{% endif %}
+  {%- if page.faqs %}{# мелочь остатка темы: пунктов меньше порога ветки #}
   {%- for f in page.faqs %}
-  <details><summary><span class="sumq">{% if f.type %}<span class="tag {{ f.type_key }}">{{ f.type }}</span>{% endif %}{{ f.q }}</span><span></span></summary>
-    <div class="a">{{ f.a | safe }}
-    <div class="src">{{ t.sources_prefix }} {{ f.n }} {{ f.n_word }} {{ t.sources_suffix }}</div></div>
+  <details><summary><span class="sumq">{{ f.q }}</span><span></span></summary>
+    <div class="a">{{ f.a | safe }}</div>
   </details>
   {%- endfor %}
   {%- endif %}

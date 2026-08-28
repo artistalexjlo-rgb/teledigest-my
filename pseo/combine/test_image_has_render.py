@@ -1,7 +1,7 @@
 """Сторож: в образе пульта есть ВСЁ, что нужно рендеру сайта.
 
 ⛔ Зачем. Публикация до сих пор возможна только с десктопа: в пульте живёт мозг (facet,
-dedup, facet_lang, keybroker), а рендера — `render.py`, `pages.py`, `templates/`, `i18n/`,
+keybroker), а рендера — `render.py`, `site.py`, `templates/`, `i18n/`,
 `static/` — там не было вообще. Класс отказа, который тут ловится, для проекта родной:
 код зовёт модуль, на десктопе он есть, в образе его нет, и падает это в проде.
 
@@ -21,7 +21,15 @@ ROOT = PSEO.parent  # корень репо = контекст сборки
 DOCKERFILE = HERE / "Dockerfile"
 
 # Точки входа рендера. Всё остальное вычисляется из их импортов.
-ENTRIES = ["render.py", "builder/pages.py", "builder/readycheck.py"]
+# плоский адрес страницы) и в образ пульта больше не едет (26.08).
+ENTRIES = [
+    "render.py",
+    "tract/site.py",
+    # ⛔ Переводчик тракта — `translation.py`. Старый `facet_lang.py` уехал в legacy 27.08:
+    # он переводил С РУССКОГО и ждал корпус отменённой схемы.
+    "tract/translation.py",
+    "builder/readycheck.py",
+]
 
 # Каталоги, которые рендер читает ПО ИМЕНИ в рантайме (ast их не видит):
 # шаблоны — FileSystemLoader, словари — load_i18n, ассеты — copy_assets, site-конфиг.
@@ -47,7 +55,7 @@ def _copied(rel_from_root: str) -> bool:
     """Попадает ли путь ОТ КОРНЯ РЕПО в образ — сам или вместе с родительским каталогом.
 
     ⚠️ От корня, а не от `pseo/`: модуль репо может лежать и вне него — справочник стран
-    живёт в `src/teledigest/`, и `pages.py` берёт имена оттуда.
+    живёт в `src/teledigest/`, и сборщик берёт имена оттуда.
     """
     target = rel_from_root.rstrip("/")
     for src in SOURCES:
@@ -93,7 +101,7 @@ def _local_and_third_party(path: pathlib.Path):
     """Импорты файла, разложенные на «локальный модуль репо» и «сторонний пакет».
 
     Локальный отдаётся СПИСКОМ мест, где модуль реально лежит: один и тот же `slugs`
-    существует и в `builder/`, и в дубле `combine/builder/`. В образе достаточно любого —
+    существует и в `builder/`, и в дубле `combine/tract/`. В образе достаточно любого —
     в `/app/builder/` они приезжают в одно место.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -111,7 +119,7 @@ def _local_and_third_party(path: pathlib.Path):
             f"pseo/{here}/{n}.py" if here else f"pseo/{n}.py",
             f"pseo/{n}.py",
             f"pseo/{n}/__init__.py",
-            f"pseo/combine/builder/{n}.py",
+            f"pseo/combine/tract/{n}.py",
             f"pseo/{n}" if (PSEO / n).is_dir() else "",  # пакет без __init__ (config/)
         ]
         found = [c for c in cands if c and (ROOT / c).exists()]
@@ -136,7 +144,7 @@ def test_local_imports_copied():
 #   keybroker.py  — свой `get_keys` (ключи приходят из env контейнера);
 #   lang_runner.py — `PY=sys.executable` (хостового venv в контейнере нет) и раздельные
 #                    HERE (каталог дублей) / DATA (примонтированные данные хоста).
-DIVERGING = {"keybroker.py", "lang_runner.py"}
+DIVERGING = {"keybroker.py"}
 
 
 def test_duplicates_identical():
@@ -147,8 +155,8 @@ def test_duplicates_identical():
     а не прод. Осознанное расхождение добавляется в DIVERGING вместе с причиной.
     """
     drift = []
-    for src in sorted((PSEO / "combine" / "builder").glob("*.py")):
-        twin = PSEO / "builder" / src.name
+    for src in sorted((PSEO / "combine" / "tract").glob("*.py")):
+        twin = PSEO / "tract" / src.name
         if not twin.exists() or src.name in DIVERGING:
             continue
         a = twin.read_bytes().replace(b"\r\n", b"\n")

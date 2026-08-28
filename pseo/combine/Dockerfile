@@ -9,22 +9,26 @@ WORKDIR /app
 COPY pseo/combine/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Пульт: бот, дубли ртов (builder/), тесты, README.
+# Пульт: бот, дубли модулей тракта (tract/), тесты, README.
 COPY pseo/combine/ /app/
 
 # Рендер-половина — БЕЗ дублей в git, забираем из pseo/ по месту жительства.
 # Пути внутри образа держим ТЕ ЖЕ, что на десктопе относительно pseo/: render.py считает
-# BASE от себя, pages.py и readycheck.py — на уровень выше себя. Отсюда /app = pseo/.
+# BASE от себя, site.py и readycheck.py — на уровень выше себя. Отсюда /app = pseo/.
 COPY pseo/render.py pseo/favicon.svg /app/
 COPY pseo/config/ /app/config/
 COPY pseo/templates/ /app/templates/
 COPY pseo/i18n/ /app/i18n/
 COPY pseo/static/ /app/static/
 COPY pseo/mirror_static/ /app/mirror_static/
-# `country_codes.py` — справочник стран рядом с pages.py (249 стран, имена и флаги).
+# `country_codes.py` — справочник стран рядом со сборщиком (249 стран, имена и флаги).
 # Копия файла бота, дословная; сторож `test_country_codes_copy` не даст ей отстать. В образ
 # едет как обычный модуль builder — никакого захода в `src/` и никаких путей вне /app.
-COPY pseo/builder/pages.py pseo/builder/readycheck.py pseo/builder/country_codes.py /app/builder/
+# ⛔ `themes.json` здесь — ТОЛЬКО СИД (английский источник, статика из git). Рабочий файл,
+# в который звено 6 дописывает купленные языки, живёт на смонтированном BRAIN_DIR и этой
+# копии не касается — иначе редеплой стирал бы покупки (28.08).
+COPY pseo/tract/site.py pseo/tract/translation.py pseo/tract/countries.json pseo/tract/themes.json pseo/tract/about.json /app/tract/
+COPY pseo/builder/readycheck.py /app/builder/
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.
 CMD ["python", "-u", "bot.py"]

@@ -289,27 +289,6 @@ def translate_texts(id_text, lang):
     return out, None
 
 
-def add_kratko(geo, lang):
-    """Короткий ответ языкового файла — СВОЙ, без обращения к отменённой схеме.
-
-    ⛔ ЗАЧЕМ ЗДЕСЬ (24.08). До этого звено 6 звало `dedup.kratko_lang`, то есть из-за одной
-    функции тянуло весь файл отменённого тракта. Заказ юзера дословно: «это должно быть
-    внутри кода нового пульта и не тянуть НИЧЕГО ниоткуда».
-
-    Сбой не роняет перевод: вернём 0 и пойдём дальше.
-    """
-    try:
-        cwd = os.getcwd()
-        os.chdir(HERE)  # файлы языков лежат относительными путями out_facet_<lang>/
-        try:
-            return kratko_lang(geo, lang)
-        finally:
-            os.chdir(cwd)
-    except Exception as e:
-        print(f"{geo}/{lang}: kratko не сделан ({type(e).__name__}: {e})", flush=True)
-        return 0
-
-
 def _src_hash(t):
     """Короткий отпечаток ИСХОДНОГО текста мухи. По нему видно, что источник переписали и
     перевод устарел, — иначе устаревший перевод жил бы под тем же id вечно и незаметно.
@@ -322,14 +301,14 @@ def harvest(path, en_text):
 
     ⛔ ЗАЧЕМ (2026-08-08). `run()` собирал файл с нуля: переводил ВСЕ тексты, хотя они уже
     лежали под теми же языко-независимыми id, и терял короткие ответы, потому что писал
-    словарь без них, а `dedup.kratko_lang` наполняет только пустые. Значит цена смены
+    словарь без них. Значит цена смены
     формата равнялась цене КОРПУСА, а не размеру изменения. Замер: полный пере-перевод
     90 гео × 13 языков = ~3900 запросов текста + ~1500 меток + 23 506 коротких ответов
     ≈ 29 000, шесть дневных пулов, ~110 часов. И это уже случалось однажды — полки 27.07.
 
     Возвращает (text, nodes):
       text  — {id: перевод} для мух, чей ИСТОЧНИК не изменился;
-      nodes — [{"ids", "label", "kratko", "src"}] — для переноса метки и короткого ответа.
+      nodes — [{"ids", "label", "src"}] — для переноса метки.
 
     ⚠️ Отпечаток. Муха с переписанным `ai_lesson` под тем же id обязана перевестись заново,
     иначе перевод устареет навсегда. У файлов, собранных до этой правки, отпечатка нет — их
@@ -358,7 +337,6 @@ def harvest(path, en_text):
                     {
                         "ids": frozenset(ids),
                         "label": n.get(lab),
-                        "kratko": n.get("kratko"),
                         "src": n.get("src"),
                     }
                 )
@@ -404,7 +382,7 @@ def stamp_keys(geo):
     свитчер в 404, и врущий hreflang, и вырождение всех нелатинских адресов в один «tema».
     Почему здесь: перевод меток RU→EN умеет только этот модуль.
 
-    ⛔ Файл ДОПИСЫВАЕТСЯ, а не пересобирается: в нём лежат `groups`, `kratko` и `subshelves`,
+    ⛔ Файл ДОПИСЫВАЕТСЯ, а не пересобирается: в нём лежат `groups` и `subshelves`,
     стоившие прогонов. ⛔ Уникальность ключей внутри гео обеспечивается ЗДЕСЬ: `slug()`
     схлопывает разные метки в один хвост, а уникализации адресов в `pages.py` нет нигде —
     совпавшие адреса молча перезаписывали бы страницы друг друга.
@@ -451,10 +429,6 @@ def run(geo, lang):
     out_path = f"{HERE}/out_facet_{lang}/{geo}.json"
     if os.path.exists(out_path):
         if is_fresh(out_path):
-            # ⛔ НЕ досинтезировать тут kratko: это РАЗОВЫЙ ретрофит по старому материалу,
-            # ему не место в постоянном пути (иначе каждый заход сканирует всё старое —
-            # «разовое исправление навсегда», юзер 07-22). Ретрофит = отдельная команда
-            # `dedup.py --kratko-lang <geo> <lang>`, прогоняется один раз.
             print(f"{geo}/{lang}: уже готов (новый формат), скип", flush=True)
             return True
         print(f"{geo}/{lang}: старый формат (без groups) — пересборка", flush=True)
@@ -585,8 +559,6 @@ def run(geo, lang):
             # этих абзацев, и по изменившемуся содержимому стал бы неправдой. Сравнение
             # точное, без порога «на глаз»: теперь, когда переводы переносятся, состав
             # повторяется в точности, если русский вид не оброс новыми мухами.
-            if o and o.get("kratko") and o["ids"] == {it["id"] for it in items}:
-                tv["kratko"] = o["kratko"]
             if v.get("key"):
                 # АДРЕС страницы. Английский и ОДИН на все языки (канон §0.11): хвост
                 # `/ru/br/money/` = `/zh/br/money/`. Без него слаг считался бы от
@@ -628,9 +600,6 @@ def run(geo, lang):
                     ],
                     "mesto": it.get("mesto"),
                     "uslovie": it.get("uslovie"),
-                    # тип НЕ переводим: pages.py мапит его в css-ключ по русскому имени
-                    # (TYPE_KEY), а локализация чипов — отдельная, пока не сделанная тема
-                    "type": it.get("type"),
                 }
             )
         if not s_items:
@@ -681,142 +650,7 @@ def run(geo, lang):
         f"{sum(len(v['items']) for v in out_views)} мух → {d}/{geo}.json",
         flush=True,
     )
-    # КОРОТКИЙ ОТВЕТ синтезируется ЗДЕСЬ, из только что записанных абзацев этого языка —
-    # не переводится с русского (до 07-22 было так, плашка могла разъехаться с текстом).
-    add_kratko(geo, lang)
     return True  # явный успех (было: падал в None → exit 3 на каждой записи)
-
-
-# ── КОРОТКИЙ ОТВЕТ НА ЯЗЫКЕ ─────────────────────────────────────────────────────
-# Перенесено из отменённой схемы 24.08 ДОСЛОВНО: логика и промпт не менялись, поменялся
-# только дом. Заказ юзера: звено 6 несёт своё и не тянет ничего ниоткуда.
-#
-# ⭐ Синтез, а не перевод (правило 07-22): ответ собирается из абзацев ЭТОГО языка.
-# Перевод готовой русской выжимки разводит плашку и текст разными путями, а проверить
-# это на языке, которого никто в команде не читает, нечем.
-KRATKO_TOP = 12  # топ-абзацев на выжимку (окно соска ~16.6К токенов — с запасом)
-KRATKO_KRATKO_SAVE_EVERY = 5  # чекпоинт: СТОП не съедает уплаченное
-
-LANG_NAME = {
-    "ru": "русском",
-    "en": "English",
-    "es": "Spanish",
-    "pt": "Portuguese",
-    "zh": "Chinese (Simplified)",
-    "fr": "French",
-    "de": "German",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "ar": "Arabic",
-    "th": "Thai",
-    "it": "Italian",
-    "hi": "Hindi",
-    "tr": "Turkish",
-}
-
-
-def kratko_sys(lang="ru"):
-    if lang == "ru":
-        tail = "Естественный русский, без воды и без «в чатах говорят»."
-    else:
-        tail = (
-            f"Write the answer in natural {LANG_NAME.get(lang, lang)} — the SAME language "
-            "as the advice above. No filler, no «people in chats say»."
-        )
-    return (
-        "Ты СЖИМАЕШЬ готовые советы в короткий ответ, НЕ автор. Ниже советы одной темы. "
-        "Напиши «короткий ответ» страницы: 2-3 предложения, ТОЛЬКО факты из советов ниже "
-        "(самые подтверждённые/практичные), НИЧЕГО не добавлять, не выдумывать, не обобщать "
-        f"сверх написанного. {tail}\n"
-        'СТРОГО JSON: {"kratko": "<2-3 предложения>"}'
-    )
-
-
-def kratko_for(view, lang="ru"):
-    """LLM-выжимка короткого ответа из топ-групп ЭТОГО ЖЕ файла (тексты репрезентантов) —
-    значит на языке файла. None = инфра-сбой/невалид — страница выйдет без блока, не блокер.
-    """
-    from keybroker import call  # импорт тут: кластеризация остаётся keyless
-
-    by_id = {it["id"]: it for it in view["items"]}
-    tops = [
-        by_id[g["rep"]]["text"]
-        for g in view["groups"][:KRATKO_TOP]
-        if g["rep"] in by_id
-    ]
-    if not tops:
-        return None
-    out = call(
-        json.dumps(tops, ensure_ascii=False), kratko_sys(lang), consumer="kratko"
-    )
-    k = (out or {}).get("kratko")
-    return k.strip() if isinstance(k, str) and k.strip() else None
-
-
-# ДУБЛЬ КОМБАЙНА: мягкий стоп. Исходник писал файл ТОЛЬКО в конце гео — стоп/падение
-# посреди гео сжигало уже сделанные вызовы впустую (факт 07-21: 36 попыток на au в трубу).
-# Теперь: SIGTERM/флаг = дожать текущий вид, СОХРАНИТЬ и выйти; плюс сейв каждые KRATKO_SAVE_EVERY.
-KRATKO_SAVE_EVERY = 5
-_STOP = False
-
-
-def kratko_lang(geo, lang):
-    """Короткий ответ ДЛЯ ЯЗЫКОВОГО файла: синтез из абзацев ЭТОГО файла, на ЕГО языке.
-    Зовётся после сборки out_facet_<lang>/<geo>.json. Идемпотентно (готовые не трогает),
-    чекпоинт каждые KRATKO_SAVE_EVERY, стоп-флаг между видами — как в русском run()."""
-    fn = f"out_facet_{lang}/{geo}.json"
-    d = json.load(open(fn, encoding="utf-8"))
-    views = d.get("views_by_task", [])
-    need = [v for v in views if v.get("groups") and not v.get("kratko")]
-    if not need:
-        print(f"{geo}/{lang}: kratko на месте, скип", flush=True)
-        return 0
-    print(f"{geo}/{lang}: нужно kratko: {len(need)}", flush=True)
-    n_k = n_miss = miss_streak = 0
-    for v in need:
-        if os.path.exists("LANG_RUNNER_STOP"):
-            _atomic(fn, d)
-            print(f"{geo}/{lang}: остановлен, сохранено kratko +{n_k}", flush=True)
-            return n_k
-        k = None
-        for _ in range(3):  # 1 + 2 ретрая: сбой обычно транзиентный (парс/сеть)
-            k = kratko_for(v, lang)
-            if k:
-                break
-        if k:
-            v["kratko"] = k
-            n_k += 1
-            miss_streak = 0
-            if n_k % KRATKO_SAVE_EVERY == 0:
-                _atomic(fn, d)
-        else:  # вид не сжался даже с ретраями — промах. Единичный не блокер (блок скрыт).
-            n_miss += 1
-            miss_streak += 1
-            if miss_streak >= 5:  # 5 подряд без успеха → пул мёртв, НЕ долбим впустую
-                _atomic(fn, d)
-                print(
-                    f"{geo}/{lang}: 5 промахов подряд — пул не отдаёт, стоп "
-                    f"(сделано {n_k}, осталось {len(need) - n_k - n_miss})",
-                    flush=True,
-                )
-                d = json.load(open(fn, encoding="utf-8"))
-                d["fails"] = (d.get("fails") or []) + [
-                    {
-                        "step": "kratko",
-                        "lang": lang,
-                        "why": "5 kratko подряд не сделались — пул не отдаёт",
-                        "done": n_k,
-                    }
-                ]
-                _atomic(fn, d)
-                return n_k
-        print(
-            f"  {geo}/{lang}: kratko {n_k}/{len(need)} (промахов {n_miss})", flush=True
-        )
-    _atomic(fn, d)
-    tail = f", промахов {n_miss}" if n_miss else ""
-    print(f"{geo}/{lang}: kratko +{n_k}{tail}", flush=True)
-    return n_k
 
 
 if __name__ == "__main__":

@@ -25,13 +25,13 @@ BASE = pathlib.Path(__file__).parent
 sys.path.insert(0, str(BASE))
 from config.site import SITE  # noqa: E402
 
-# ⭐ ЕДИНСТВЕННОЕ определение каталога вывода. `readycheck.py` и `ship.py` берут его отсюда
+# ⭐ ЕДИНСТВЕННОЕ определение каталога вывода. `readycheck.py` берёт его отсюда
 # импортом и своего не заводят: до 2026-08-11 `BASE/out` было выписано в трёх местах, и при
 # переносе публикации в пульт рендер писал бы в примонтированный каталог, а гейт проверял
 # пустой `/app/out` и рапортовал «готово 0» при собранном сайте. Одно знание — одно место.
 # PSEO_OUT нужен именно пульту: писать сразу в маунт, а не копировать после рендера.
 OUT = pathlib.Path(os.environ.get("PSEO_OUT") or (BASE / "out"))
-# ⭐ И ЕДИНСТВЕННОЕ определение каталога СОБРАННЫХ СТРАНИЦ. `pages.py` в него пишет,
+# ⭐ И ЕДИНСТВЕННОЕ определение каталога СОБРАННЫХ СТРАНИЦ. `site.py` в него пишет,
 # рендер из него читает — переменная одна на обоих, иначе испытательный прогон собрал бы
 # сайт из боевого корпуса, а тестовый остался бы лежать нетронутым.
 DATA = pathlib.Path(os.environ.get("PSEO_DATA") or (BASE / "data"))
@@ -87,7 +87,7 @@ VOICE_ANY = [0, 6]  # «объяснись с местными», «спроси
 
 
 def voice_pool(pools: dict, page: dict) -> list:
-    idx = VOICE_BY_SHELF.get(page.get("shelf_key") or "", VOICE_ANY)
+    idx = VOICE_BY_SHELF.get(page.get("theme") or "", VOICE_ANY)
     lines = [pools["voice"][i] for i in idx if i < len(pools["voice"])]
     return lines or pools["voice"]  # пул короче ожидаемого → ведём себя как раньше
 
@@ -99,12 +99,16 @@ def door_url(page: dict) -> str:
     `?geo=&shelf=`, а nginx уже пишет строку запроса и Referer — значит видно, какая страна
     и какой раздел отдают переходы, и своего бэкенда для этого не нужно.
 
+    ⛔ 28.08: поле называлось `shelf_key` со старого сборщика (`pages.py`, снят 27.08).
+    Новый кладёт тему в `theme`, а старое имя тут молча читало пустоту — раздел в query
+    всегда был пуст, реплики CTA (`voice_pool`) всегда падали на нейтральный пул.
+
     Сам шлюз ведёт в продукт НАПРЯМУЮ: иначе страница слала бы на саму себя.
     """
     if "/go/luky/" in (page.get("path") or ""):
         return SITE["cta_luky_url"]
     lang = page.get("lang", "ru")
-    q = [("geo", page.get("geo") or ""), ("shelf", page.get("shelf_key") or "")]
+    q = [("geo", page.get("geo") or ""), ("shelf", page.get("theme") or "")]
     tail = urllib.parse.urlencode([(k, v) for k, v in q if v])
     return f"/{lang}/go/luky/" + (f"?{tail}" if tail else "")
 
@@ -282,7 +286,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
     # ⭐ lastmod ПОСТРАНИЧНО (2026-08-07). Было: одна дата из аргумента командной строки на
     # ВСЕ адреса — кто-то вписал `2026-07-06`, и она месяц ехала во все 2185, то есть месяц
     # говорила Google «здесь ничего не менялось». Теперь дату несёт сама страница
-    # (`updated_iso`, ставит pages.py и только при РЕАЛЬНОМ изменении содержимого).
+    # (`updated_iso`, ставит сборщик и только при РЕАЛЬНОМ изменении содержимого).
     # Аргумент остался запасным: у старых data-файлов поля нет.
     def _lm(iso):
         d = iso or lastmod

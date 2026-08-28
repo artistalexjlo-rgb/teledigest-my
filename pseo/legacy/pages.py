@@ -23,125 +23,10 @@ from slugs import slug, slug_or_none  # ЕДИНСТВЕННОЕ определ�
 # полка → стабильный латинский ключ для URL (/ru/<geo>/s/finance/), не транслит-slug
 SHELF_KEY = {name: key for key, name, _ in _tax.SHELVES}
 # тип абзаца → латинский ключ (css-класс тега на карточке/аккордеоне)
-TYPE_KEY = {name: key for key, name, _ in _tax.TYPES}
 # короткий ярлык тега (полное имя типа громоздко для чипа в аккордеоне)
 # Ярлык типа абзаца ПО ЯЗЫКАМ. Был плоским русским словарём — и это была вторая причина,
 # по которой полочный контур держали под `if lang == "ru"`: на английской странице чип
 # напечатал бы «лайфхак». Нет языка — англ. фолбэк, не русский (русский виден как брак).
-TYPE_SHORT = {
-    "ru": {
-        "lifehack": "лайфхак",
-        "reglament": "регламент",
-        "howto": "инструкция",
-        "risk": "риск",
-        "case": "кейс",
-        "service": "сервис",
-    },
-    "en": {
-        "lifehack": "tip",
-        "reglament": "rule",
-        "howto": "how-to",
-        "risk": "risk",
-        "case": "case",
-        "service": "service",
-    },
-    "es": {
-        "lifehack": "truco",
-        "reglament": "norma",
-        "howto": "guía",
-        "risk": "riesgo",
-        "case": "caso",
-        "service": "servicio",
-    },
-    "pt": {
-        "lifehack": "dica",
-        "reglament": "regra",
-        "howto": "guia",
-        "risk": "risco",
-        "case": "caso",
-        "service": "serviço",
-    },
-    "de": {
-        "lifehack": "Tipp",
-        "reglament": "Regel",
-        "howto": "Anleitung",
-        "risk": "Risiko",
-        "case": "Fall",
-        "service": "Service",
-    },
-    "fr": {
-        "lifehack": "astuce",
-        "reglament": "règle",
-        "howto": "guide",
-        "risk": "risque",
-        "case": "cas",
-        "service": "service",
-    },
-    "it": {
-        "lifehack": "trucco",
-        "reglament": "regola",
-        "howto": "guida",
-        "risk": "rischio",
-        "case": "caso",
-        "service": "servizio",
-    },
-    "tr": {
-        "lifehack": "ipucu",
-        "reglament": "kural",
-        "howto": "rehber",
-        "risk": "risk",
-        "case": "vaka",
-        "service": "servis",
-    },
-    "zh": {
-        "lifehack": "窍门",
-        "reglament": "规定",
-        "howto": "步骤",
-        "risk": "风险",
-        "case": "案例",
-        "service": "服务",
-    },
-    "ja": {
-        "lifehack": "コツ",
-        "reglament": "ルール",
-        "howto": "手順",
-        "risk": "リスク",
-        "case": "事例",
-        "service": "サービス",
-    },
-    "ko": {
-        "lifehack": "팁",
-        "reglament": "규정",
-        "howto": "방법",
-        "risk": "위험",
-        "case": "사례",
-        "service": "서비스",
-    },
-    "ar": {
-        "lifehack": "نصيحة",
-        "reglament": "قاعدة",
-        "howto": "دليل",
-        "risk": "خطر",
-        "case": "حالة",
-        "service": "خدمة",
-    },
-    "hi": {
-        "lifehack": "तरीका",
-        "reglament": "नियम",
-        "howto": "गाइड",
-        "risk": "जोखिम",
-        "case": "मामला",
-        "service": "सेवा",
-    },
-    "th": {
-        "lifehack": "เคล็ดลับ",
-        "reglament": "กฎ",
-        "howto": "วิธีทำ",
-        "risk": "ความเสี่ยง",
-        "case": "กรณี",
-        "service": "บริการ",
-    },
-}
 SHELF_MIN = 3  # полка становится страницей от 3 абзацев (мельче — тонковато)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../pseo
@@ -2269,13 +2154,6 @@ def groups_to_faqs(v, lang):
         rep = by_id[g["rep"]]
         q, a = lead_split(rep["text"])
         f = {"q": q, "a": a, "n": g["n"], "n_word": n_word(lang, g["n"])}
-        typ = rep.get(
-            "type"
-        )  # у хвост-антологий абзац типизирован (lifehack/reglament/…)
-        if typ and typ in TYPE_KEY:
-            key = TYPE_KEY[typ]
-            f["type"] = TYPE_SHORT.get(lang, TYPE_SHORT["en"]).get(key, typ)
-            f["type_key"] = key
         faqs.append(f)
     return faqs
 
@@ -2781,7 +2659,6 @@ def build_geo(geo, lang="ru"):
                 page["faqs_label"] = C["fact_list_label"]
         elif v.get("groups"):  # дедуп прошёл (dedup.py) → компактная страница-аккордеон
             page["template"] = "page.html.j2"
-            page["short_answer"] = v.get("kratko")  # None → блок скрыт шаблоном
             page["list_label"] = C[
                 "fact_list_label"
             ]  # «Из живого опыта», не «Частые вопросы»

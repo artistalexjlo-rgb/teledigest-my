@@ -1,0 +1,18 @@
+{
+ "_readme": "Имена тринадцати тем по языкам. `en` — авторский источник (написан руками, не переводится). Остальные тринадцать, включая ru, покупает звено 6 (translation.py, рот labels) переводом с английского и дописывает сюда — русский тут ОБЫЧНЫЙ язык перевода, как и в текстах советов, отдельного пути к нему нет.",
+ "en": {
+  "border": "Border and Migration Control",
+  "visa": "Visa Procedures",
+  "finance": "Finance and Banking",
+  "transport": "Transport and Logistics",
+  "docs": "Document Support",
+  "safety": "Regional Safety and Risks",
+  "customs": "Customs Rules",
+  "digital": "Digital Life and Connectivity",
+  "tourism": "Tourism and Leisure",
+  "housing": "Housing and Rentals",
+  "shopping": "Shopping and Services",
+  "work": "Work, Study and Community",
+  "health": "Health and Medicine"
+ }
+}
