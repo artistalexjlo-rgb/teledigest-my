@@ -478,14 +478,26 @@ def pipeline_state():
             # шагом» — не кнопка, не запуск). Свежесть векторов свипер решает сам, по таймеру.
             have = _vectors.load_vecs(list(ids))
             st["no_vec"] += len(ids) - len(have)
+            # ⛔ Схлопывание устарело, если протокол НЕ ПОКРЫВАЕТ все текущие мухи гео —
+            # не просто «файла нет вовсе» (29.08, юзер поймал: новые мухи, пришедшие после
+            # первого прогона, молча не проходили дедуп, протокол-то уже существовал).
+            dedup_fn = f"{BRAIN}/{TESTS}/dedup/{g}.json"
+            if not os.path.exists(dedup_fn):
+                st["collapse"].append(g)
+            else:
+                try:
+                    proto = json.load(open(dedup_fn, encoding="utf-8"))
+                    covered = {
+                        i
+                        for grp in proto.get("groups") or []
+                        for i in grp.get("ids") or []
+                    }
+                    if set(ids) - covered:
+                        st["collapse"].append(g)
+                except Exception:
+                    st["collapse"].append(g)
     except Exception as e:
         st["error"] = f"база мух недоступна: {e}"
-
-    # ── схлопывание: у гео есть мухи, а протокола схлопывания ещё нет ─────────────────
-    # Работа шага = «что МОЖНО сделать»: гео, которое ждёт разметки и не схлопнуто.
-    for x in st["mark"]:
-        if not os.path.exists(f"{BRAIN}/{TESTS}/dedup/{x['geo']}.json"):
-            st["collapse"].append(x["geo"])
 
     # ── списки: разметка есть, а корпус старше её или отсутствует ──────────────────────
     only = test_geo()
@@ -528,6 +540,26 @@ def pipeline_state():
             if not os.path.exists(lp) or os.path.getmtime(lp) < corpus_mtime:
                 st["to_translate"].append(geo)
                 break
+
+    # ⛔ «Сборка сайта» и «Готовность» и того же класса: раньше работа считалась по
+    # «корпус существует», кнопки НИКОГДА не гасли галкой (29.08, юзер поймал). Теперь —
+    # по свежести: данные (`site.py`) не старше корпуса, `ready.json` не старше данных.
+    corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/*.json")
+    data_all = glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
+    if corpus_all and data_all:
+        st["build_done"] = min(os.path.getmtime(p) for p in data_all) >= max(
+            os.path.getmtime(p) for p in corpus_all
+        )
+    else:
+        st["build_done"] = False
+
+    ready_fn = f"{TRACT}/ready.json"
+    if data_all and os.path.exists(ready_fn):
+        st["readiness_done"] = os.path.getmtime(ready_fn) >= max(
+            os.path.getmtime(p) for p in data_all
+        )
+    else:
+        st["readiness_done"] = False
     return st
 
 
@@ -611,13 +643,17 @@ def pipeline_steps(s):
         },
         {
             "kind": "build",
-            "jobs": [("build", None)] if s["geos"] else [],
+            "jobs": [("build", None)] if s["geos"] and not s.get("build_done") else [],
             "label": f"6. Сборка сайта — {s['views']} страниц",
             "note": "",
         },
         {
             "kind": "readiness",
-            "jobs": [("readiness", None)] if s["geos"] else [],
+            "jobs": (
+                [("readiness", None)]
+                if s["geos"] and not s.get("readiness_done")
+                else []
+            ),
             "label": "7. Готовность снимка",
             "note": "гейт над песочницей; каталога раздачи ещё нет — не публикация",
         },
