@@ -5,6 +5,7 @@
 всё остальное — код. Сторож держит две вещи: новые кнопки на месте и старые не вернулись.
 """
 
+import json
 import os
 import pathlib
 import sys
@@ -136,6 +137,120 @@ def test_translate_is_done_when_every_language_is_fresh(tmp_path, monkeypatch):
 
     st = bot.pipeline_state()
     assert "gr" not in st["to_translate"], "все языки свежие — шаг обязан быть ✅"
+
+
+def test_collapse_is_stale_when_new_flies_are_not_covered(tmp_path, monkeypatch):
+    """Схлопывание не гасит галку, если протокол дедупа не покрывает мух гео — не
+    просто «файла нет вовсе».
+
+    ⛔ 29.08: протокол мог остаться от первого прогона, а новые мухи (пришедшие позже)
+    в нём не значились — кнопка молчала, хотя новые мухи никогда не проходили дедуп.
+    """
+    import sqlite3
+
+    import corpus
+    import vectors
+
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    dbpath = str(tmp_path / "messages_fts.db")
+    conn = sqlite3.connect(dbpath)
+    conn.execute(
+        "CREATE TABLE extracted_patterns (country TEXT, id TEXT, ai_lesson TEXT)"
+    )
+    long_text = "x" * 200
+    for i in range(3):
+        conn.execute(
+            "INSERT INTO extracted_patterns VALUES (?,?,?)", ("gr", f"g{i}", long_text)
+        )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(corpus, "DB", dbpath)
+    # ⛔ Без своей vec.db грузим дефолтный `/root/embed_ab/...` — невалидный путь на
+    # Windows рушит проход по гео ДО проверки схлопывания, а не только счётчик векторов.
+    vecdb = str(tmp_path / "local_vec.db")
+    vc = sqlite3.connect(vecdb)
+    vc.execute("CREATE TABLE vec (doc_id TEXT, v BLOB)")
+    vc.commit()
+    vc.close()
+    monkeypatch.setattr(vectors, "VEC_DB", vecdb)
+    bot.set_test_geo("gr")
+
+    dedup_dir = tmp_path / "tests" / "dedup"
+    dedup_dir.mkdir(parents=True)
+    # протокол покрывает ТОЛЬКО g0, g1 — g2 (новая муха) в него не попал
+    (dedup_dir / "gr.json").write_text(
+        json.dumps({"groups": [{"rep": "g0", "ids": ["g0", "g1"]}]}), encoding="utf-8"
+    )
+
+    st = bot.pipeline_state()
+    assert (
+        "gr" in st["collapse"]
+    ), "новая муха не покрыта протоколом — шаг обязан быть НЕ готов"
+
+    (dedup_dir / "gr.json").write_text(
+        json.dumps({"groups": [{"rep": "g0", "ids": ["g0", "g1", "g2"]}]}),
+        encoding="utf-8",
+    )
+    st = bot.pipeline_state()
+    assert "gr" not in st["collapse"], "все мухи покрыты — шаг обязан быть ✅"
+
+
+def test_build_is_done_only_when_data_is_not_older_than_corpus(tmp_path, monkeypatch):
+    """Кнопка «Сборка сайта» гасит галку, только когда данные (`site.py`) не старше
+    корпуса — не просто «корпус существует» (29.08, та же болезнь, что у переводов).
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    corpus_dir = tmp_path / "tests" / "out_facet_en"
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "gr.json").write_text('{"views_by_task": []}', encoding="utf-8")
+
+    st = bot.pipeline_state()
+    assert st["build_done"] is False, "данных ещё нет — шаг обязан быть НЕ готов"
+
+    data_dir = tmp_path / "tests" / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "en_gr.json").write_text("{}", encoding="utf-8")
+    old = os.path.getmtime(corpus_dir / "gr.json") - 10
+    os.utime(data_dir / "en_gr.json", (old, old))
+
+    st = bot.pipeline_state()
+    assert st["build_done"] is False, "данные старше корпуса — шаг обязан быть НЕ готов"
+
+    fresh = os.path.getmtime(corpus_dir / "gr.json") + 10
+    os.utime(data_dir / "en_gr.json", (fresh, fresh))
+    st = bot.pipeline_state()
+    assert st["build_done"] is True, "данные свежее корпуса — шаг обязан быть ✅"
+
+
+def test_readiness_is_done_only_when_ready_json_is_fresh(tmp_path, monkeypatch):
+    """Кнопка «Готовность» гасит галку, только когда `ready.json` не старше собранных
+    данных — не просто «корпус существует».
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "TRACT", str(tmp_path))
+    data_dir = tmp_path / "tests" / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "en_gr.json").write_text("{}", encoding="utf-8")
+
+    st = bot.pipeline_state()
+    assert (
+        st["readiness_done"] is False
+    ), "ready.json ещё нет — шаг обязан быть НЕ готов"
+
+    ready_fn = tmp_path / "ready.json"
+    ready_fn.write_text("{}", encoding="utf-8")
+    old = os.path.getmtime(data_dir / "en_gr.json") - 10
+    os.utime(ready_fn, (old, old))
+    st = bot.pipeline_state()
+    assert (
+        st["readiness_done"] is False
+    ), "ready.json старше данных — шаг обязан быть НЕ готов"
+
+    fresh = os.path.getmtime(data_dir / "en_gr.json") + 10
+    os.utime(ready_fn, (fresh, fresh))
+    st = bot.pipeline_state()
+    assert st["readiness_done"] is True, "ready.json свежее данных — шаг обязан быть ✅"
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
