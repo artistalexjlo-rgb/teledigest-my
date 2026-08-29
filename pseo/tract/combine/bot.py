@@ -421,11 +421,14 @@ def pipeline_state():
         "to_translate": [],  # гео, у которых хоть один целевой язык отстал от корпуса
         "views": 0,
         "langs": [],
+        "no_vec": 0,  # мух пробы без bge-m3-вектора (28.08) — ВИДИМОСТЬ, не действие:
+        # свипер (`bge-sweep.timer` на VPS) обслуживает не только тракт, пульт его не трогает
     }
     if TRACT not in _sys.path:
         _sys.path.insert(0, TRACT)
     try:
         import corpus as _facet
+        import vectors as _vectors
     except Exception as e:  # без билдера состояние не посчитать — честно скажем
         st["error"] = str(e)
         return st
@@ -471,6 +474,10 @@ def pipeline_state():
             if left:
                 st["mark"].append({"geo": g, "n": left})
                 st["mark_n"] += left
+            # ⛔ Только видимость (юзер 29.08: «нужна видимость его состояния перед своим
+            # шагом» — не кнопка, не запуск). Свежесть векторов свипер решает сам, по таймеру.
+            have = _vectors.load_vecs(list(ids))
+            st["no_vec"] += len(ids) - len(have)
     except Exception as e:
         st["error"] = f"база мух недоступна: {e}"
 
@@ -537,6 +544,8 @@ def state_card():
             else "🎯 проба: страна не выбрана (весь корпус) — /geo <код>"
         ),
         f"📦 корпус: {s['geos']} гео, {s['views']} страниц",
+        f"🧬 векторы: {s['no_vec']} мух без вектора"
+        + (" — схлопывание не увидит похожих у них" if s["no_vec"] else ""),
     ]
     if s["mark"]:
         worst = ", ".join(f"{x['geo']}({x['n']})" for x in s["mark"][:6])

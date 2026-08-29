@@ -401,40 +401,56 @@ def summarize(geo):
             print(f"  стоп на теме {tema}", flush=True)
             break
 
-        # ── ПРОХОД А: закрытый список имён темы ────────────────────────────────────
-        masses = {}
-        for r in group:
-            masses[r["subtheme"]] = masses.get(r["subtheme"], 0) + 1
-        labels = sorted(masses.items(), key=lambda kv: -kv[1])
-        idx = {str(j): f"{m} ({n})" for j, (m, n) in enumerate(labels)}
-        res = call(
-            json.dumps(idx, ensure_ascii=False),
-            names_sys(),
-            consumer="canon",
-            salvage=("names", "names"),
-        )
-        names = []
-        for raw in (res or {}).get("names") or []:
-            nm = str(raw or "").strip()
-            if nm and not bad_name(nm) and nm not in names:
-                names.append(nm)
-        names = names[:NAMES_MAX]
-        if not names:
-            print(f"  тема {tema}: список имён не получен, пропуск", flush=True)
-            continue
+        # ⛔ Список имён темы ЗАМОРОЖЕН, если у темы уже есть хоть один именованный
+        # совет — иначе проход А выдаёт СВОЙ список на каждом прогоне (рот не
+        # детерминирован), и добавление новых мух переприсваивало бы имена ВСЕМ
+        # советам темы заново, уводя адреса страниц (28.08, юзер поймал риск).
+        frozen = sorted({r["name"] for r in group if r.get("name")})
+        if frozen:
+            names = frozen
+            label_count = None
+        else:
+            # ── ПРОХОД А: закрытый список имён темы (только первый раз для темы) ──
+            masses = {}
+            for r in group:
+                masses[r["subtheme"]] = masses.get(r["subtheme"], 0) + 1
+            labels = sorted(masses.items(), key=lambda kv: -kv[1])
+            label_count = len(labels)
+            idx = {str(j): f"{m} ({n})" for j, (m, n) in enumerate(labels)}
+            res = call(
+                json.dumps(idx, ensure_ascii=False),
+                names_sys(),
+                consumer="canon",
+                salvage=("names", "names"),
+            )
+            names = []
+            for raw in (res or {}).get("names") or []:
+                nm = str(raw or "").strip()
+                if nm and not bad_name(nm) and nm not in names:
+                    names.append(nm)
+            names = names[:NAMES_MAX]
+            if not names:
+                print(f"  тема {tema}: список имён не получен, пропуск", flush=True)
+                continue
         for nm in names:
             directory.setdefault(nm, {"slug": slug(nm)})
 
-        # ── ПРОХОД Б: присваивание из закрытого списка ─────────────────────────────
+        # ── ПРОХОД Б: присваивание из закрытого списка — ТОЛЬКО новым советам ──────
+        # ⛔ Уже размеченные (`r["name"]` стоит) не трогаем и рту не показываем — как
+        # `undone()` в звене 3: старое не переплачиваем и не рискуем пересчитать иначе.
+        todo = [r for r in group if not r.get("name")]
+        if not todo:
+            print(f"  тема {tema}: новых советов нет, имён {len(names)}", flush=True)
+            continue
         # ⛔ Нумерация имён С ЕДИНИЦЫ: «0» занят под «ни одно не подошло» (так в
         # исходном промпте). С нуля ноль значил бы и первое имя, и отказ.
         names_map = {str(k): nm for k, nm in enumerate(names, start=1)}
         vzyato = 0
-        for st in range(0, len(group), ASSIGN_BATCH):
+        for st in range(0, len(todo), ASSIGN_BATCH):
             if os.path.exists("RUNNER_STOP"):
                 print(f"  стоп на теме {tema}, пачка {st}", flush=True)
                 break
-            chunk = group[st : st + ASSIGN_BATCH]
+            chunk = todo[st : st + ASSIGN_BATCH]
             user = json.dumps(
                 {
                     "names": names_map,
@@ -453,9 +469,10 @@ def summarize(geo):
                     vzyato += 1
             _save_json(fn, tagged)  # чекпоинт: СТОП не съедает уплаченное
             _save_json(names_path(), directory)
+        metki = "заморожен" if label_count is None else str(label_count)
         print(
-            f"  тема {tema}: советов {len(group)}, меток {len(labels)} -> имён "
-            f"{len(names)}, разложено {vzyato}",
+            f"  тема {tema}: советов {len(group)} (новых {len(todo)}), меток {metki} "
+            f"-> имён {len(names)}, разложено {vzyato}",
             flush=True,
         )
     print(
