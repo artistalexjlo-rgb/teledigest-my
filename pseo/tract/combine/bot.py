@@ -418,7 +418,7 @@ def pipeline_state():
         "summarize": [],
         "build_corpus": [],
         "geos": 0,
-        "sobrano": [],  # гео, у которых корпус уже собран: их и переводим
+        "to_translate": [],  # гео, у которых хоть один целевой язык отстал от корпуса
         "views": 0,
         "langs": [],
     }
@@ -507,11 +507,20 @@ def pipeline_state():
             d = json.load(open(fn, encoding="utf-8"))
         except Exception:
             continue
+        geo = os.path.basename(fn)[:-5]
         st["geos"] += 1
-        st["sobrano"].append(
-            os.path.basename(fn)[:-5]
-        )  # гео с корпусом — работа переводам
         st["views"] += len(d.get("views_by_task") or [])
+        # ⛔ Работа шага переводов = хоть один целевой язык ОТСТАЛ от корпуса, а не «корпус
+        # существует» (28.08, юзер поймал: кнопка «Переводы» не гасла галкой после успешного
+        # прогона — старая проверка не смотрела, готовы ли переводы, только что есть корпус).
+        corpus_mtime = os.path.getmtime(fn)
+        for lang in _SITE["languages"]:
+            if lang == "en":
+                continue
+            lp = f"{BRAIN}/{TESTS}/out_facet_{lang}/{geo}.json"
+            if not os.path.exists(lp) or os.path.getmtime(lp) < corpus_mtime:
+                st["to_translate"].append(geo)
+                break
     return st
 
 
@@ -587,7 +596,7 @@ def pipeline_steps(s):
         },
         {
             "kind": "translate",
-            "jobs": [("translate", g) for g in s.get("sobrano") or []],
+            "jobs": [("translate", g) for g in s.get("to_translate") or []],
             "label": "5. Переводы — 13 языков",
             "note": "ключи; английский бесплатно",
         },

@@ -102,13 +102,40 @@ def test_job_tuples_are_kind_then_geo():
         "mark_n": 5,
         "summarize": ["cz"],
         "build_corpus": ["cz"],
-        "sobrano": ["cz"],
+        "to_translate": ["cz"],
         "geos": 1,
         "views": 3,
     }
     for st in bot.pipeline_steps(s):
         for job in st["jobs"]:
             assert job[0] == st["kind"], f"{st['kind']}: job {job} не начинается с kind"
+
+
+def test_translate_is_done_when_every_language_is_fresh(tmp_path, monkeypatch):
+    """Кнопка «Переводы» гасит галку, когда у гео есть корпус и ВСЕ целевые языки не
+    старше него — не просто «корпус существует».
+
+    ⛔ 28.08, юзер поймал: после успешного прогона (все 14 языков, 791 совет) кнопка
+    осталась без ✅ — старая проверка (`to_translate`, тогда `sobrano`) считала работой
+    сам факт наличия корпуса, а не отставание переводов от него.
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    out = tmp_path / "tests" / "out_facet_en"
+    out.mkdir(parents=True)
+    (out / "gr.json").write_text('{"views_by_task": []}', encoding="utf-8")
+
+    st = bot.pipeline_state()
+    assert "gr" in st["to_translate"], "без единого перевода шаг обязан быть НЕ готов"
+
+    for lang in bot._SITE["languages"]:
+        if lang == "en":
+            continue
+        d = tmp_path / "tests" / f"out_facet_{lang}"
+        d.mkdir(parents=True)
+        (d / "gr.json").write_text('{"views_by_task": []}', encoding="utf-8")
+
+    st = bot.pipeline_state()
+    assert "gr" not in st["to_translate"], "все языки свежие — шаг обязан быть ✅"
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):

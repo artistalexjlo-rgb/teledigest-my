@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import sys
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,6 +32,21 @@ from country_codes import COUNTRIES  # noqa: E402
 BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам site.py тут же
 DATA = os.environ.get("PSEO_DATA", f"{BASE}/data")
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
+# ⛔ Картинки — НЕ в git (28.08, юзер: «отдельная папка без гит, кинул копированием»).
+# Кладутся руками, найдены по имени — без записи в корпус и без рта. Хаб: `<гео>.webp`.
+# Страница: `<гео>_<тема>_<слаг>.webp`. Нет файла — нет `<img>`, дырки в вёрстке не будет.
+IMAGES = os.environ.get("PSEO_IMAGES", f"{BUILT}/images")
+# Список ожидаемых имён — чтобы не гадать, как назвать файл. Копится по ходу сборки,
+# пишется build_all() в конце в `{BUILT}/images_wanted.txt`, тот же на любой язык —
+# имя картинки не зависит от языка страницы.
+_wanted_images = set()
+
+
+def image_for(*parts):
+    fn = "_".join(parts) + ".webp"
+    _wanted_images.add(fn)
+    return fn if os.path.exists(f"{IMAGES}/{fn}") else None
+
 
 # `themes.json` РАСТЁТ: звено 6 дописывает купленные языки — как canon.json, живёт на
 # СМОНТИРОВАННОМ томе (BUILT_DIR), а не в образе, иначе редеплой стирал бы покупки (28.08,
@@ -136,7 +152,7 @@ def advice_page(page_data, geo, lang, siblings=()):
     ]
     faqs = [
         {
-            "q": it["text"].split(".")[0][:120],
+            "q": textwrap.shorten(it["text"].split(".")[0], 120, placeholder="…"),
             "a": it["text"],
             "n": it.get("n", 1),
             "n_word": "",
@@ -166,6 +182,7 @@ def advice_page(page_data, geo, lang, siblings=()):
         # поисковику части разными видеть надо.
         "parts": parts if len(parts) > 1 else [],
         "search_title": page_data["title"],
+        "image": image_for(geo, theme, slug),
     }
 
 
@@ -213,7 +230,7 @@ def theme_page(theme, pages, leftover, geo, lang):
         # Остаток — то, чему имени не нашлось. Показываем списком, чтобы советы не пропали.
         page["faqs"] = [
             {
-                "q": it["text"].split(".")[0][:120],
+                "q": textwrap.shorten(it["text"].split(".")[0], 120, placeholder="…"),
                 "a": it["text"],
                 "n": it.get("n", 1),
                 "n_word": "",
@@ -247,6 +264,7 @@ def hub(geo, themes, lang):
         "title": _geo_name(geo, lang),
         "tiles": tiles,
         "search_title": _geo_name(geo, lang),
+        "image": image_for(geo),
     }
 
 
@@ -394,6 +412,13 @@ def build_all(lang="en"):
         _write(f"{lang}_about.json", page)
         total += 1
     print(f"ИТОГО {lang}: {total} страниц-data -> {DATA}", flush=True)
+    # Список ожидаемых имён картинок — не зависит от языка страницы, тот же на любой
+    # прогон. Пишем поверх: не архив, а актуальный список того, чего сейчас не хватает.
+    if _wanted_images:
+        with open(f"{BUILT}/images_wanted.txt", "w", encoding="utf-8") as fh:
+            have = {os.path.basename(p) for p in glob.glob(f"{IMAGES}/*.webp")}
+            for fn in sorted(_wanted_images):
+                fh.write(f"{'✅' if fn in have else '·'} {fn}\n")
     return total
 
 
