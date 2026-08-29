@@ -173,6 +173,7 @@ def test_menu_builds_on_a_live_state(monkeypatch):
             "geos": 1,
             "views": 12,
             "langs": [],
+            "no_vec": 0,
         },
     )
     bot.send_menu(None)
@@ -201,6 +202,7 @@ def test_every_geo_step_gets_its_own_rows(monkeypatch):
             "geos": 0,
             "views": 0,
             "langs": [],
+            "no_vec": 0,
         },
     )
     bot.send_menu(None)
@@ -235,6 +237,7 @@ def test_menu_shows_only_the_trial_country(tmp_path, monkeypatch):
             "geos": 0,
             "views": 0,
             "langs": [],
+            "no_vec": 0,
         },
     )
     bot.send_menu(None)
@@ -271,6 +274,7 @@ def test_trial_country_is_picked_by_button(tmp_path, monkeypatch):
             "geos": 0,
             "views": 0,
             "langs": [],
+            "no_vec": 0,
         },
     )
     bot.send_menu(None)
