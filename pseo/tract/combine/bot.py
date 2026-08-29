@@ -520,13 +520,16 @@ def pipeline_state():
         if not os.path.exists(corpus) or os.path.getmtime(corpus) < svezhee:
             st["build_corpus"].append(geo)
 
-    # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
+    # ── корпус: сколько гео и страниц уже собрано — ПО ВЫБРАННОЙ ПРОБЕ, как всё остальное
+    # (29.08, юзер поймал: выбор новой страны показывал готовым по данным СТАРОЙ). ─────────
     for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet_en/*.json")):
+        geo = os.path.basename(fn)[:-5]
+        if only and geo != only:
+            continue
         try:
             d = json.load(open(fn, encoding="utf-8"))
         except Exception:
             continue
-        geo = os.path.basename(fn)[:-5]
         st["geos"] += 1
         st["views"] += len(d.get("views_by_task") or [])
         # ⛔ Работа шага переводов = хоть один целевой язык ОТСТАЛ от корпуса, а не «корпус
@@ -541,11 +544,18 @@ def pipeline_state():
                 st["to_translate"].append(geo)
                 break
 
-    # ⛔ «Сборка сайта» и «Готовность» и того же класса: раньше работа считалась по
-    # «корпус существует», кнопки НИКОГДА не гасли галкой (29.08, юзер поймал). Теперь —
-    # по свежести: данные (`site.py`) не старше корпуса, `ready.json` не старше данных.
-    corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/*.json")
-    data_all = glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
+    # ⛔ «Сборка сайта» и «Готовность» — той же болезни свежести, что переводы, и той же
+    # пробы, что всё остальное. Имя данных — `<язык>_<гео>[...].json`, гео вторым куском.
+    if only:
+        corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/{only}.json")
+        data_all = [
+            p
+            for p in glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
+            if os.path.basename(p)[: -len(".json")].split("_")[1:2] == [only]
+        ]
+    else:
+        corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/*.json")
+        data_all = glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
     if corpus_all and data_all:
         st["build_done"] = min(os.path.getmtime(p) for p in data_all) >= max(
             os.path.getmtime(p) for p in corpus_all

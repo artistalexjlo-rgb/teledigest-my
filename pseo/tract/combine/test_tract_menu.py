@@ -253,6 +253,40 @@ def test_readiness_is_done_only_when_ready_json_is_fresh(tmp_path, monkeypatch):
     assert st["readiness_done"] is True, "ready.json свежее данных — шаг обязан быть ✅"
 
 
+def test_switching_probe_does_not_borrow_another_geos_readiness(tmp_path, monkeypatch):
+    """Свежевыбранная проба не должна показывать готовым то, что готово у ДРУГОГО гео.
+
+    ⛔ 29.08, юзер поймал: переключил пробу с `gr` (полностью собранной) на `gb` — и
+    «Сборка сайта»/«Готовность» сразу стояли ✅, хотя `gb` только начал разметку. Свежесть
+    считалась по ВСЕМ гео сразу, а не по выбранной пробе, как остальные шаги.
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "TRACT", str(tmp_path))
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+
+    # gr — полностью собран и готов
+    (tmp_path / "tests" / "out_facet_en").mkdir(parents=True)
+    (tmp_path / "tests" / "out_facet_en" / "gr.json").write_text(
+        '{"views_by_task": []}', encoding="utf-8"
+    )
+    (tmp_path / "tests" / "data").mkdir(parents=True)
+    (tmp_path / "tests" / "data" / "en_gr.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "ready.json").write_text("{}", encoding="utf-8")
+
+    bot.set_test_geo("gr")
+    st = bot.pipeline_state()
+    assert st["build_done"] is True, "gr собран — шаг обязан быть ✅"
+    assert st["readiness_done"] is True, "gr проверен — шаг обязан быть ✅"
+
+    # переключились на gb — у него корпуса и данных ещё нет вовсе
+    bot.set_test_geo("gb")
+    st = bot.pipeline_state()
+    assert st["build_done"] is False, "у gb корпуса нет — шаг НЕ должен быть ✅"
+    assert st["readiness_done"] is False, "у gb данных нет — шаг НЕ должен быть ✅"
+    assert st["geos"] == 0, "проба gb — счёт не должен показывать корпус gr"
+    assert st["views"] == 0, st["views"]
+
+
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
     """Работа шага «списки» = гео, у которых разметка новее корпуса или корпуса нет.
 
