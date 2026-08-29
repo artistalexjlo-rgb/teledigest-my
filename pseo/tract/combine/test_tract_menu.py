@@ -511,6 +511,49 @@ def test_cycle_goes_country_by_country_not_step_by_step():
     ], chain
 
 
+class _FakeProc:
+    """Заглушка subprocess.Popen для сторожа `_pump`: только `.stdout` и `.wait()`."""
+
+    def __init__(self, lines, rc=0):
+        self.stdout = iter(lines)
+        self._rc = rc
+
+    def wait(self):
+        return self._rc
+
+
+def test_budget_marker_pauses_chain_and_notifies_once(tmp_path, monkeypatch):
+    """Строка «бюджет модели … выбран — стоп» из keybroker.call() уже несёт готовый
+    сигнал «день исчерпан» (acquire() отдаёт -1.0) — раньше он тонул в логе контейнера.
+
+    ⛔ 29.08: пульт ловит ЭТУ строку и ставит вежливый стоп-флаг (та же ветка, что у
+    ручной ⛔ СТОП) — иначе цепочка цикла пролетела бы вхолостую по всем оставшимся
+    шагам без единого ключа, вместо того чтобы честно встать и подождать.
+    """
+    monkeypatch.setattr(bot, "JOBS_DB", str(tmp_path / "jobs.db"))
+    monkeypatch.setattr(bot, "STOP_FLAGS", [str(tmp_path / "RUNNER_STOP")])
+    monkeypatch.setattr(bot, "brain_stats", lambda: (0, [], 0, 0))
+    said = []
+    monkeypatch.setattr(bot, "say", lambda t, **kw: (said.append(t), 1)[1])
+    j = bot.Job()
+    j.chain = [("readiness", None)]  # цепочка ещё не пуста — как при реальной паузе
+    proc = _FakeProc(
+        [
+            "разогрев\n",
+            "  бюджет модели gemini-3.1-flash-lite выбран — стоп (mark)\n",
+        ],
+        rc=0,
+    )
+    j._pump(proc, 1, "mark", "gr", str(tmp_path / "log.txt"), 0)
+    assert j.budget_paused is True
+    assert os.path.exists(
+        str(tmp_path / "RUNNER_STOP")
+    ), "вежливый стоп-флаг не поставлен"
+    assert j.chain == [], "цепочка обязана прерваться, а не лететь вхолостую без ключей"
+    assert any("бюджет модели" in t and "паузу" in t for t in said), said
+    assert any("цикл прерван" in t for t in said), said
+
+
 def test_one_bad_button_does_not_kill_the_pult():
     """Обработка обновления вызывается ПОД `try` — сбой стоит кнопки, а не пульта."""
     src = (HERE / "bot.py").read_text(encoding="utf-8")

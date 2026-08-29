@@ -614,6 +614,44 @@ def acquire(consumer, role, model, keys):
         c.close()
 
 
+def any_alive(model="gemini-3.1-flash-lite", role="background"):
+    """Правда ли хоть один ключ СЕЙЧАС годен (не бан/кап дня, не в 429-кулдауне).
+
+    Только СМОТРИТ — ничего не берёт и не двигает круг/такт. Для внешней проверки «можно
+    продолжать» (пульт, 29.08): после паузы на исчерпании пульт не должен сам звать
+    `acquire()` (это забрало бы ход у настоящего рта, когда тот вернётся), а без чтения
+    статуса ждал бы вслепую до полуночи по Pacific, даже если ключ отошёл от кулдауна раньше.
+    """
+    cap = cap_for(model, role)
+    now = time.time()
+    day = _pt_day()
+    keys = get_keys()
+    c = _conn()
+    try:
+        clocks = {
+            r[0]: r[1]
+            for r in c.execute("SELECT key_hash, cooldown_until FROM key_clock")
+        }
+        used = {
+            r[0]: (r[1], r[2])
+            for r in c.execute(
+                "SELECT key_hash, count, banned FROM usage WHERE model=? AND pt_day=?",
+                (model, day),
+            )
+        }
+        for k in keys:
+            kh = _kh(k)
+            cnt, ban = used.get(kh, (0, 0))
+            if ban or cnt >= cap:
+                continue
+            if clocks.get(kh, 0.0) > now:
+                continue
+            return True
+        return False
+    finally:
+        c.close()
+
+
 def report(consumer, key, model, status):
     """Отчёт об исходе — эскалация 429 ПО ОБОРОТАМ ОЧЕРЕДИ (правило юзера 2026-07-21):
 

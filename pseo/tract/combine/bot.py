@@ -71,6 +71,16 @@ STOP_FLAGS = [
 # падал до 28.08, когда `config/` и `tract.py` считались с разной глубины.
 sys.path.insert(0, TRACT)
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
+import keybroker  # noqa: E402  для паузы на бюджете (any_alive) — см. Job._pump/_budget_watcher
+
+# Раз в сколько секунд фоновый сторож проверяет, отпустило ли пул ключей после паузы.
+# Не чаще: чтение keybroker.db лишний раз ничего не стоит, но и незачем спрашивать чаще,
+# чем раз в несколько минут, — ключи не оживают внутри минуты.
+BUDGET_POLL_S = int(os.environ.get("COMBINE_BUDGET_POLL_S", "900"))
+# Строка-маркер печатается keybroker.call() при дневном исчерпании (keybroker.py, ветка
+# `wait is None or wait < 0`) — она и есть уже вычисленный сигнал «ждать нечего до
+# полуночи», который раньше тонул в логе контейнера, а теперь пульт его ловит.
+_BUDGET_MARKER = "бюджет модели"
 
 # Список языков сайта — ОДИН источник (`config/site.py`), не второй список тут же:
 # кнопка «Сборка» обязана строить те же 14 языков, что видит переключатель на странице.
@@ -351,6 +361,23 @@ def ban_watch():
             c.close()
         except Exception as e:
             log("ban_watch сбой:", type(e).__name__, e)
+
+
+def budget_watch(job):
+    """Сторож возврата ключей после паузы (29.08). Раз в `BUDGET_POLL_S` спрашивает
+    `keybroker.any_alive()` — ТОЛЬКО смотрит, ничего не запускает: юзер решил, что полная
+    автокруговерть избыточна, а нужна пауза + «можно продолжать, нажми плей» (не автостарт).
+    """
+    while True:
+        time.sleep(BUDGET_POLL_S)
+        if not job.budget_paused:
+            continue
+        try:
+            if keybroker.any_alive():
+                job.budget_paused = False
+                say("✅ ключи снова живы — можно продолжать. Жми ▶️ в меню.")
+        except Exception as e:
+            log("budget_watch сбой:", type(e).__name__, e)
 
 
 def brain_stats():
@@ -691,6 +718,7 @@ class Job:
         self.lock = threading.Lock()
         self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
         self.tries = {}  # (шаг, гео) → сколько раз уже пробовали в этой фазе цикла
+        self.budget_paused = False  # см. _pump/_budget_watcher: пауза на дневном бане
 
     def busy(self):
         return self.proc is not None and self.proc.poll() is None
@@ -777,6 +805,21 @@ class Job:
                 line = line.strip()
                 if line:
                     self.tail = line  # последняя строка — в отчёты (живая, общая)
+                    # ⛔ 29.08: сигнал «день исчерпан» уже вычислен в keybroker.acquire()
+                    # (-1.0) и уже печатается — тонул в логе контейнера. Ловим ЭТУ же
+                    # строку и один раз за прогон шлём в чат + ставим вежливый стоп-флаг:
+                    # цикл прервётся организованно (та же ветка, что у ручной ⛔ СТОП),
+                    # а не будет вхолостую пролетать оставшиеся шаги цепочки без ключей.
+                    if _BUDGET_MARKER in line and not self.budget_paused:
+                        self.budget_paused = True
+                        for f in STOP_FLAGS:
+                            open(f, "w").close()
+                        say(
+                            f"⏸ {line}\n"
+                            "встал на паузу — ключей на сегодня нет. Напишу, когда "
+                            "пул отойдёт (проверяю раз в "
+                            f"{BUDGET_POLL_S // 60} мин)."
+                        )
         rc = proc.wait()
         spent = brain_stats()[0] - base_attempts
         mins = (time.time() - t0) / 60
@@ -1257,6 +1300,7 @@ def main():
     job = Job()
     threading.Thread(target=job.reporter, daemon=True).start()
     threading.Thread(target=ban_watch, daemon=True).start()  # сигнал о банах ключей
+    threading.Thread(target=budget_watch, args=(job,), daemon=True).start()
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
     # Рестарт контейнера убил рот вместе с PID-namespace (пульт = PID 1 — проверено
     # NSpid). Задача оборвалась молча, а канон обещает отчёт при ЛЮБОМ исходе.
