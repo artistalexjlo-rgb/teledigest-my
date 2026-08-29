@@ -74,9 +74,14 @@ def _load(path):
         return None
 
 
-def _write(name, page):
+def _write(name, page, corpus_mtime=None):
     """Записать страницу. Дату ставим ТОЛЬКО при реальном изменении содержимого: свежий
     `lastmod` на неизменной странице — ложь поисковику, и он от таких сигналов отучается.
+
+    `corpus_mtime` — время правки корпуса, из которого страница собрана (29.08, цикл
+    «по стране, потом следующая»: без этого `build_all` на 95 странах переписывал бы ВЕСЬ
+    файл каждой уже готовой страны заново при каждом новом вызове — рост квадратичный).
+    Содержимое не изменилось И диск не старше корпуса — писать нечего, файл не трогаем.
     """
     import datetime as dt
 
@@ -86,10 +91,13 @@ def _write(name, page):
     prev = _load(path)
     if prev:
         strip = {"updated", "updated_iso"}
-        if {k: v for k, v in prev.items() if k not in strip} == {
+        same = {k: v for k, v in prev.items() if k not in strip} == {
             k: v for k, v in page.items() if k not in strip
-        }:
+        }
+        if same:
             keep = prev.get("updated_iso")
+            if corpus_mtime is not None and os.path.getmtime(path) >= corpus_mtime:
+                return
     today = dt.date.today()
     page["updated"] = today.strftime("%m.%Y")
     page["updated_iso"] = keep or today.isoformat()
@@ -350,6 +358,8 @@ def build_geo(geo, lang="en"):
     d = corpus(geo, lang)
     if not d:
         return 0, []
+    corpus_fn = f"{BUILT}/out_facet_{lang}/{geo}.json"
+    corpus_mtime = os.path.getmtime(corpus_fn) if os.path.exists(corpus_fn) else None
     by_theme = {}
     for v in d.get("views_by_task") or []:
         # ⛔ Тема нужна СЕГМЕНТОМ адреса, поэтому берём ключ, а не человеческое имя полки.
@@ -370,17 +380,17 @@ def build_geo(geo, lang="en"):
         for parts in by_branch(pages):
             for p in parts:
                 _, page = advice_page(p, geo, lang, parts)
-                _write(f"{lang}_{geo}_{theme}_{p['slug']}.json", page)
+                _write(f"{lang}_{geo}_{theme}_{p['slug']}.json", page, corpus_mtime)
                 n += 1
         _, page = theme_page(theme, pages, leftovers.get(theme), geo, lang)
-        _write(f"{lang}_{geo}_{theme}.json", page)
+        _write(f"{lang}_{geo}_{theme}.json", page, corpus_mtime)
         n += 1
     themes = [
         (t, len(v)) for t, v in sorted(by_theme.items(), key=lambda kv: -len(kv[1]))
     ]
     if themes:
         _, page = hub(geo, themes, lang)
-        _write(f"{lang}_{geo}.json", page)
+        _write(f"{lang}_{geo}.json", page, corpus_mtime)
         n += 1
     return n, themes
 
