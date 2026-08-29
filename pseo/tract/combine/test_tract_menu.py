@@ -474,6 +474,43 @@ def test_cycle_counts_the_current_tract(monkeypatch):
     assert "~" in text and "запросов" in text, text
 
 
+def test_cycle_goes_country_by_country_not_step_by_step():
+    """«ВСЁ ПО ПОРЯДКУ» проходит ОДНУ страну целиком (все её шаги), потом следующую —
+    а не шаг поперёк всех стран.
+
+    ⛔ 29.08, юзер поймал: прежняя сборка `[j for st in steps for j in st["jobs"]]` шла ПО
+    ШАГУ — сперва схлопывание всех гео, потом разметка всех. При массовом прогоне на много
+    стран пауза на бюджете (день исчерпан) размазывала бы недоделанность по всем странам
+    сразу, вместо чистой границы «эти готовы, эта в работе». Сборка/готовность (глобальные,
+    без гео) обязаны стоять в ХВОСТЕ каждой страны, а не только в конце всего цикла.
+    """
+    s = {
+        "collapse": ["gr"],
+        "mark": [{"geo": "gr", "n": 5}],
+        "mark_n": 5,
+        "summarize": ["gr"],
+        "build_corpus": ["gr"],
+        "to_translate": ["gr", "gb"],
+        "geos": 2,
+        "views": 10,
+        "build_done": False,
+        "readiness_done": False,
+    }
+    chain = bot._country_major_chain(bot.pipeline_steps(s))
+    assert chain == [
+        ("collapse", "gr"),
+        ("mark", "gr"),
+        ("summarize", "gr"),
+        ("build_corpus", "gr"),
+        ("translate", "gr"),
+        ("build", None),
+        ("readiness", None),
+        ("translate", "gb"),
+        ("build", None),
+        ("readiness", None),
+    ], chain
+
+
 def test_one_bad_button_does_not_kill_the_pult():
     """Обработка обновления вызывается ПОД `try` — сбой стоит кнопки, а не пульта."""
     src = (HERE / "bot.py").read_text(encoding="utf-8")
