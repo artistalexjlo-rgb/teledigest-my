@@ -40,6 +40,63 @@ def _texts(monkeypatch, rows):
     monkeypatch.setattr(tract, "load_flies", lambda geo: list(pairs))
 
 
+def test_second_run_does_not_touch_old_names_or_reopen_pass_a(tmp_path, monkeypatch):
+    """Новые мухи в теме не трогают уже присвоенные имена и не зовут проход А заново.
+
+    ⛔ 28.08, юзер поймал риск: рот не детерминирован, и повторный вызов проход А на
+    теме с новыми мухами мог выдать ДРУГОЙ список имён — тогда проход Б переприсвоил бы
+    имена ВСЕМ советам темы (не только новым), уводя адреса уже опубликованных страниц.
+    Список имён темы теперь заморожен, как только у темы появился хоть один именованный
+    совет; проход Б трогает только `not r.get("name")`.
+    """
+    monkeypatch.chdir(tmp_path)
+    rows = [_row(i, f"label {i}") for i in range(3)]
+    _tags(tmp_path, rows)
+    _texts(monkeypatch, rows)
+
+    def fake_call_1(user, sysprompt, **kw):
+        if kw["consumer"] == "canon":
+            return {"names": ["visa documents"]}
+        adv = json.loads(user)["advices"]
+        return {"map": {k: "1" for k in adv}}
+
+    monkeypatch.setattr(tract, "call", fake_call_1)
+    tract.summarize("gr")
+
+    tagged = json.load(open(tmp_path / "tests" / "tags" / "gr.json", encoding="utf-8"))
+    assert all(r["name"] == "visa documents" for r in tagged), tagged
+
+    # ── новые мухи в ту же тему — дописываем к УЖЕ ИМЕНОВАННЫМ, не к исходным `rows`
+    new_rows = [_row(i, f"label {i}") for i in range(3, 5)]
+    rows2 = tagged + new_rows
+    _tags(tmp_path, rows2)
+    _texts(monkeypatch, rows2)
+
+    seen2 = {}
+
+    def fake_call_2(user, sysprompt, **kw):
+        seen2[kw["consumer"]] = json.loads(user)
+        if kw["consumer"] == "canon":
+            # Если проход А реально позвался — рот "передумал" бы имя. Тест обязан
+            # упасть на следующей проверке, если это случится, а не молча пройти.
+            return {"names": ["completely different name"]}
+        adv = json.loads(user)["advices"]
+        return {"map": {k: "1" for k in adv}}
+
+    monkeypatch.setattr(tract, "call", fake_call_2)
+    tract.summarize("gr")
+
+    assert "canon" not in seen2, "проход А позвался повторно — список имён не заморожен"
+    assert "assign" in seen2, "проход Б не позвался для новых советов"
+
+    tagged2 = json.load(open(tmp_path / "tests" / "tags" / "gr.json", encoding="utf-8"))
+    by_id = {r["id"]: r for r in tagged2}
+    for r in rows:  # старые — имя НЕ ИЗМЕНИЛОСЬ
+        assert by_id[r["id"]]["name"] == "visa documents", by_id[r["id"]]
+    for r in rows2[3:]:  # новые — получили имя из ЗАМОРОЖЕННОГО списка
+        assert by_id[r["id"]]["name"] == "visa documents", by_id[r["id"]]
+
+
 def test_names_come_from_pass_a_and_assignment_only_picks(tmp_path, monkeypatch):
     """А называет, Б выбирает: у советов оказываются ИМЕНА ИЗ СПИСКА, а не свои подтемы."""
     monkeypatch.chdir(tmp_path)
