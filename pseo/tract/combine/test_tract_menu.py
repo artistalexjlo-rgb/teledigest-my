@@ -196,6 +196,48 @@ def test_collapse_is_stale_when_new_flies_are_not_covered(tmp_path, monkeypatch)
     assert "gr" not in st["collapse"], "все мухи покрыты — шаг обязан быть ✅"
 
 
+def test_any_geo_is_excluded_from_the_tract(tmp_path, monkeypatch):
+    """ "any" (совет не привязан к стране, corpus.ANY_GEO) не должен попадать ни в список
+    проб, ни в работу шагов — на сайте это дало бы страну «ANY» без флага и без перевода
+    имени (ни COUNTRIES, ни countries.json его не знают). 30.08, юзер: «исключи any из
+    тракта пока» — до отдельного решения, как публиковать общие советы.
+    """
+    import sqlite3
+
+    import corpus
+    import vectors
+
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    dbpath = str(tmp_path / "messages_fts.db")
+    conn = sqlite3.connect(dbpath)
+    conn.execute(
+        "CREATE TABLE extracted_patterns (country TEXT, id TEXT, ai_lesson TEXT)"
+    )
+    long_text = "x" * 200
+    conn.execute(
+        "INSERT INTO extracted_patterns VALUES (?,?,?)", ("gr", "g0", long_text)
+    )
+    conn.execute(
+        "INSERT INTO extracted_patterns VALUES (?,?,?)", ("any", "a0", long_text)
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(corpus, "DB", dbpath)
+    vecdb = str(tmp_path / "local_vec.db")
+    vc = sqlite3.connect(vecdb)
+    vc.execute("CREATE TABLE vec (doc_id TEXT, v BLOB)")
+    vc.commit()
+    vc.close()
+    monkeypatch.setattr(vectors, "VEC_DB", vecdb)
+
+    st = bot.pipeline_state()
+    geos = {x["geo"] for x in st["all_geos"]}
+    assert "gr" in geos, "настоящая страна пропала вместе с исключением any"
+    assert "any" not in geos, "any попал в список проб — его можно было бы выбрать"
+    assert "any" not in {x["geo"] for x in st["mark"]}, "any попал в работу разметки"
+
+
 def test_build_is_done_only_when_data_is_not_older_than_corpus(tmp_path, monkeypatch):
     """Кнопка «Сборка сайта» гасит галку, только когда данные (`site.py`) не старше
     корпуса — не просто «корпус существует» (29.08, та же болезнь, что у переводов).

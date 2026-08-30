@@ -485,6 +485,13 @@ def pipeline_state():
             if _facet.is_junk(lesson):
                 continue
             for g in _facet.geo_codes(country):
+                # ⛔ 30.08: "any" — легальное значение (совет не привязан к стране,
+                # corpus.ANY_GEO), но ни COUNTRIES, ни countries.json его не знают — на
+                # сайте это дало бы страну «ANY» без флага и без перевода имени. Пока
+                # тракт не умеет отдельно публиковать общие советы — не показываем "any"
+                # даже в списке проб, чтобы его нельзя было выбрать и прогнать как страну.
+                if g == _facet.ANY_GEO:
+                    continue
                 by_geo.setdefault(g, set()).add(fid)
         only = test_geo()
         for g, ids in sorted(by_geo.items(), key=lambda kv: -len(kv[1])):
