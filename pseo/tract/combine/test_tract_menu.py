@@ -632,6 +632,50 @@ def test_every_country_in_scope_gets_the_full_fixed_sequence():
     ], chain
 
 
+def test_tg_reuses_a_shared_session_not_a_fresh_connection(monkeypatch):
+    """`tg()` обязан ходить через ОДНУ сессию (keep-alive), не `requests.post()` с нуля.
+
+    ⛔ 30.08: у пульта минимум 4 независимых потока, зовущих `tg()` (главный цикл,
+    `job.reporter`, `ban_watch`, `Job._pump`), периоды не синхронизированы и иногда
+    совпадают — при отдельном соединении на каждый вызов это новый DNS-запрос на
+    КАЖДЫЙ вызов из КАЖДОГО потока. Общая сессия резолвит DNS один раз на соединение.
+    """
+
+    class _FakeResponse:
+        def json(self):
+            return {"ok": True}
+
+    calls = []
+
+    def _fake_post(url, **kw):
+        calls.append(url)
+        return _FakeResponse()
+
+    monkeypatch.setattr(bot._TG_SESSION, "post", _fake_post)
+    bot.tg("getMe")
+    bot.tg("sendMessage", chat_id=1, text="x")
+    assert len(calls) == 2, calls  # оба ушли через ОДИН и тот же объект сессии
+
+
+def test_tg_sleeps_after_a_connection_failure_instead_of_hammering(monkeypatch):
+    """Провал связи — пауза перед возвратом, не мгновенный `{}` для нового круга сразу же.
+
+    ⛔ 30.08, живой лог: 8 подряд `TG-СБОЙ getUpdates` за 48 секунд — цикл в `main()`
+    после провала не спал вовсе и лупил заново мгновенно. Протокол лонг-поллинга
+    требует отступить после сбоя, не хлестать API/DNS сразу повторной попыткой.
+    """
+
+    def _boom(url, **kw):
+        raise ConnectionError("no dns")
+
+    monkeypatch.setattr(bot._TG_SESSION, "post", _boom)
+    slept = []
+    monkeypatch.setattr(bot.time, "sleep", lambda s: slept.append(s))
+    result = bot.tg("getUpdates", offset=0, timeout=30)
+    assert result == {}
+    assert slept == [bot.TG_RETRY_SLEEP_S], slept
+
+
 class _FakeProc:
     """Заглушка subprocess.Popen для сторожа `_pump`: только `.stdout` и `.wait()`."""
 
