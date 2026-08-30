@@ -14,9 +14,16 @@ CLI:
 только написанное свежее под план пульта). Снято при переписи: ссылка на `BUILDER_RULES`
 (документ в `pseo/legacy/`, не действует) и демо-заглушка `br_finance` из давно прошедшей
 эпохи в дефолте CLI.
+
+⭐ ДВА ДОМЕНА, ОДИН РЕНДЕР (звено 8, PLAN.md §3.2). `.ru`-зеркало несёт свой домен и CTA
+прямо в HTML (canonical/hreflang) — общий сайт для обоих доменов собрать нельзя. Какой
+конфиг брать — говорит `PSEO_SITE_CONFIG` (модуль с `SITE = {...}`, дефолт `config.site`),
+второй прогон рендера с `PSEO_SITE_CONFIG=config.site_ru` даёт `.ru`-дерево из тех же
+`data/*.json` — данные (звено 5, `site.py`) от домена не зависят.
 """
 
 import hashlib
+import importlib
 import json
 import os
 import pathlib
@@ -30,7 +37,7 @@ HERE = pathlib.Path(__file__).parent  # …/pseo/tract — templates/, i18n/, co
 # static/ переехали сюда же 28.08 (юзер: «одна папка истина — тракт»); ROOT сняли,
 # второго уровня над ними больше нет.
 sys.path.insert(0, str(HERE))
-from config.site import SITE  # noqa: E402
+SITE = importlib.import_module(os.environ.get("PSEO_SITE_CONFIG", "config.site")).SITE
 
 # ⭐ ЕДИНСТВЕННОЕ определение каталога вывода. `readycheck.py` берёт его отсюда импортом
 # и своего не заводит: до 2026-08-11 `BASE/out` было выписано в трёх местах, и при переносе
