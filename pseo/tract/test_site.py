@@ -209,3 +209,41 @@ def test_about_page_is_skipped_when_language_has_no_text(tmp_path, monkeypatch):
     monkeypatch.setattr(site, "ABOUT_FILE", str(empty_about))
     site.build_all("ru")
     assert "/ru/about/" not in _pages(tmp_path)
+
+
+def test_unchanged_page_is_not_rewritten_when_corpus_is_not_newer(
+    tmp_path, monkeypatch
+):
+    """Инкрементальность (29.08, цикл «страна за страной»): не устарело — диск не трогаем.
+
+    Иначе массовый прогон на 95 странах переписывал бы КАЖДУЮ уже готовую страну заново
+    при каждой новой (PLAN.md, «Публикации нет») — рост квадратичный без всякой пользы:
+    содержимое то же самое.
+    """
+    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents")])
+    site.build_all("ru")
+    path = tmp_path / "data" / "ru_gr.json"
+    assert path.exists()
+    corpus_fn = tmp_path / "built" / "out_facet_ru" / "gr.json"
+    # метка ЯВНО в будущем относительно корпуса — реальная перезапись дала бы «сейчас»,
+    # а «сейчас» этого корпуса заведомо меньше нашей метки.
+    marker = os.path.getmtime(corpus_fn) + 12345
+    os.utime(path, (marker, marker))
+    site.build_all("ru")  # тот же корпус, содержимое не менялось
+    assert os.path.getmtime(path) == marker, "неизменная страница переписана заново"
+
+
+def test_changed_corpus_content_is_always_rewritten(tmp_path, monkeypatch):
+    """Смена содержимого переписывает страницу независимо от меток времени на диске —
+    пропуск в `_write` смотрит СНАЧАЛА на содержимое, метка — только вторая проверка."""
+    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents")])
+    site.build_all("ru")
+    page_path = tmp_path / "data" / "ru_gr_visa_visa-documents.json"
+    future = os.path.getmtime(page_path) + 999999
+    os.utime(page_path, (future, future))
+    _korpus(tmp_path, monkeypatch, [_view("visa documents updated", "visa-documents")])
+    site.build_all("ru")
+    page = json.load(open(page_path, encoding="utf-8"))
+    assert (
+        page["h1"] == "visa documents updated"
+    ), "изменившийся корпус не переписал страницу"

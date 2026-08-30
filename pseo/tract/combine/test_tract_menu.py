@@ -196,6 +196,48 @@ def test_collapse_is_stale_when_new_flies_are_not_covered(tmp_path, monkeypatch)
     assert "gr" not in st["collapse"], "все мухи покрыты — шаг обязан быть ✅"
 
 
+def test_any_geo_is_excluded_from_the_tract(tmp_path, monkeypatch):
+    """ "any" (совет не привязан к стране, corpus.ANY_GEO) не должен попадать ни в список
+    проб, ни в работу шагов — на сайте это дало бы страну «ANY» без флага и без перевода
+    имени (ни COUNTRIES, ни countries.json его не знают). 30.08, юзер: «исключи any из
+    тракта пока» — до отдельного решения, как публиковать общие советы.
+    """
+    import sqlite3
+
+    import corpus
+    import vectors
+
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+    dbpath = str(tmp_path / "messages_fts.db")
+    conn = sqlite3.connect(dbpath)
+    conn.execute(
+        "CREATE TABLE extracted_patterns (country TEXT, id TEXT, ai_lesson TEXT)"
+    )
+    long_text = "x" * 200
+    conn.execute(
+        "INSERT INTO extracted_patterns VALUES (?,?,?)", ("gr", "g0", long_text)
+    )
+    conn.execute(
+        "INSERT INTO extracted_patterns VALUES (?,?,?)", ("any", "a0", long_text)
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(corpus, "DB", dbpath)
+    vecdb = str(tmp_path / "local_vec.db")
+    vc = sqlite3.connect(vecdb)
+    vc.execute("CREATE TABLE vec (doc_id TEXT, v BLOB)")
+    vc.commit()
+    vc.close()
+    monkeypatch.setattr(vectors, "VEC_DB", vecdb)
+
+    st = bot.pipeline_state()
+    geos = {x["geo"] for x in st["all_geos"]}
+    assert "gr" in geos, "настоящая страна пропала вместе с исключением any"
+    assert "any" not in geos, "any попал в список проб — его можно было бы выбрать"
+    assert "any" not in {x["geo"] for x in st["mark"]}, "any попал в работу разметки"
+
+
 def test_build_is_done_only_when_data_is_not_older_than_corpus(tmp_path, monkeypatch):
     """Кнопка «Сборка сайта» гасит галку, только когда данные (`site.py`) не старше
     корпуса — не просто «корпус существует» (29.08, та же болезнь, что у переводов).
@@ -251,6 +293,40 @@ def test_readiness_is_done_only_when_ready_json_is_fresh(tmp_path, monkeypatch):
     os.utime(ready_fn, (fresh, fresh))
     st = bot.pipeline_state()
     assert st["readiness_done"] is True, "ready.json свежее данных — шаг обязан быть ✅"
+
+
+def test_switching_probe_does_not_borrow_another_geos_readiness(tmp_path, monkeypatch):
+    """Свежевыбранная проба не должна показывать готовым то, что готово у ДРУГОГО гео.
+
+    ⛔ 29.08, юзер поймал: переключил пробу с `gr` (полностью собранной) на `gb` — и
+    «Сборка сайта»/«Готовность» сразу стояли ✅, хотя `gb` только начал разметку. Свежесть
+    считалась по ВСЕМ гео сразу, а не по выбранной пробе, как остальные шаги.
+    """
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "TRACT", str(tmp_path))
+    monkeypatch.setattr(bot, "GEO_FILE", str(tmp_path / "GEO"))
+
+    # gr — полностью собран и готов
+    (tmp_path / "tests" / "out_facet_en").mkdir(parents=True)
+    (tmp_path / "tests" / "out_facet_en" / "gr.json").write_text(
+        '{"views_by_task": []}', encoding="utf-8"
+    )
+    (tmp_path / "tests" / "data").mkdir(parents=True)
+    (tmp_path / "tests" / "data" / "en_gr.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "ready.json").write_text("{}", encoding="utf-8")
+
+    bot.set_test_geo("gr")
+    st = bot.pipeline_state()
+    assert st["build_done"] is True, "gr собран — шаг обязан быть ✅"
+    assert st["readiness_done"] is True, "gr проверен — шаг обязан быть ✅"
+
+    # переключились на gb — у него корпуса и данных ещё нет вовсе
+    bot.set_test_geo("gb")
+    st = bot.pipeline_state()
+    assert st["build_done"] is False, "у gb корпуса нет — шаг НЕ должен быть ✅"
+    assert st["readiness_done"] is False, "у gb данных нет — шаг НЕ должен быть ✅"
+    assert st["geos"] == 0, "проба gb — счёт не должен показывать корпус gr"
+    assert st["views"] == 0, st["views"]
 
 
 def test_work_is_counted_as_undone(tmp_path, monkeypatch):
@@ -438,6 +514,86 @@ def test_cycle_counts_the_current_tract(monkeypatch):
     assert "весь тракт" in text, text
     # разметка 765/25=31 вызов, списки ≤(13+8) вызовов, по 4 запроса worst-case
     assert "~" in text and "запросов" in text, text
+
+
+def test_cycle_goes_country_by_country_not_step_by_step():
+    """«ВСЁ ПО ПОРЯДКУ» проходит ОДНУ страну целиком (все её шаги), потом следующую —
+    а не шаг поперёк всех стран.
+
+    ⛔ 29.08, юзер поймал: прежняя сборка `[j for st in steps for j in st["jobs"]]` шла ПО
+    ШАГУ — сперва схлопывание всех гео, потом разметка всех. При массовом прогоне на много
+    стран пауза на бюджете (день исчерпан) размазывала бы недоделанность по всем странам
+    сразу, вместо чистой границы «эти готовы, эта в работе». Сборка/готовность (глобальные,
+    без гео) обязаны стоять в ХВОСТЕ каждой страны, а не только в конце всего цикла.
+    """
+    s = {
+        "collapse": ["gr"],
+        "mark": [{"geo": "gr", "n": 5}],
+        "mark_n": 5,
+        "summarize": ["gr"],
+        "build_corpus": ["gr"],
+        "to_translate": ["gr", "gb"],
+        "geos": 2,
+        "views": 10,
+        "build_done": False,
+        "readiness_done": False,
+    }
+    chain = bot._country_major_chain(bot.pipeline_steps(s))
+    assert chain == [
+        ("collapse", "gr"),
+        ("mark", "gr"),
+        ("summarize", "gr"),
+        ("build_corpus", "gr"),
+        ("translate", "gr"),
+        ("build", None),
+        ("readiness", None),
+        ("translate", "gb"),
+        ("build", None),
+        ("readiness", None),
+    ], chain
+
+
+class _FakeProc:
+    """Заглушка subprocess.Popen для сторожа `_pump`: только `.stdout` и `.wait()`."""
+
+    def __init__(self, lines, rc=0):
+        self.stdout = iter(lines)
+        self._rc = rc
+
+    def wait(self):
+        return self._rc
+
+
+def test_budget_marker_pauses_chain_and_notifies_once(tmp_path, monkeypatch):
+    """Строка «бюджет модели … выбран — стоп» из keybroker.call() уже несёт готовый
+    сигнал «день исчерпан» (acquire() отдаёт -1.0) — раньше он тонул в логе контейнера.
+
+    ⛔ 29.08: пульт ловит ЭТУ строку и ставит вежливый стоп-флаг (та же ветка, что у
+    ручной ⛔ СТОП) — иначе цепочка цикла пролетела бы вхолостую по всем оставшимся
+    шагам без единого ключа, вместо того чтобы честно встать и подождать.
+    """
+    monkeypatch.setattr(bot, "JOBS_DB", str(tmp_path / "jobs.db"))
+    monkeypatch.setattr(bot, "STOP_FLAGS", [str(tmp_path / "RUNNER_STOP")])
+    monkeypatch.setattr(bot, "brain_stats", lambda: (0, [], 0, 0))
+    said = []
+    monkeypatch.setattr(bot, "say", lambda t, **kw: (said.append(t), 1)[1])
+    j = bot.Job()
+    j.chain = [("readiness", None)]  # цепочка ещё не пуста — как при реальной паузе
+    proc = _FakeProc(
+        [
+            "разогрев\n",
+            "  бюджет модели gemini-3.1-flash-lite выбран — стоп (mark)\n",
+        ],
+        rc=0,
+    )
+    j._pump(proc, 1, "mark", "gr", str(tmp_path / "log.txt"), 0)
+    assert j.budget_paused is True
+    assert os.path.exists(
+        str(tmp_path / "RUNNER_STOP")
+    ), "вежливый стоп-флаг не поставлен"
+    assert j.chain == [], "цепочка обязана прерваться, а не лететь вхолостую без ключей"
+    assert any("бюджет модели" in t and "паузу" in t for t in said), said
+    assert any("цикл прерван" in t for t in said), said
 
 
 def test_one_bad_button_does_not_kill_the_pult():

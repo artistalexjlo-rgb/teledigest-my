@@ -70,7 +70,17 @@ STOP_FLAGS = [
 # остальные модули — без пытства `pytest pseo/tract/combine/` в одиночку падал бы, как
 # падал до 28.08, когда `config/` и `tract.py` считались с разной глубины.
 sys.path.insert(0, TRACT)
+import keybroker  # noqa: E402  для паузы на бюджете (any_alive) — см. Job._pump/_budget_watcher
 import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
+
+# Раз в сколько секунд фоновый сторож проверяет, отпустило ли пул ключей после паузы.
+# Не чаще: чтение keybroker.db лишний раз ничего не стоит, но и незачем спрашивать чаще,
+# чем раз в несколько минут, — ключи не оживают внутри минуты.
+BUDGET_POLL_S = int(os.environ.get("COMBINE_BUDGET_POLL_S", "900"))
+# Строка-маркер печатается keybroker.call() при дневном исчерпании (keybroker.py, ветка
+# `wait is None or wait < 0`) — она и есть уже вычисленный сигнал «ждать нечего до
+# полуночи», который раньше тонул в логе контейнера, а теперь пульт его ловит.
+_BUDGET_MARKER = "бюджет модели"
 
 # Список языков сайта — ОДИН источник (`config/site.py`), не второй список тут же:
 # кнопка «Сборка» обязана строить те же 14 языков, что видит переключатель на странице.
@@ -353,6 +363,23 @@ def ban_watch():
             log("ban_watch сбой:", type(e).__name__, e)
 
 
+def budget_watch(job):
+    """Сторож возврата ключей после паузы (29.08). Раз в `BUDGET_POLL_S` спрашивает
+    `keybroker.any_alive()` — ТОЛЬКО смотрит, ничего не запускает: юзер решил, что полная
+    автокруговерть избыточна, а нужна пауза + «можно продолжать, нажми плей» (не автостарт).
+    """
+    while True:
+        time.sleep(BUDGET_POLL_S)
+        if not job.budget_paused:
+            continue
+        try:
+            if keybroker.any_alive():
+                job.budget_paused = False
+                say("✅ ключи снова живы — можно продолжать. Жми ▶️ в меню.")
+        except Exception as e:
+            log("budget_watch сбой:", type(e).__name__, e)
+
+
 def brain_stats():
     """Снимок мозга за PT-день: попытки всего/по ртам, макс-ключ, 429."""
     day = pt_day()
@@ -458,6 +485,13 @@ def pipeline_state():
             if _facet.is_junk(lesson):
                 continue
             for g in _facet.geo_codes(country):
+                # ⛔ 30.08: "any" — легальное значение (совет не привязан к стране,
+                # corpus.ANY_GEO), но ни COUNTRIES, ни countries.json его не знают — на
+                # сайте это дало бы страну «ANY» без флага и без перевода имени. Пока
+                # тракт не умеет отдельно публиковать общие советы — не показываем "any"
+                # даже в списке проб, чтобы его нельзя было выбрать и прогнать как страну.
+                if g == _facet.ANY_GEO:
+                    continue
                 by_geo.setdefault(g, set()).add(fid)
         only = test_geo()
         for g, ids in sorted(by_geo.items(), key=lambda kv: -len(kv[1])):
@@ -520,13 +554,16 @@ def pipeline_state():
         if not os.path.exists(corpus) or os.path.getmtime(corpus) < svezhee:
             st["build_corpus"].append(geo)
 
-    # ── корпус: сколько гео и страниц уже собрано ──────────────────────────────────────
+    # ── корпус: сколько гео и страниц уже собрано — ПО ВЫБРАННОЙ ПРОБЕ, как всё остальное
+    # (29.08, юзер поймал: выбор новой страны показывал готовым по данным СТАРОЙ). ─────────
     for fn in sorted(glob.glob(f"{BRAIN}/{TESTS}/out_facet_en/*.json")):
+        geo = os.path.basename(fn)[:-5]
+        if only and geo != only:
+            continue
         try:
             d = json.load(open(fn, encoding="utf-8"))
         except Exception:
             continue
-        geo = os.path.basename(fn)[:-5]
         st["geos"] += 1
         st["views"] += len(d.get("views_by_task") or [])
         # ⛔ Работа шага переводов = хоть один целевой язык ОТСТАЛ от корпуса, а не «корпус
@@ -541,11 +578,18 @@ def pipeline_state():
                 st["to_translate"].append(geo)
                 break
 
-    # ⛔ «Сборка сайта» и «Готовность» и того же класса: раньше работа считалась по
-    # «корпус существует», кнопки НИКОГДА не гасли галкой (29.08, юзер поймал). Теперь —
-    # по свежести: данные (`site.py`) не старше корпуса, `ready.json` не старше данных.
-    corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/*.json")
-    data_all = glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
+    # ⛔ «Сборка сайта» и «Готовность» — той же болезни свежести, что переводы, и той же
+    # пробы, что всё остальное. Имя данных — `<язык>_<гео>[...].json`, гео вторым куском.
+    if only:
+        corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/{only}.json")
+        data_all = [
+            p
+            for p in glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
+            if os.path.basename(p)[: -len(".json")].split("_")[1:2] == [only]
+        ]
+    else:
+        corpus_all = glob.glob(f"{BRAIN}/{TESTS}/out_facet_*/*.json")
+        data_all = glob.glob(f"{BRAIN}/{TESTS}/data/*.json")
     if corpus_all and data_all:
         st["build_done"] = min(os.path.getmtime(p) for p in data_all) >= max(
             os.path.getmtime(p) for p in corpus_all
@@ -681,6 +725,7 @@ class Job:
         self.lock = threading.Lock()
         self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
         self.tries = {}  # (шаг, гео) → сколько раз уже пробовали в этой фазе цикла
+        self.budget_paused = False  # см. _pump/_budget_watcher: пауза на дневном бане
 
     def busy(self):
         return self.proc is not None and self.proc.poll() is None
@@ -767,6 +812,21 @@ class Job:
                 line = line.strip()
                 if line:
                     self.tail = line  # последняя строка — в отчёты (живая, общая)
+                    # ⛔ 29.08: сигнал «день исчерпан» уже вычислен в keybroker.acquire()
+                    # (-1.0) и уже печатается — тонул в логе контейнера. Ловим ЭТУ же
+                    # строку и один раз за прогон шлём в чат + ставим вежливый стоп-флаг:
+                    # цикл прервётся организованно (та же ветка, что у ручной ⛔ СТОП),
+                    # а не будет вхолостую пролетать оставшиеся шаги цепочки без ключей.
+                    if _BUDGET_MARKER in line and not self.budget_paused:
+                        self.budget_paused = True
+                        for f in STOP_FLAGS:
+                            open(f, "w").close()
+                        say(
+                            f"⏸ {line}\n"
+                            "встал на паузу — ключей на сегодня нет. Напишу, когда "
+                            "пул отойдёт (проверяю раз в "
+                            f"{BUDGET_POLL_S // 60} мин)."
+                        )
         rc = proc.wait()
         spent = brain_stats()[0] - base_attempts
         mins = (time.time() - t0) / 60
@@ -1067,16 +1127,55 @@ def send_geo_picker():
     )
 
 
-def start_cycle(job):
-    """Полный цикл = ВСЯ вертикаль тракта подряд. Worst-case пишем ДО запуска.
+# Содержательные шаги — по гео, В ЭТОМ порядке внутри одной страны. «Сборка»/«Готовность»
+# в этот список НЕ входят: это глобальные шаги (весь корпус разом, звенья 5/2+7), а не
+# по-геошные — им место в ХВОСТЕ каждой волны, не внутри неё.
+_CONTENT_KINDS = ("collapse", "mark", "summarize", "build_corpus", "translate")
 
-    ⛔ Цепочка берётся из `pipeline_steps` — из ТОГО ЖЕ списка, по которому рисуется меню.
-    Прежде она собиралась здесь отдельно и БЕЗ шага 0: кнопка обещала «по порядку», а
-    разметку пропускала, и страницы собирались по непротегованным мухам.
+
+def _country_major_chain(steps):
+    """Пересобрать цепочку из «шаг поперёк всех стран» в «страна, все её шаги, следующая».
+
+    ⛔ 29.08, юзер поймал: `[j for st in steps for j in st["jobs"]]` идёт ПО ШАГУ — сперва
+    схлопывание всех гео, потом разметка всех гео и так далее. При массовом прогоне (проба
+    не выбрана) ни одна страна не будет готова целиком, пока не пройдут ВСЕ через каждый
+    шаг по очереди — пауза на бюджете (см. keybroker) размазывает недоделанность по всем
+    странам разом, а не оставляет чистую границу «эти готовы, эта в работе».
+    «Сборка»/«Готовность» — глобальные (весь корпус каждый раз), но звено 5 (site.py)
+    инкрементально с 29.08 (site.py: `_write` пропускает диск, если гео не устарело) —
+    поэтому вставлять их в хвост КАЖДОЙ волны теперь дёшево, не квадратичный пересчёт.
+    """
+    by_kind = {st["kind"]: st["jobs"] for st in steps}
+    geos = []
+    for kind in _CONTENT_KINDS:
+        for _k, geo in by_kind.get(kind) or []:
+            if geo not in geos:
+                geos.append(geo)
+    tail = (by_kind.get("build") or []) + (by_kind.get("readiness") or [])
+    if not geos:
+        return list(tail)
+    chain = []
+    for geo in geos:
+        for kind in _CONTENT_KINDS:
+            pair = (kind, geo)
+            if pair in (by_kind.get(kind) or []):
+                chain.append(pair)
+        chain.extend(tail)
+    return chain
+
+
+def start_cycle(job):
+    """Полный цикл = ВСЯ вертикаль тракта подряд, но ПО СТРАНЕ: одна страна — все её шаги
+    (включая сборку/готовность), потом следующая. Worst-case пишем ДО запуска.
+
+    ⛔ Цепочка берётся из `pipeline_steps` — из ТОГО ЖЕ списка, по которому рисуется меню,
+    и перегруппирована `_country_major_chain` (29.08, см. её докстринг). Прежде она
+    собиралась здесь отдельно и БЕЗ шага 0: кнопка обещала «по порядку», а разметку
+    пропускала, и страницы собирались по непротегованным мухам.
     """
     s = pipeline_state()
     steps = pipeline_steps(s)
-    chain = [j for st in steps for j in st["jobs"]]
+    chain = _country_major_chain(steps)
     if not chain:
         say("цикл не нужен: всё готово, можно шипить.")
         return
@@ -1097,9 +1196,11 @@ def start_cycle(job):
     plan = " → ".join(
         f"{st['label'].split(' — ')[0]}×{len(st['jobs'])}" for st in steps if st["jobs"]
     )
+    n_geos = len({geo for _k, geo in chain if geo})
     say(
-        f"⛓ весь тракт: {len(chain)} шагов\n"
-        f"порядок: {plan}\n"
+        f"⛓ весь тракт: {len(chain)} шагов, по стране ({n_geos} стран, все шаги подряд,\n"
+        f"потом следующая — сборка/готовность идут в хвосте КАЖДОЙ)\n"
+        f"состав по шагам: {plan}\n"
         f"ГРУБАЯ оценка расхода: ~{est} запросов (при 12 ключах × 440 = 5280/день)\n"
         f"остановить можно в любой момент — ⛔ СТОП рвёт цепочку."
     )
@@ -1206,6 +1307,7 @@ def main():
     job = Job()
     threading.Thread(target=job.reporter, daemon=True).start()
     threading.Thread(target=ban_watch, daemon=True).start()  # сигнал о банах ключей
+    threading.Thread(target=budget_watch, args=(job,), daemon=True).start()
     say("🟢 комбайн-пульт на связи. /combine — меню, /status, /stop")
     # Рестарт контейнера убил рот вместе с PID-namespace (пульт = PID 1 — проверено
     # NSpid). Задача оборвалась молча, а канон обещает отчёт при ЛЮБОМ исходе.
