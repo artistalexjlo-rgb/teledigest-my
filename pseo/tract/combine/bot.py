@@ -70,8 +70,8 @@ STOP_FLAGS = [
 # остальные модули — без пытства `pytest pseo/tract/combine/` в одиночку падал бы, как
 # падал до 28.08, когда `config/` и `tract.py` считались с разной глубины.
 sys.path.insert(0, TRACT)
-import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 import keybroker  # noqa: E402  для паузы на бюджете (any_alive) — см. Job._pump/_budget_watcher
+import tract as _tract  # noqa: E402  размеры пачек берём у тракта, не копией
 
 # Раз в сколько секунд фоновый сторож проверяет, отпустило ли пул ключей после паузы.
 # Не чаще: чтение keybroker.db лишний раз ничего не стоит, но и незачем спрашивать чаще,
