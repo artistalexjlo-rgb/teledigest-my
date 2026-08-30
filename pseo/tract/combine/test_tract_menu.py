@@ -373,6 +373,44 @@ def test_menu_builds_on_a_live_state(monkeypatch):
     assert "cz" in text and "191" in text, text
 
 
+def test_menu_step_count_matches_the_real_execution_chain(monkeypatch):
+    """«▶️ ВСЁ ПО ПОРЯДКУ — N шагов» обязан считать N по той же цепочке, что реально
+    исполнится (`_country_major_chain`), а не плоской суммой по шагам.
+
+    ⛔ 30.08, юзер поймал по живому меню: кнопка обещала «190 шагов» (плоская сумма), а
+    цепочка после перегруппировки по стране реально исполнила бы 286 — «Готовность»
+    цеплялась в хвост за каждой из ~97 стран, а не только за той, что дошла до перевода.
+    """
+    sent = []
+    monkeypatch.setattr(bot, "tg", lambda method, **kw: sent.append((method, kw)) or {})
+    # ДВЕ страны доходят до перевода в этом прогоне — хвост (сборка+готовность) законно
+    # цепляется дважды, поэтому реальная цепочка ДЛИННЕЕ плоской суммы (та считает хвост
+    # один раз). Если формула в send_menu откатится на плоскую сумму — тест поймает разницу.
+    s = {
+        "collapse": [],
+        "mark": [],
+        "mark_n": 0,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": ["gr", "gb"],
+        "geos": 2,
+        "views": 10,
+        "langs": [],
+        "no_vec": 0,
+        "build_done": False,
+        "readiness_done": False,
+    }
+    monkeypatch.setattr(bot, "pipeline_state", lambda: s)
+    real_len = len(bot._country_major_chain(bot.pipeline_steps(s)))
+    flat_len = sum(len(st["jobs"]) for st in bot.pipeline_steps(s))
+    assert (
+        real_len != flat_len
+    ), "сценарий не воспроизводит расхождение — поправь фикстуру"
+    bot.send_menu(None)
+    text = str(sent[-1][1])
+    assert f"{real_len} шагов" in text, (real_len, text)
+
+
 def test_every_geo_step_gets_its_own_rows(monkeypatch):
     """У шага, чья работа разложена по гео, в меню есть строка НА ГЕО.
 
@@ -549,6 +587,41 @@ def test_cycle_goes_country_by_country_not_step_by_step():
         ("readiness", None),
         ("translate", "gb"),
         ("build", None),
+        ("readiness", None),
+    ], chain
+
+
+def test_tail_does_not_repeat_for_countries_that_only_reach_early_steps():
+    """«Сборка»/«Готовность» цепляются ТОЛЬКО за страной, дошедшей до перевода в этом
+    прогоне — не за каждой страной списка.
+
+    ⛔ 30.08, юзер поймал по живому меню: на массовом прогоне (95 гео на разметку, ни
+    одна не доходит до перевода в этом заходе) хвост цеплялся 97 раз — «Готовность»
+    гонялась вхолостую почти на каждой стране, у которой корпуса ещё даже нет. Кнопка
+    обещала «190 шагов», а реально исполнила бы 286. Хвост обязан идти ОДИН раз — в
+    конце, если ни одна страна перевод не завершает, а не за каждой попутно.
+    """
+    s = {
+        "collapse": ["a", "b", "c"],
+        "mark": [{"geo": "a", "n": 5}, {"geo": "b", "n": 5}, {"geo": "c", "n": 5}],
+        "mark_n": 15,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": [],  # ни одна страна не доходит до перевода в этом прогоне
+        "geos": 2,
+        "views": 10,
+        "build_done": True,
+        "readiness_done": False,  # но готовность сама по себе недоделана
+    }
+    chain = bot._country_major_chain(bot.pipeline_steps(s))
+    assert chain.count(("readiness", None)) == 1, chain
+    assert chain == [
+        ("collapse", "a"),
+        ("mark", "a"),
+        ("collapse", "b"),
+        ("mark", "b"),
+        ("collapse", "c"),
+        ("mark", "c"),
         ("readiness", None),
     ], chain
 
