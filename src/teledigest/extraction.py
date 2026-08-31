@@ -171,6 +171,25 @@ _INTER_FILE_PAUSE_S = 4.5
 # Retry schedule per file (если все попытки на разных pairs провалились).
 _RETRY_DELAYS_S = [5.0, 20.0, 60.0]
 
+# ⛔ 31.08, юзер поймал в живом логе: 503 UNAVAILABLE ("model is currently experiencing
+# high demand") — это перегрузка МОДЕЛИ на стороне Google, не проблема конкретного ключа.
+# Ротатор до этой правки умел скипать пару (ключ, модель) только по RPD-капу/429-бану —
+# 503 не отличал, и перебирал ключи ОДНОЙ и той же лежащей модели файл за файлом, каждый
+# раз проходя всю лестницу ретраев (5+20+60с) впустую. In-memory (не SQLite): перегрузка
+# Google проходит за минуты, не сутки — персистентность тут не нужна, переживать рестарт
+# не должна.
+_MODEL_OVERLOAD_COOLDOWN_S = 120.0
+_model_overload_until: dict[str, float] = {}
+
+
+def _mark_model_overloaded(model: str) -> None:
+    _model_overload_until[model] = time.time() + _MODEL_OVERLOAD_COOLDOWN_S
+
+
+def _model_is_overloaded(model: str) -> bool:
+    return time.time() < _model_overload_until.get(model, 0.0)
+
+
 # Sidecar suffix для пометки обработанных файлов.
 _PROCESSED_MARKER = ".processed"
 
@@ -210,6 +229,13 @@ def iter_model_key_pairs(
     while True:
         any_used_this_round = False
         for model_name, rpd_cap in mdls:
+            if _model_is_overloaded(model_name):
+                log.warning(
+                    "extraction rotator: модель %s в откате после 503 — пропускаем "
+                    "весь оборот, не долбим ключи заведомо лежащей модели",
+                    model_name,
+                )
+                continue
             used_in_model = 0
             for api_key, kh in hashed:
                 count, banned = quota_state(kh, model_name)
@@ -474,6 +500,13 @@ def process_file(
                 api_key[:6],
             )
             quota_ban_today(kh, model)
+        elif status == 503:
+            log.warning(
+                "extraction: 503 на модели %s — модель в откате на %.0fs, не ключ виноват",
+                model,
+                _MODEL_OVERLOAD_COOLDOWN_S,
+            )
+            _mark_model_overloaded(model)
 
         if api_resp:
             break

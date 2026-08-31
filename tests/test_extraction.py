@@ -133,6 +133,37 @@ def test_rotator_continues_to_next_round(temp_quota_db):
     assert sleeps == [extraction._INTER_MODEL_SLEEP_S] * 3
 
 
+def test_rotator_skips_overloaded_model_entirely(temp_quota_db, monkeypatch):
+    """503 на модели — откатываем ВСЮ модель, не отдельный ключ/пару.
+
+    ⛔ 31.08, живой лог: 503 UNAVAILABLE ("model is currently experiencing high
+    demand") — перегрузка Google на уровне МОДЕЛИ, не конкретного ключа. Ротатор
+    до этой правки такого не знал и продолжал перебирать ключи лежащей модели
+    файл за файлом, каждый раз проходя всю лестницу ретраев впустую.
+    """
+    monkeypatch.setattr(extraction, "_model_overload_until", {})
+    extraction._mark_model_overloaded("m1")
+    sleeps: list[float] = []
+    models = [("m1", 10), ("m2", 10)]
+    gen = extraction.iter_model_key_pairs(
+        ["k1", "k2"], sleep_fn=sleeps.append, models=models
+    )
+    pairs = _collect(gen, 4)
+    # m1 в откате — ни одной попытки на неё, сразу m2 с обоими ключами.
+    assert pairs[:2] == [("m2", "k1"), ("m2", "k2")]
+    assert ("m1", "k1") not in pairs and ("m1", "k2") not in pairs
+
+
+def test_model_overload_cooldown_expires(monkeypatch):
+    """Откат — короткоживущий: истёк срок, модель снова доступна."""
+    monkeypatch.setattr(extraction, "_model_overload_until", {})
+    now = extraction.time.time()
+    extraction._model_overload_until["m1"] = now - 1  # уже истёк
+    assert extraction._model_is_overloaded("m1") is False
+    extraction._model_overload_until["m1"] = now + 100  # ещё активен
+    assert extraction._model_is_overloaded("m1") is True
+
+
 def test_is_junk_ai_lesson_catches_inquiry_narration():
     """Guard ловит пересказы вопросов/пустоты/листингов, но не трогает факты."""
     junk = [
