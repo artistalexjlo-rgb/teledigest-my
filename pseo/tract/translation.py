@@ -277,10 +277,24 @@ def translate_geo(geo, lang):
         items = _retext(sh.get("items"), teksty, source_by_id)
         if items:
             out["shelves"].append({**sh, "items": items})
+
+    trouble = stop or stop_imen
+    # ⛔ 31.08, живой лог: md/zh записался пустышкой — `out["views_by_task"]` пустой (ни
+    # одной страницы), а файл ВСЁ РАВНО писался. `pipeline_state()` видит только «файл
+    # существует», не заглядывает внутрь — пустышка НАВСЕГДА выглядит готовой, дыра больше
+    # никогда не переспросится. Не пишем файл вовсе, если контента реально ноль — тогда
+    # geo+lang честно останется «не готово» и попадёт в to_translate заново.
+    if not out["views_by_task"] and not out["shelves"]:
+        print(
+            f"{geo} {lang}: 0 из {len(pairs)} переведено — файл НЕ пишем, чтобы не "
+            "выдать пустышку за готовое" + (f" ⛔ {trouble}" if trouble else ""),
+            flush=True,
+        )
+        return 0
+
     _save(f"{BUILT}/out_facet_{lang}/{geo}.json", out)
     theme_names(lang)  # имена тем — один раз на язык, отдельным файлом
 
-    trouble = stop or stop_imen
     print(
         f"{geo} {lang}: советов {len(teksty)} из {len(pairs)} (куплено {len(bought)}), "
         f"имён {len(names)} из {len(imena_en)}" + (f" ⛔ {trouble}" if trouble else ""),
