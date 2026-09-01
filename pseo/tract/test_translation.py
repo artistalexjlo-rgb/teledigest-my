@@ -202,6 +202,25 @@ def test_the_small_remainder_is_translated_too(tmp_path, monkeypatch):
     assert out["shelves"][0]["items"][0]["text"] == "ru:leftover"
 
 
+def test_empty_translation_does_not_write_a_fake_done_file(tmp_path, monkeypatch):
+    """Полный провал перевода (пул мёртв, 0 советов) — файл НЕ пишем вовсе.
+
+    ⛔ 31.08, живой лог: md/zh записался пустышкой (0 страниц), а файл всё равно
+    появился на диске — `pipeline_state()` видит только «файл существует», не
+    заглядывает внутрь, и дыра маскировалась НАВСЕГДА (`to_translate` больше не
+    переспрашивал бы этот geo+lang). Пустой результат обязан оставить geo+lang
+    честно «не готовым», а не подделывать готовность.
+    """
+    _korpus(
+        tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a", "b"])]
+    )
+    monkeypatch.setattr(translation, "call", lambda *a, **kw: None)
+    monkeypatch.setattr(translation, "any_alive", lambda: False)
+    n = translation.translate_geo("gr", "ru")
+    assert n == 0
+    assert not (tmp_path / "out_facet_ru" / "gr.json").exists()
+
+
 def test_theme_names_are_bought_from_english_and_cached(tmp_path, monkeypatch):
     """Имена тем: русский — обычный язык перевода, ни особого пути, ни готового текста.
 
