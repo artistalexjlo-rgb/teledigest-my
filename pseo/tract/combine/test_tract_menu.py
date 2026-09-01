@@ -719,6 +719,55 @@ def test_budget_marker_pauses_chain_and_notifies_once(tmp_path, monkeypatch):
     assert any("цикл прерван" in t for t in said), said
 
 
+def test_readiness_failure_recomputes_and_continues_instead_of_stopping(
+    tmp_path, monkeypatch
+):
+    """«Готовность» проверяет ВЕСЬ сайт, не только только что прошедшую страну —
+    ненулевой код чаще значит «где-то в прошлом осталась недоделанная страна», не
+    крах цикла. Пересчитываем состояние и продолжаем НОВОЙ очередью вместо того,
+    чтобы стереть всё и остановиться.
+
+    ⛔ 01.09, живой лог: md/zh — 25 часов чистой работы, один временный сбой перевода
+    (уже починен отдельно), потом КАЖДАЯ следующая проверка готовности рвала ВСЮ
+    очередь оставшихся стран, требуя ручного перезапуска. Юзер: «надо переместиться
+    на недоделанную, прогнать её и пойти дальше» — не игнорировать, не останавливаться.
+    """
+    monkeypatch.setattr(bot, "JOBS_DB", str(tmp_path / "jobs.db"))
+    monkeypatch.setattr(bot, "STOP_FLAGS", [str(tmp_path / "RUNNER_STOP")])
+    monkeypatch.setattr(bot, "brain_stats", lambda: (0, [], 0, 0))
+    said = []
+    monkeypatch.setattr(bot, "say", lambda t, **kw: (said.append(t), 1)[1])
+
+    fresh_state = {
+        "collapse": [],
+        "mark": [],
+        "mark_n": 0,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": ["md"],  # пересчёт честно нашёл недоделанную страну
+        "geos": 5,
+        "views": 100,
+        "build_done": True,
+        "readiness_done": False,
+    }
+    monkeypatch.setattr(bot, "pipeline_state", lambda: fresh_state)
+
+    j = bot.Job()
+    j.chain = [("collapse", "kz")]  # старая очередь ещё не пуста, но она СТЁРТА новой
+    started = []
+    monkeypatch.setattr(
+        j, "start", lambda kind, geo=None, _chain=False: started.append((kind, geo))
+    )
+    proc = _FakeProc(["}\n"], rc=1)  # readiness с проблемами — код 1, не крах
+    j._pump(proc, 1, "readiness", None, str(tmp_path / "log.txt"), 0)
+
+    expected = bot._country_major_chain(bot.pipeline_steps(fresh_state))
+    assert started == [expected[0]], started
+    assert j.chain == expected[1:], j.chain
+    assert any("самоисправления" in t for t in said), said
+    assert not any("цикл прерван" in t for t in said), said
+
+
 def test_one_bad_button_does_not_kill_the_pult():
     """Обработка обновления вызывается ПОД `try` — сбой стоит кнопки, а не пульта."""
     src = (HERE / "bot.py").read_text(encoding="utf-8")
