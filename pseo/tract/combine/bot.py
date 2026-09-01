@@ -215,9 +215,23 @@ def _conflict_log(desc):
         )
 
 
+# ⭐ ОДНА сессия на все вызовы (30.08). Раньше каждый tg() был `requests.post()` с нуля —
+# новое TCP-соединение и, значит, НОВЫЙ DNS-запрос на КАЖДЫЙ вызов, а вызывающих потоков
+# минимум четыре (главный цикл getUpdates ~30с, `job.reporter` ~25с, `ban_watch` ~30с,
+# `Job._pump`), и они не синхронизированы — иногда совпадают по времени и все разом лезут
+# в резолвер контейнера. `Session` держит соединение (keep-alive) — DNS резолвится один
+# раз на соединение, а не на каждый вызов.
+_TG_SESSION = requests.Session()
+# Пауза после сбоя связи — протокол лонг-поллинга требует НЕ хлестать API сразу же
+# следующей попыткой (эталон — как в aiogram/python-telegram-bot). Раньше цикл в main()
+# после провала getUpdates шёл на новый круг без сна вовсе — 8 отказов подряд за 48с
+# в логе 30.08, вместо того чтобы отступить и дать сети время отойти.
+TG_RETRY_SLEEP_S = float(os.environ.get("COMBINE_TG_RETRY_SLEEP_S", "3"))
+
+
 def tg(method, **kw):
     try:
-        r = requests.post(f"{API}/{method}", json=kw, timeout=35).json()
+        r = _TG_SESSION.post(f"{API}/{method}", json=kw, timeout=35).json()
         if not r.get("ok", True):
             desc = r.get("description") or ""
             if "Conflict" in desc:
@@ -229,6 +243,7 @@ def tg(method, **kw):
         return r
     except Exception as e:
         log("TG-СБОЙ", method, type(e).__name__, e)
+        time.sleep(TG_RETRY_SLEEP_S)
         return {}
 
 

@@ -254,3 +254,39 @@ def test_first_touch_of_an_empty_volume_seeds_english_from_git(tmp_path, monkeyp
     assert (
         len(schet.get("labels") or []) == 13
     ), "русский всё равно куплен ротом, а не сид"
+
+
+def test_by_batches_skips_a_failed_batch_when_pool_is_alive(monkeypatch):
+    """Одна неудачная пачка (всплеск отказов Google) не хоронит остальные — мозг
+    (`any_alive`) подтвердил, что пул жив, значит идём дальше по следующим пачкам.
+
+    ⛔ 31.08, живой лог: у md пачка №1 из ~17 провалилась всплеском отказов, а
+    `_by_batches` хоронил ВЕСЬ остальной язык — «0 из 415», хотя пул был жив
+    (соседние по времени языки прошли гладко). Присоска не должна гадать о
+    состоянии пула по одной неудачной пачке — это знание мозга.
+    """
+    calls = []
+
+    def fake_call(user, sysprompt, consumer):
+        calls.append(user)
+        # первая пачка проваливается RETRY раз подряд
+        if len(calls) <= translation.RETRY:
+            return None
+        return {"0": "ok"}
+
+    monkeypatch.setattr(translation, "call", fake_call)
+    monkeypatch.setattr(translation, "any_alive", lambda: True)
+    pairs = [("a", "text a"), ("b", "text b")]
+    out, stop = translation._by_batches(pairs, "sys", "translate", batch=1)
+    assert stop is None, stop
+    assert out == {"b": "ok"}, out  # пачка "a" пропущена, "b" переведена как обычно
+
+
+def test_by_batches_stops_when_pool_confirmed_dead(monkeypatch):
+    """Мозг подтвердил, что пул реально мёртв — тут честно останавливаемся, как раньше."""
+    monkeypatch.setattr(translation, "call", lambda *a, **kw: None)
+    monkeypatch.setattr(translation, "any_alive", lambda: False)
+    pairs = [("a", "text a"), ("b", "text b")]
+    out, stop = translation._by_batches(pairs, "sys", "translate", batch=1)
+    assert out == {}, out
+    assert stop and "мозг подтвердил" in stop, stop

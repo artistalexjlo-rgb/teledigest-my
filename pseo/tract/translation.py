@@ -28,7 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import tract  # noqa: E402
-from keybroker import call  # noqa: E402
+from keybroker import any_alive, call  # noqa: E402
 
 BASE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — сам файл тут же
 BUILT = os.environ.get("BUILT_DIR", f"{BASE}/builder")
@@ -116,8 +116,17 @@ def names_sys(lang):
 def _by_batches(pairs, sysprompt, consumer, batch):
     """Пары (ключ, английский текст) → {ключ: перевод}. Рту уходят НОМЕРА пачки.
 
-    Возвращает (перевод, причина остановки). Причина не None — пул ключей не отдаёт, и
-    прогон честно останавливается, не устроив шторма запросов.
+    Возвращает (перевод, причина остановки). Причина не None — ТОЛЬКО когда мозг
+    (`keybroker.any_alive()`) подтвердил, что пул реально мёртв, и прогон честно
+    останавливается, не устроив шторма запросов.
+
+    ⛔ 31.08, живой лог: у md пачка №1 (из ~17) провалилась всплеском отказов Google
+    (429/5xx/сеть на 4 разных ключах подряд — `call()` внутри уже это корректно
+    различает и не путает с исчерпанием), а `_by_batches` хоронил ВЕСЬ ОСТАЛЬНОЙ
+    язык — «0 из 415», хотя пул был жив (соседние по времени языки прошли гладко).
+    Оценка «жив ли пул» — знание мозга, не присоски: спрашиваем `any_alive()`
+    вместо того чтобы гадать по одной неудачной пачке. Пул жив — пропускаем ТОЛЬКО
+    эту пачку и идём дальше; мёртв — останавливаемся, как раньше.
     """
     out = {}
     for i in range(0, len(pairs), batch):
@@ -131,7 +140,13 @@ def _by_batches(pairs, sysprompt, consumer, batch):
             if res is not None:
                 break
         if res is None:
-            return out, "перевод прерван: пул ключей не отдаёт (исчерпание или сбой)"
+            if not any_alive():
+                return out, "перевод прерван: пул ключей не отдаёт (мозг подтвердил)"
+            print(
+                f"  пачка {i // batch + 1} не задалась — пул жив, пропускаем и идём дальше",
+                flush=True,
+            )
+            continue
         for j, (key, _en) in enumerate(chunk):  # сшивка ПО ПОЗИЦИИ
             v = str(res.get(str(j)) or "").strip()
             if v:
