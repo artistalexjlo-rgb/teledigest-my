@@ -741,6 +741,7 @@ class Job:
         self.chain = []  # очередь шагов полного цикла: [(kind, geo), ...]
         self.tries = {}  # (шаг, гео) → сколько раз уже пробовали в этой фазе цикла
         self.budget_paused = False  # см. _pump/_budget_watcher: пауза на дневном бане
+        self.readiness_recoveries = 0  # подряд самоисправлений на провале готовности
 
     def busy(self):
         return self.proc is not None and self.proc.poll() is None
@@ -921,10 +922,42 @@ class Job:
         # цепочка полного цикла: следующий шаг только если предыдущий вышел чисто
         # и стоп не нажат (нажатый стоп = юзер сказал «хватит», цепочка рвётся)
         if self.chain and rc == 0 and not any(os.path.exists(f) for f in STOP_FLAGS):
+            # чистый шаг — серия самоисправлений не в счёт
+            self.readiness_recoveries = 0
             kind, geo = self.chain.pop(0)
             say(f"⛓ цикл: следующий шаг — {kind}" + (f" ({geo})" if geo else ""))
             self.start(kind, geo, _chain=True)
             return
+        # ⛔ 01.09, юзер поймал живьём: «Готовность» проверяет ВЕСЬ сайт, не только
+        # только что прошедшую страну — ненулевой код здесь чаще значит «где-то в
+        # прошлом осталась недоделанная страна» (md/zh — 25 часов чистой работы, потом
+        # один временный сбой перевода, потом КАЖДАЯ следующая проверка готовности рвала
+        # ВСЮ очередь оставшихся стран). Юзер: «надо переместиться на недоделанную,
+        # прогнать её и пойти дальше» — не игнорировать, не останавливаться. Пересчёт
+        # `pipeline_state()` уже честно покажет, что доделать (спасибо фиксу записи
+        # переводов) — строим НОВУЮ очередь из него и продолжаем, не спрашивая юзера.
+        # Только для readiness: остальные шаги сами выходят кодом 0 даже при внутреннем
+        # откате («откат внутри» не поднимает код), ненулевой код у НИХ — настоящий крах.
+        if (
+            kind == "readiness"
+            and rc != 0
+            and self.chain
+            and not any(os.path.exists(f) for f in STOP_FLAGS)
+        ):
+            self.readiness_recoveries += 1
+            if self.readiness_recoveries <= MAX_PHASE_TRIES:
+                fresh = _country_major_chain(pipeline_steps(pipeline_state()))
+                say(
+                    f"🔁 готовность нашла недоделанное (попытка самоисправления "
+                    f"{self.readiness_recoveries}/{MAX_PHASE_TRIES}) — пересчитал "
+                    f"состояние, продолжаю новой очередью ({len(fresh)} шагов)."
+                )
+                if fresh:
+                    self.chain = fresh[1:]
+                    k, g = fresh[0]
+                    self.start(k, g, _chain=True)
+                    return
+                # пересчёт ничего не нашёл — падаем в обычную остановку ниже
         if self.chain:
             n = len(self.chain)
             self.chain = []
