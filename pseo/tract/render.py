@@ -220,6 +220,35 @@ def alt_langs(page: dict) -> list:
     return [x for x in SITE["languages"] if f"/{x}/{tail}" in _PATHS]
 
 
+def _tail_of(page: dict) -> str | None:
+    """Адрес БЕЗ языка (`ru/gr/visa/x/` → `gr/visa/x/`) — та же формула, что в
+    `alt_langs()`, вынесена отдельно: нужна ДО рендера, чтобы решить, надо ли он
+    вообще (`_dirty_tails`), а `alt_langs()` смотрит только на неё, HTML не считает.
+    """
+    if not page.get("shared_tail"):
+        return None
+    return "/".join(page["path"].split("/")[2:])
+
+
+_MANIFEST_NAME = ".tails.json"  # OUT/… — не страница, robots/gitignore её не видят
+
+
+def _load_tail_manifest() -> dict:
+    p = OUT / _MANIFEST_NAME
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}  # битый манифест — как пустой: следующий прогон перерендерит всё
+
+
+def _save_tail_manifest(m: dict) -> None:
+    (OUT / _MANIFEST_NAME).write_text(
+        json.dumps(m, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+
 def render_page(page: dict, lang: str | None = None) -> str:
     lang = lang or page.get("lang", "ru")
     t = load_i18n(lang)
@@ -261,27 +290,70 @@ def _indexable(page: dict) -> bool:
 
 
 def build_all(lastmod: str = "", data_dir=None) -> dict:
-    """Рендерит все data/*.json, пишет sitemap.xml (только indexable) + robots.txt.
+    """Рендерит data/*.json — но ТОЛЬКО те, кому это реально нужно (30.08→02.09: полный
+    прогон на 46к+ страниц занимал 63с и гонялся после КАЖДОЙ страны в массовом цикле —
+    89 из 90 раз впустую, ни одна из строк корпуса не менялась). Пишет sitemap.xml
+    (только indexable) + robots.txt — это по-прежнему из ВСЕХ страниц, дёшево (только
+    чтение JSON, не Jinja2).
+
+    Страница НЕ рендерится (HTML не трогаем, mtime старый), если ВСЁ верно:
+      1. её `data/*.json` не новее уже записанного HTML;
+      2. HTML уже существует;
+      3. набор языков её адреса (`_tail_of`) не изменился со времени прошлого рендера —
+         если перевод только что закрыл дыру для этого адреса на новом языке, ВСЕ его
+         языковые версии перерендерятся разом (у них должен обновиться hreflang-свитчер),
+         не только свежедобавленная. Это и есть весь смысл: пропускать не «показалось
+         дёшево», а доказанно безопасно, свитчер языков не протухнет молча.
+
     lastmod — ISO-дата для <lastmod> (freshness-сигнал); пустая → без тега.
     data_dir — только для сторожей (прогон берёт `DATA`, см. `PSEO_DATA`).
-    Возвращает {rendered, indexed, skipped_noindex, assets, search_titles}."""
+    Возвращает {rendered, skipped, indexed, skipped_noindex, assets, search_titles}."""
     data_dir = pathlib.Path(data_dir or DATA)
     index_paths(
         data_dir
     )  # ДО рендера: hreflang опирается на собранное, а не на догадку
     n_assets = copy_assets()  # общие CSS/JS: один файл на сайт вместо копии в странице
     copy_images()  # руками положенные картинки (28.08) — не в git, копия вслед за static/
-    urls, n_rendered, n_noindex = [], 0, 0
-    search = {}  # язык → [[заголовок, адрес], …] для поиска по заголовкам
+
+    manifest = _load_tail_manifest()
+    current_tails: dict[str, set] = {}
+    pages_by_file = {}
     for jf in sorted(data_dir.glob("*.json")):
-        page = json.loads(jf.read_text(encoding="utf-8"))
+        try:
+            page = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
         if "path" not in page:
             continue  # не страница (конфиг/фикстура) — пропускаем
-        build(str(jf))
-        n_rendered += 1
-        # ИНДЕКС ПОИСКА СОБИРАЕТСЯ ИЗ ТОГО, ЧТО РЕАЛЬНО ОТРЕНДЕРИЛОСЬ, а не из корпуса:
-        # иначе он обещал бы страницы, которые отсеялись, — поиск вёл бы в 404. Служебные
-        # страницы (noindex: шлюз, сама страница поиска) в индекс не идут.
+        pages_by_file[jf] = page
+        tail = _tail_of(page)
+        if tail is not None:
+            current_tails.setdefault(tail, set()).add(page.get("lang"))
+    dirty_tails = {
+        tail
+        for tail, langs in current_tails.items()
+        if set(manifest.get(tail) or []) != langs
+    }
+
+    urls, n_rendered, n_skipped, n_noindex = [], 0, 0, 0
+    search = {}  # язык → [[заголовок, адрес], …] для поиска по заголовкам
+    for jf, page in pages_by_file.items():
+        out_path = OUT / page["path"].strip("/") / "index.html"
+        tail = _tail_of(page)
+        stale = (
+            not out_path.exists()
+            or jf.stat().st_mtime > out_path.stat().st_mtime
+            or (tail is not None and tail in dirty_tails)
+        )
+        if stale:
+            build(str(jf))
+            n_rendered += 1
+        else:
+            n_skipped += 1
+        # ИНДЕКС ПОИСКА СОБИРАЕТСЯ ИЗ ТОГО, ЧТО РЕАЛЬНО ЕСТЬ, а не из корпуса: иначе он
+        # обещал бы страницы, которые отсеялись, — поиск вёл бы в 404. Пропущенный рендер
+        # тут не помеха — файл на диске всё равно есть, метаданные те же, что были.
+        # Служебные страницы (noindex: шлюз, сама страница поиска) в индекс не идут.
         title = page.get("search_title") or page.get("intent_name") or page.get("h1")
         if title and page.get("lang") and not page.get("noindex"):
             search.setdefault(page["lang"], []).append([title, page["path"]])
@@ -291,6 +363,8 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
             urls.append((SITE["domain"] + page["path"], page.get("updated_iso", "")))
         else:
             n_noindex += 1
+
+    _save_tail_manifest({t: sorted(langs) for t, langs in current_tails.items()})
 
     # lastmod ПОСТРАНИЧНО: дату несёт сама страница (`updated_iso`, ставит сборщик и
     # только при РЕАЛЬНОМ изменении содержимого). Аргумент — запасной, у старых файлов
@@ -327,6 +401,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         n_search += len(rows)
     return {
         "rendered": n_rendered,
+        "skipped": n_skipped,
         "indexed": len(urls),
         "skipped_noindex": n_noindex,
         "assets": n_assets,
@@ -339,7 +414,7 @@ if __name__ == "__main__":
         lm = sys.argv[2] if len(sys.argv) > 2 else ""
         stat = build_all(lastmod=lm)
         print(
-            f"build_all: rendered={stat['rendered']} "
+            f"build_all: rendered={stat['rendered']} skipped={stat['skipped']} "
             f"indexed={stat['indexed']} noindex={stat['skipped_noindex']} "
             f"(draft={SITE.get('draft')})"
         )
