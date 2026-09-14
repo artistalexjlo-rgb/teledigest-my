@@ -49,7 +49,8 @@ def test_call_actually_uses_salvage():
     Мутация «выключить спасение в вызове» проходила зелёной — сторожей на проводку не было.
     Поведением это не проверить без битого HTTP-ответа, поэтому проверяем, что ветка на месте.
     """
-    src = (HERE / "keybroker.py").read_text(encoding="utf-8")
+    # 15.09: мозг живёт в src/teledigest/, в тракте — загрузчик; читаем настоящий файл
+    src = pathlib.Path(keybroker.__file__).read_text(encoding="utf-8")
     body = src[src.index("def call(") :]
     assert "if salvage:" in body, "вызов не спасает записи"
     assert "salvage_objects(raw, salvage[1])" in body, "вызов не зовёт спасателя"

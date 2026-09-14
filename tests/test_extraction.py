@@ -1,167 +1,191 @@
-"""Тесты rotator-логики extraction.iter_model_key_pairs.
+"""Сторожа экстрактора (15.09 — экстрактор через мозг `keybroker`).
 
 Покрытие:
-- порядок выдачи (model A × все ключи → next model);
-- sleep между моделями вызывается ровно столько раз, сколько использованных моделей;
-- забаненные/закапанные пары пропускаются;
-- StopIteration при пустом обороте.
+- нарезка файла на куски по границам строк;
+- порядок моделей: следующая — только когда у текущей нет живых ключей или мозг вернул None;
+- сайдкары: `.processed` при извлечении, `.empty` при нуле, ничего при провале куска;
+- индекс паттерна сквозной по файлу (окно на кусок), повтор не задваивает;
+- проход останавливается, когда у мозга нет живых ключей;
+- junk-guard ai_lesson (детерминированный, без LLM).
+
+Мозг сюда не зовём (у него свои сторожа в pseo/tract/) — подменяем `keybroker.call` /
+`keybroker.any_alive` и `_persist_patterns`, проверяем СКЛЕЙКУ.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
-from teledigest import extraction, extraction_db
+from teledigest import extraction
+
+# ── нарезка ────────────────────────────────────────────────────────────────────────────
+
+
+def test_split_keeps_small_text_whole():
+    assert extraction.split_content("a\nb\n", limit=100) == ["a\nb\n"]
+    assert extraction.split_content("   \n", limit=100) == []
+
+
+def test_split_cuts_on_line_boundaries_under_limit():
+    text = "".join(f"line{i:02d}\n" for i in range(10))  # 7 симв. на строку
+    chunks = extraction.split_content(text, limit=20)
+    assert "".join(chunks) == text, "ничего не потеряно и не задвоено"
+    assert all(len(c) <= 20 for c in chunks), [len(c) for c in chunks]
+    assert all(c.endswith("\n") for c in chunks), "рез только по границе строки"
+
+
+def test_split_keeps_an_oversized_line_as_its_own_chunk():
+    text = "short\n" + "x" * 50 + "\nshort\n"
+    chunks = extraction.split_content(text, limit=20)
+    assert "".join(chunks) == text
+    assert "x" * 50 + "\n" in chunks, "длинная строка — своим куском, не резана пополам"
+
+
+# ── вызов мозга: порядок моделей ────────────────────────────────────────────────────────
+
+
+def test_ask_uses_first_model_with_alive_keys(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(extraction.keybroker, "any_alive", lambda m, role: m != "m1")
+
+    def fake_call(user, sysprompt, consumer, model, role, timeout, salvage):
+        calls.append(model)
+        assert consumer == extraction.CONSUMER and role == extraction.ROLE
+        assert salvage == ("patterns", "title")
+        return {"patterns": [{"title": "t"}]}
+
+    monkeypatch.setattr(extraction.keybroker, "call", fake_call)
+    out = extraction.ask("лог", models=["m1", "m2", "m3"])
+    assert out == [{"title": "t"}]
+    assert calls == ["m2"], "m1 без живых ключей пропущена, m3 не понадобилась"
+
+
+def test_ask_falls_through_when_brain_returns_none(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(extraction.keybroker, "any_alive", lambda m, role: True)
+
+    def fake_call(user, sysprompt, consumer, model, **kw):
+        calls.append(model)
+        return None if model == "m1" else {"patterns": []}
+
+    monkeypatch.setattr(extraction.keybroker, "call", fake_call)
+    assert extraction.ask("лог", models=["m1", "m2", "m3"]) == []
+    assert calls == ["m1", "m2"], "пустой список — это ОТВЕТ, к m3 не идём"
+
+
+def test_ask_returns_none_when_no_model_answers(monkeypatch):
+    monkeypatch.setattr(extraction.keybroker, "any_alive", lambda m, role: True)
+    monkeypatch.setattr(extraction.keybroker, "call", lambda *a, **k: None)
+    assert extraction.ask("лог", models=["m1", "m2"]) is None
+
+
+# ── файл: куски, индексы, сайдкары ───────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def temp_quota_db(tmp_path: Path, monkeypatch):
-    db_path = tmp_path / "test_quota.db"
+def persisted(monkeypatch):
+    """Подмена записи в базу: копим (file, idx_offset, patterns), отвечаем «все сохранены»."""
+    seen: list[tuple[str, int, list]] = []
 
-    def _connect():
-        return sqlite3.connect(str(db_path))
+    def fake_persist(file_name, patterns, idx_offset=0):
+        seen.append((file_name, idx_offset, patterns))
+        return len(patterns), len(patterns)
 
-    monkeypatch.setattr(extraction_db, "get_db_connection", _connect)
-    extraction_db.init_extraction_tables()
-    yield db_path
-
-
-def _collect(gen, max_items: int) -> list[tuple[str, str]]:
-    """Pull up to max_items from generator, stopping early if StopIteration."""
-    out: list[tuple[str, str]] = []
-    for _ in range(max_items):
-        try:
-            out.append(next(gen))
-        except StopIteration:
-            break
-    return out
+    monkeypatch.setattr(extraction, "_persist_patterns", fake_persist)
+    return seen
 
 
-def test_rotator_order_model_then_keys(temp_quota_db):
-    sleeps: list[float] = []
-    models = [("m1", 10), ("m2", 10)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2", "k3"], sleep_fn=sleeps.append, models=models
+def _sample(tmp_path: Path, name="2026-09-13_gr_1.txt", text="[10:00] u/1: привет\n"):
+    d = tmp_path / "gr"
+    d.mkdir(exist_ok=True)
+    f = d / name
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_chunks_get_disjoint_index_windows(tmp_path, monkeypatch, persisted):
+    f = _sample(
+        tmp_path, text="".join(f"[10:0{i}] u/1: строка {i}\n" for i in range(6))
     )
-    # Тянем 7 — чтобы спровоцировать sleep после m2 (генератор выполняет
-    # код после yield только на следующем next()).
-    pairs = _collect(gen, 7)
-    assert pairs[:6] == [
-        ("m1", "k1"),
-        ("m1", "k2"),
-        ("m1", "k3"),
-        ("m2", "k1"),
-        ("m2", "k2"),
-        ("m2", "k3"),
-    ]
-    # 7-й next() начинает новый круг и выдаёт первую пару следующего оборота.
-    assert pairs[6] == ("m1", "k1")
-    # Sleep вызвался дважды (после m1 и после m2).
-    assert sleeps == [extraction._INTER_MODEL_SLEEP_S] * 2
+    monkeypatch.setattr(extraction, "CHUNK_CHARS", 40)  # → несколько кусков
+    monkeypatch.setattr(extraction, "ask", lambda chunk: [{"title": chunk[:5]}])
+
+    saved, attempted, ok = extraction.process_file(f)
+
+    assert ok and saved == attempted == len(persisted) >= 2
+    offsets = [o for _, o, _ in persisted]
+    assert offsets == [i * extraction._IDX_STRIDE for i in range(len(persisted))]
 
 
-def test_rotator_skips_banned_pairs(temp_quota_db):
-    sleeps: list[float] = []
-    # Забанить (k2, m1).
-    extraction_db.quota_ban_today(extraction._key_hash("k2"), "m1")
-    models = [("m1", 10), ("m2", 10)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2", "k3"], sleep_fn=sleeps.append, models=models
+def test_processed_marker_when_patterns_extracted(tmp_path, monkeypatch, persisted):
+    f = _sample(tmp_path)
+    monkeypatch.setattr(extraction, "ask", lambda chunk: [{"title": "t"}])
+    monkeypatch.setattr(extraction, "_any_model_alive", lambda: True)
+    monkeypatch.setattr(extraction, "init_extraction_tables", lambda: None)
+
+    assert extraction.run_extraction_pass(tmp_path) == (1, 1, 1)
+    assert Path(str(f) + ".processed").exists()
+    assert not Path(str(f) + ".empty").exists()
+
+
+def test_empty_marker_when_answer_has_no_patterns(tmp_path, monkeypatch, persisted):
+    """⛔ 15.09: пустой ответ раньше не помечался — 241 файл «сообщений нет» крутился в
+    очереди каждый проход, съедая вызов и ключ."""
+    f = _sample(tmp_path)
+    monkeypatch.setattr(extraction, "ask", lambda chunk: [])
+    monkeypatch.setattr(extraction, "_any_model_alive", lambda: True)
+    monkeypatch.setattr(extraction, "init_extraction_tables", lambda: None)
+
+    assert extraction.run_extraction_pass(tmp_path) == (1, 0, 0)
+    assert Path(str(f) + ".empty").exists()
+    assert not Path(str(f) + ".processed").exists()
+    # второй проход файл не берёт
+    assert extraction.run_extraction_pass(tmp_path) == (0, 0, 0)
+
+
+def test_no_marker_when_a_chunk_fails(tmp_path, monkeypatch, persisted):
+    """Провал куска — файл вернётся; извлечённое из удачных кусков уже записано."""
+    f = _sample(
+        tmp_path, text="".join(f"[10:0{i}] u/1: строка {i}\n" for i in range(6))
     )
-    pairs = _collect(gen, 5)
-    # На m1 — только k1 и k3, k2 забанен.
-    assert pairs[:2] == [("m1", "k1"), ("m1", "k3")]
-    # Дальше — все три ключа на m2.
-    assert pairs[2:5] == [("m2", "k1"), ("m2", "k2"), ("m2", "k3")]
+    monkeypatch.setattr(extraction, "CHUNK_CHARS", 40)
+    answers = iter([[{"title": "a"}], None, [{"title": "c"}]])
+    monkeypatch.setattr(extraction, "ask", lambda chunk: next(answers, None))
+    monkeypatch.setattr(extraction, "_any_model_alive", lambda: True)
+    monkeypatch.setattr(extraction, "init_extraction_tables", lambda: None)
+
+    files, saved, attempted = extraction.run_extraction_pass(tmp_path)
+
+    assert files == 1 and saved >= 1
+    assert not Path(str(f) + ".processed").exists()
+    assert not Path(str(f) + ".empty").exists()
+    assert extraction._is_done(f) is False
 
 
-def test_rotator_skips_capped_pairs(temp_quota_db):
-    sleeps: list[float] = []
-    # k1 на m1 уже сделал 20 запросов при cap=20 — должен скипаться.
-    kh = extraction._key_hash("k1")
-    for _ in range(20):
-        extraction_db.quota_increment(kh, "m1")
-    models = [("m1", 20), ("m2", 20)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2"], sleep_fn=sleeps.append, models=models
-    )
-    pairs = _collect(gen, 3)
-    # На m1 — только k2 (k1 на капе).
-    assert pairs[0] == ("m1", "k2")
-    # Затем m2 с обоими ключами.
-    assert pairs[1:3] == [("m2", "k1"), ("m2", "k2")]
+def test_pass_stops_when_brain_has_no_alive_keys(tmp_path, monkeypatch, persisted):
+    _sample(tmp_path, "a.txt")
+    _sample(tmp_path, "b.txt")
+    monkeypatch.setattr(extraction, "ask", lambda chunk: [{"title": "t"}])
+    monkeypatch.setattr(extraction, "init_extraction_tables", lambda: None)
+    alive = iter([True, False])
+    monkeypatch.setattr(extraction, "_any_model_alive", lambda: next(alive))
+
+    files, *_ = extraction.run_extraction_pass(tmp_path)
+    assert files == 1, "второй файл не тронут — у мозга нет живых ключей"
 
 
-def test_rotator_stops_when_all_exhausted(temp_quota_db):
-    sleeps: list[float] = []
-    # Забанить все пары.
-    for k in ("k1", "k2"):
-        for m in ("m1", "m2"):
-            extraction_db.quota_ban_today(extraction._key_hash(k), m)
-    models = [("m1", 10), ("m2", 10)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2"], sleep_fn=sleeps.append, models=models
-    )
-    pairs = _collect(gen, 10)
-    assert pairs == []
-    # И sleep вообще не звался — пустой оборот.
-    assert sleeps == []
+def test_own_rotator_and_quota_are_gone():
+    """Один учёт ключей — мозг. Свой ротатор/квота не должны вернуться (15.09)."""
+    for name in ("iter_model_key_pairs", "_gemini_generate_json", "_MINING_MODELS"):
+        assert not hasattr(extraction, name), name
+    assert (
+        extraction.CONSUMER in extraction.keybroker.CAPS
+    ), "имя `extract` в реестре мозга"
 
 
-def test_rotator_empty_keys_returns_nothing(temp_quota_db):
-    sleeps: list[float] = []
-    gen = extraction.iter_model_key_pairs(
-        [], sleep_fn=sleeps.append, models=[("m1", 10)]
-    )
-    assert list(gen) == []
-    assert sleeps == []
-
-
-def test_rotator_continues_to_next_round(temp_quota_db):
-    """Второй оборот — те же пары снова доступны (RPD не достигнут)."""
-    sleeps: list[float] = []
-    models = [("m1", 10)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2"], sleep_fn=sleeps.append, models=models
-    )
-    # Тянем 7 чтобы спровоцировать 3-й sleep после третьего прохода m1.
-    pairs = _collect(gen, 7)
-    assert pairs[:6] == [("m1", "k1"), ("m1", "k2")] * 3
-    assert sleeps == [extraction._INTER_MODEL_SLEEP_S] * 3
-
-
-def test_rotator_skips_overloaded_model_entirely(temp_quota_db, monkeypatch):
-    """503 на модели — откатываем ВСЮ модель, не отдельный ключ/пару.
-
-    ⛔ 31.08, живой лог: 503 UNAVAILABLE ("model is currently experiencing high
-    demand") — перегрузка Google на уровне МОДЕЛИ, не конкретного ключа. Ротатор
-    до этой правки такого не знал и продолжал перебирать ключи лежащей модели
-    файл за файлом, каждый раз проходя всю лестницу ретраев впустую.
-    """
-    monkeypatch.setattr(extraction, "_model_overload_until", {})
-    extraction._mark_model_overloaded("m1")
-    sleeps: list[float] = []
-    models = [("m1", 10), ("m2", 10)]
-    gen = extraction.iter_model_key_pairs(
-        ["k1", "k2"], sleep_fn=sleeps.append, models=models
-    )
-    pairs = _collect(gen, 4)
-    # m1 в откате — ни одной попытки на неё, сразу m2 с обоими ключами.
-    assert pairs[:2] == [("m2", "k1"), ("m2", "k2")]
-    assert ("m1", "k1") not in pairs and ("m1", "k2") not in pairs
-
-
-def test_model_overload_cooldown_expires(monkeypatch):
-    """Откат — короткоживущий: истёк срок, модель снова доступна."""
-    monkeypatch.setattr(extraction, "_model_overload_until", {})
-    now = extraction.time.time()
-    extraction._model_overload_until["m1"] = now - 1  # уже истёк
-    assert extraction._model_is_overloaded("m1") is False
-    extraction._model_overload_until["m1"] = now + 100  # ещё активен
-    assert extraction._model_is_overloaded("m1") is True
+# ── junk-guard ───────────────────────────────────────────────────────────────────────────
 
 
 def test_is_junk_ai_lesson_catches_inquiry_narration():
