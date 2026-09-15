@@ -11,6 +11,10 @@ COPY pseo/tract/combine/requirements.txt /app/combine/requirements.txt
 RUN pip install --no-cache-dir -r /app/combine/requirements.txt
 
 COPY pseo/tract/ /app/
+# Мозг — ОДИН файл на бота и тракт, живёт в src/teledigest/ (15.09). В тракте лежит только
+# загрузчик (pseo/tract/keybroker.py), который берёт настоящий модуль по KEYBROKER_PATH.
+COPY src/teledigest/keybroker.py /app/_brain/keybroker.py
+ENV KEYBROKER_PATH=/app/_brain/keybroker.py
 
 # BRAIN_DIR (/brain = /root/pseo_builder хоста) монтируется Dokploy: keybroker.db, out_facet и пр.
 WORKDIR /app/combine

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from teledigest import extraction, extraction_db, ipv4_only
+from teledigest import ipv4_only
 
 _V6 = (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:4860:4842:400::", 443, 0, 0))
 _V4 = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.217.113.4", 443))
@@ -88,50 +88,52 @@ def test_gemini_caller_applies_the_policy(name, monkeypatch):
 
 
 # ── СЧЁТЧИК КВОТЫ ────────────────────────────────────────────────────────────────────
+# 15.09: учёт ключей — в мозге (`keybroker.report`), свой счётчик экстрактора снесён.
+# Правило то же: запрос, который НЕ УШЁЛ (транспорт, status -1), квоту Google не трогает и
+# в счётчик не попадает; 19.08 резолверы легли на десять минут, и RPD списывался за каждую
+# непосланную попытку — счётчик врал там, где по нему решают «ключи кончились».
 
 
 @pytest.fixture
-def quota_db(tmp_path: Path, monkeypatch):
-    db_path = tmp_path / "quota.db"
-    monkeypatch.setattr(
-        extraction_db, "get_db_connection", lambda: sqlite3.connect(str(db_path))
-    )
-    extraction_db.init_extraction_tables()
-    yield db_path
+def broker_db(tmp_path: Path, monkeypatch):
+    from teledigest import keybroker
+
+    monkeypatch.setattr(keybroker, "DB", str(tmp_path / "kb.db"))
+    monkeypatch.setattr(keybroker, "_SCHEMA_OK", False)
+    return keybroker
 
 
-def _run_one(monkeypatch, tmp_path, status, resp=None):
-    """Прогнать process_file с подменённым HTTP-вызовом. Рты не зовём."""
-    f = tmp_path / "2026-08-19_br_test.txt"
-    f.write_text("живой текст лога про Бразилию", encoding="utf-8")
-    monkeypatch.setattr(extraction, "_RETRY_DELAYS_S", [])  # без пауз в тесте
-    monkeypatch.setattr(
-        extraction, "_gemini_generate_json", lambda *a, **k: (resp, status)
-    )
-    rotator = iter([("m1", "AIza-test-key")] * 4)
-    extraction.process_file(f, rotator)
-    kh = extraction_db._key_hash("AIza-test-key")
-    return extraction_db.quota_state(kh, "m1")
+def _usage(kb, key: str, model: str) -> tuple[int, int]:
+    c = sqlite3.connect(kb.DB)
+    row = c.execute(
+        "SELECT count, banned FROM usage WHERE key_hash=? AND model=?",
+        (kb._kh(key), model),
+    ).fetchone()
+    c.close()
+    return (row[0], row[1]) if row else (0, 0)
 
 
-def test_transport_failure_does_not_spend_quota(quota_db, tmp_path, monkeypatch):
-    """⛔ Запрос НЕ УШЁЛ (status 0) → квота Google не тронута, счётчик обязан молчать.
-
-    Так и легло 19.08: резолверы провайдера отвалились на десять минут, а RPD списывался за
-    каждую непосланную попытку. Счётчик врал там, где по нему решают «ключи кончились».
-    """
-    count, banned = _run_one(monkeypatch, tmp_path, status=0)
-    assert count == 0, f"списали {count} попыток, не отправив ни одного запроса"
-    assert not banned
+def test_transport_failure_does_not_spend_quota(broker_db):
+    broker_db.report("extract", "AIza-test-key", "m1", -1)
+    assert _usage(broker_db, "AIza-test-key", "m1") == (0, 0)
 
 
-def test_real_http_answer_spends_quota(quota_db, tmp_path, monkeypatch):
-    """Обратная сторона: реальный ответ Google (даже 500) попытками считается."""
-    count, _banned = _run_one(monkeypatch, tmp_path, status=500)
-    assert count == 1, count
+def test_real_answer_spends_quota(broker_db):
+    broker_db.report("extract", "AIza-test-key", "m1", 200)
+    assert _usage(broker_db, "AIza-test-key", "m1")[0] == 1
 
 
-def test_429_spends_quota_and_bans_the_pair(quota_db, tmp_path, monkeypatch):
-    """429 — это превышение: и попытка, и бан пары до UTC-полуночи. Не сломать заодно."""
-    count, banned = _run_one(monkeypatch, tmp_path, status=429)
-    assert count >= 1 and banned, (count, banned)
+def test_first_429_is_a_strike_not_a_day_ban(broker_db):
+    """⛔ Старый экстрактор банил пару на сутки с ПЕРВОГО 429 (15.09: 7 ключей из 12 за
+    полтора часа). Мозг: первый 429 — метка, ключ остаётся в очереди; бан — только после
+    всей лестницы отдыха."""
+    broker_db.report("extract", "AIza-test-key", "m1", 429)
+    count, banned = _usage(broker_db, "AIza-test-key", "m1")
+    assert banned == 0 and count == 0
+    c = sqlite3.connect(broker_db.DB)
+    struck = c.execute(
+        "SELECT struck FROM key_clock WHERE key_hash=?",
+        (broker_db._kh("AIza-test-key"),),
+    ).fetchone()[0]
+    c.close()
+    assert struck == 1

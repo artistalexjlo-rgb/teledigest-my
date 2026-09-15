@@ -1,54 +1,51 @@
-"""extraction.py — Python-порт apps_script/Code.gs::runMining_.
+"""extraction.py — сообщения чата → мухи (`extracted_patterns`), через МОЗГ.
 
-Читает sample-файлы из samples_dir (созданы daily_samples.dump_all_targets),
-прогоняет каждый через Gemini API (free-tier ключи pool), извлекает JSON
-patterns и складывает в SQLite таблицу extracted_patterns. Маркирует
-обработанные файлы сайдкаром .processed чтобы не перечитывать.
+Читает sample-файлы из samples_dir (созданы daily_samples.dump_all_targets), прогоняет
+каждый через Gemini, извлекает JSON patterns и складывает в SQLite extracted_patterns.
+Обработанные файлы помечает сайдкаром.
 
-Apps Script больше НЕ используется — Cloud-suspend сделал его inferно
-ненадёжным. Эта функция всё делает в Python в нашем боте-контейнере.
-
-ROTATION (consonant-slow по требованию юзера):
-  Одна модель — запрос по всем ключам в круг.
-  Между моделями — sleep 60s.
-  Если у пары (key, model) RPD исчерпан или она была забанена 429 —
-  скипаем эту пару до конца UTC-суток.
-  Счётчики персистентны в SQLite (gemini_quota), переживают рестарт.
+⭐ 15.09: ключи, темп, 429/503, парс-фейлы и повторы — ЦЕЛИКОМ в `keybroker.py` (один мозг
+на бота и тракт, общая база квоты). Свой ротатор (`iter_model_key_pairs`), свой учёт
+`gemini_quota` и своя лестница ретраев отсюда СНЕСЕНЫ: два учёта давали два разных ответа
+на «ключи кончились», а свой 429 банил ключ на сутки после 2–3 вызовов (7 из 12 ключей
+за первые полтора часа прохода, замер 15.09). Экстрактор зовётся у мозга именем `extract`
+с ролью `primary` (полный RPD).
 
 Поток:
-1. Walk samples/{country}/*.txt → skip если .processed sidecar.
-2. iterate model-key pairs (rotator), per file одно успешное обращение.
-3. Parse {"patterns": [...]} → write to extracted_patterns (pending).
-4. Touch sidecar {file}.processed.
-5. embed_pump.py отдельным проходом подбирает pending и заливает в Qdrant.
+1. Walk samples/{country}/*.txt → skip, если есть сайдкар `.processed` или `.empty`.
+2. Файл режется на куски по `CHUNK_CHARS` (по границам строк): ответ на 900 строк чата
+   не влезает ни в 60 с, ни в потолок выходных токенов — 15.09 файлы cn/id от 140 КБ
+   падали по таймауту четырежды подряд и не обрабатывались никогда.
+3. Каждый кусок → `keybroker.call` по списку MODELS: следующая модель, только когда у
+   предыдущей нет живых ключей (`any_alive`) или вызов вернул None.
+4. Parse {"patterns": [...]} → extracted_patterns (pending), индекс сквозной по файлу.
+5. Сайдкар: `.processed` — извлечено хоть что-то; `.empty` — все куски ответили, паттернов
+   ноль (пустой день чата, 241 файл < 300 байт крутились в очереди вечно до 15.09);
+   ничего — хоть один кусок провалился, файл вернётся в следующий проход.
+6. embed_pump.py отдельным проходом подбирает pending и заливает в Qdrant.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import json
 import re
-import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from .config import get_config, log
+from . import keybroker
+from .config import log
 from .extraction_db import (
     COLLECTION_STORIES,
     COLLECTION_WISDOM,
-    _key_hash,
     init_extraction_tables,
     insert_extracted_pattern,
-    quota_ban_today,
-    quota_increment,
-    quota_state,
 )
 from .ipv4_only import force_ipv4
 
 # ⛔ IPv6 к Google с этого VPS — чёрная дыра: замер 19.08 дал IPv4 0.18 с против 8 с молчания
 # по IPv6, а в логе 15 повисаний по 60 с. Ставим фильтр ДО первого запроса. Правило одно, живёт
-# в `ipv4_only`; в pseo та же болезнь вылечена ещё в июле, сюда починку не переносили.
+# в `ipv4_only`; мозг ставит такой же фильтр у себя — двойной безвреден.
 force_ipv4()
 
 # System-prompt — дословно из Apps Script Code.gs:280-316.
@@ -142,56 +139,27 @@ _SYSTEM_PROMPT = (
     'история"). Каждую историю пиши свежо, своими словами.\n'
 )
 
-# (name, rpd_cap). RPM cap уже задан Google'ом на стороне сервера; мы не
-# идём близко к нему благодаря inter-model sleep. Имена моделей —
-# best-effort GA: проверяем через ListModels при первом запуске; если
-# 404 — откатываем на -preview вариант.
-# gemini-3.5-flash убрана 2026-05-24 — на ней extraction давал spam-ish
-# результаты: пропускала прямую рекламу как "истории" + переписывала
-# простые факты в блогерскую воду с морализаторством. Это новая модель,
-# не calibrated под наш мухи/котлеты-фильтр. Возвращать только если
-# Google сделает её более строгой на инструкции стиля.
-_MINING_MODELS: list[tuple[str, int]] = [
-    ("gemini-3.1-flash-lite", 500),
-    ("gemini-2.5-flash", 20),
-    ("gemini-2.5-flash-lite", 20),
+# Порядок моделей. Лимиты (RPM/RPD) и учёт — в keybroker.LIMITS, здесь только очередь:
+# `3.1-flash-lite` закрывает всё (юзер 15.09), остальные — хвост на случай выбранного бюджета.
+# gemini-3.5-flash убрана 2026-05-24 — на ней extraction давал spam-ish результаты:
+# пропускала прямую рекламу как "истории" + переписывала простые факты в блогерскую воду.
+MODELS: list[str] = [
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 ]
+CONSUMER = "extract"  # имя в закрытом реестре мозга (keybroker.CAPS)
+ROLE = "primary"  # полный RPD: экстрактор — основной потребитель ключей ночью
+# Таймаут одного HTTP-вызова. 60 с не хватало на ответ по большому куску; при CHUNK_CHARS
+# ответ короткий, 180 — запас на медленную модель, не на толстый вход.
+CALL_TIMEOUT_S = 180
+# Порог куска в СИМВОЛАХ (кириллица в UTF-8 — 2 байта на символ: 40 000 симв. ≈ 60–80 КБ
+# файла, ≈ 15–20 тыс. токенов входа). Замер 15.09: 140 КБ (≈70 тыс. симв.) — уже таймаут.
+CHUNK_CHARS = 40_000
 
-# Sleep между моделями (после прохода всех ключей в текущей модели).
-_INTER_MODEL_SLEEP_S = 60.0
-
-# Sleep между файлами в рамках одной модели (consonant slow).
-# TODO(review-global-throttle): это ИСТОЧНИК, откуда в keybroker миско­пировали GLOBAL_FLOOR (там
-# вычищен как запрещённый глоб-аггрегат, канон §5). Здесь per-процесс (единый экстрактор, файлы
-# последовательно) — работает 3 мес без шторма, НЕ трогать сейчас. Но пересмотреть позже: 4.5с между
-# КАЖДЫМ файлом = потолок ~13 файлов/мин на весь пул; при переводе экстрактора на мозг темп даст
-# per-key шаг, эта пауза станет лишней. Пометка к сносу при проводке экстрактора к keybroker.
-_INTER_FILE_PAUSE_S = 4.5
-
-# Retry schedule per file (если все попытки на разных pairs провалились).
-_RETRY_DELAYS_S = [5.0, 20.0, 60.0]
-
-# ⛔ 31.08, юзер поймал в живом логе: 503 UNAVAILABLE ("model is currently experiencing
-# high demand") — это перегрузка МОДЕЛИ на стороне Google, не проблема конкретного ключа.
-# Ротатор до этой правки умел скипать пару (ключ, модель) только по RPD-капу/429-бану —
-# 503 не отличал, и перебирал ключи ОДНОЙ и той же лежащей модели файл за файлом, каждый
-# раз проходя всю лестницу ретраев (5+20+60с) впустую. In-memory (не SQLite): перегрузка
-# Google проходит за минуты, не сутки — персистентность тут не нужна, переживать рестарт
-# не должна.
-_MODEL_OVERLOAD_COOLDOWN_S = 120.0
-_model_overload_until: dict[str, float] = {}
-
-
-def _mark_model_overloaded(model: str) -> None:
-    _model_overload_until[model] = time.time() + _MODEL_OVERLOAD_COOLDOWN_S
-
-
-def _model_is_overloaded(model: str) -> bool:
-    return time.time() < _model_overload_until.get(model, 0.0)
-
-
-# Sidecar suffix для пометки обработанных файлов.
+# Сайдкары. `.processed` — извлечено; `.empty` — ответ был, паттернов ноль. Оба = «не брать».
 _PROCESSED_MARKER = ".processed"
+_EMPTY_MARKER = ".empty"
 
 
 def _doc_id(source_file_name: str, idx: int, collection: str) -> str:
@@ -201,127 +169,63 @@ def _doc_id(source_file_name: str, idx: int, collection: str) -> str:
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:24]
 
 
-def iter_model_key_pairs(
-    keys: list[str],
-    sleep_fn=time.sleep,
-    models: list[tuple[str, int]] | None = None,
-) -> Iterator[tuple[str, str]]:
-    """Бесконечный генератор пар (model_name, api_key) по правилу:
+def split_content(text: str, limit: int = CHUNK_CHARS) -> list[str]:
+    """Порезать лог на куски не длиннее `limit` символов по границам строк.
 
-    "Одна модель — по всем ключам — потом sleep 60s — следующая модель".
-
-    Пропускает пары которые упёрлись в RPD-кап или забанены 429.
-    Выходит (StopIteration) если за полный оборот ни одной живой пары не
-    нашлось — значит все RPD-баки на сегодня пусты, есть смысл подождать
-    до завтра.
-
-    Аргументы:
-      keys: список api-ключей (порядок сохраняется).
-      sleep_fn: для тестов — подменяемая sleep-функция.
-      models: для тестов — переопределить _MINING_MODELS.
+    Одна строка длиннее лимита идёт своим куском целиком — резать сообщение пополам
+    хуже, чем дать модели один длинный кусок. Пустой текст → [].
     """
-    if not keys:
-        log.error("extraction rotator: пустой список ключей — нечего ротировать")
-        return
-    mdls = models if models is not None else _MINING_MODELS
-    hashed = [(k, _key_hash(k)) for k in keys]
-
-    while True:
-        any_used_this_round = False
-        for model_name, rpd_cap in mdls:
-            if _model_is_overloaded(model_name):
-                log.warning(
-                    "extraction rotator: модель %s в откате после 503 — пропускаем "
-                    "весь оборот, не долбим ключи заведомо лежащей модели",
-                    model_name,
-                )
-                continue
-            used_in_model = 0
-            for api_key, kh in hashed:
-                count, banned = quota_state(kh, model_name)
-                if banned or count >= rpd_cap:
-                    continue
-                used_in_model += 1
-                any_used_this_round = True
-                yield model_name, api_key
-            if used_in_model > 0:
-                log.info(
-                    "extraction rotator: модель %s отработала %d ключей, "
-                    "sleep %.0fs до следующей",
-                    model_name,
-                    used_in_model,
-                    _INTER_MODEL_SLEEP_S,
-                )
-                sleep_fn(_INTER_MODEL_SLEEP_S)
-        if not any_used_this_round:
-            log.warning(
-                "extraction rotator: все (ключ, модель) пары на капе RPD — "
-                "оборот пуст, выходим до сброса квоты (UTC-полночь)"
-            )
-            return
-
-
-def _gemini_generate_json(
-    content: str,
-    model: str,
-    api_key: str,
-    timeout: int = 60,
-) -> tuple[dict | None, int]:
-    """One generate_content call в JSON-режиме.
-
-    Returns (response_json, http_status). response_json = None если HTTP не
-    200 или тело пустое; http_status позволяет вызывающему отличать 429
-    (бан пары) от прочих ошибок (general retry).
-    """
-    import requests
-
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
-    payload: dict[str, Any] = {
-        "contents": [{"parts": [{"text": f"Текст лога:\n{content}"}]}],
-        "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
-        "generationConfig": {"responseMimeType": "application/json"},
-    }
-    try:
-        resp = requests.post(url, json=payload, timeout=timeout)
-    except Exception as e:
-        log.warning("extraction Gemini call exception: %s", e)
-        return None, 0
-    if resp.status_code != 200:
-        log.warning(
-            "extraction Gemini HTTP %d on %s: %s",
-            resp.status_code,
-            model,
-            resp.text[:300],
-        )
-        return None, resp.status_code
-    return resp.json(), 200
-
-
-def _extract_patterns_from_response(api_resp: dict) -> list[dict]:
-    """Из generate_content response достать JSON массив patterns."""
-    cands = api_resp.get("candidates") or []
-    if not cands or not cands[0].get("content"):
+    if not text.strip():
         return []
-    parts = cands[0]["content"].get("parts") or []
-    if not parts:
-        return []
-    raw = parts[0].get("text") or ""
-    clean = re.sub(r"```json|```", "", raw).strip()
-    try:
-        data = json.loads(clean)
-    except json.JSONDecodeError as e:
-        log.warning("extraction: JSON parse failed: %s\nText: %s", e, clean[:300])
-        return []
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        patterns = data.get("patterns")
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    cur: list[str] = []
+    size = 0
+    for line in text.splitlines(keepends=True):
+        if cur and size + len(line) > limit:
+            chunks.append("".join(cur))
+            cur, size = [], 0
+        cur.append(line)
+        size += len(line)
+    if cur:
+        chunks.append("".join(cur))
+    return chunks
+
+
+def _patterns_from(resp: Any) -> list[dict]:
+    """Из ответа мозга (уже распарсенный JSON) достать список patterns."""
+    if isinstance(resp, list):
+        return [p for p in resp if isinstance(p, dict)]
+    if isinstance(resp, dict):
+        patterns = resp.get("patterns")
         if isinstance(patterns, list):
-            return patterns
+            return [p for p in patterns if isinstance(p, dict)]
     return []
+
+
+def ask(chunk: str, models: list[str] | None = None) -> list[dict] | None:
+    """Один кусок лога → список patterns, или None, если ни одна модель не ответила.
+
+    Модели по порядку; к следующей — только если у текущей нет живых ключей или мозг
+    вернул None (бюджет выбран / сдался). Пустой список — это ОТВЕТ (паттернов нет), а не
+    провал: дальше по списку не идём.
+    """
+    for model in models or MODELS:
+        if not keybroker.any_alive(model, ROLE):
+            continue
+        resp = keybroker.call(
+            f"Текст лога:\n{chunk}",
+            _SYSTEM_PROMPT,
+            CONSUMER,
+            model=model,
+            role=ROLE,
+            timeout=CALL_TIMEOUT_S,
+            salvage=("patterns", "title"),
+        )
+        if resp is not None:
+            return _patterns_from(resp)
+    return None
 
 
 # Guard: ai_lesson, в котором дешёвая модель пересказала ВОПРОС/ПУСТОТУ/ЛИСТИНГ
@@ -372,11 +276,18 @@ def is_junk_ai_lesson(text: str | None) -> bool:
     return bool(_JUNK_AI_LESSON_RE.search(text) or _JUNK_OPENER_RE.match(text))
 
 
-def _persist_patterns(file_name: str, patterns: list[dict]) -> tuple[int, int]:
-    """Save patterns to SQLite extracted_patterns. Returns (saved, attempted)."""
+def _persist_patterns(
+    file_name: str, patterns: list[dict], idx_offset: int = 0
+) -> tuple[int, int]:
+    """Save patterns to SQLite extracted_patterns. Returns (saved, attempted).
+
+    `idx_offset` — смещение индекса для кусков одного файла: id паттерна = sha1(файл:idx),
+    и второй кусок без смещения перетёр бы (INSERT OR IGNORE — молча потерял) первый.
+    """
     saved = 0
     attempted = 0
-    for idx, p in enumerate(patterns):
+    for i, p in enumerate(patterns):
+        idx = idx_offset + i
         if not isinstance(p, dict):
             continue
         routing = (p.get("routing") or "both").strip().lower()
@@ -443,92 +354,82 @@ def _persist_patterns(file_name: str, patterns: list[dict]) -> tuple[int, int]:
     return saved, attempted
 
 
-def process_file(
-    file_path: Path,
-    rotator: Iterator[tuple[str, str]],
-) -> tuple[int, int, bool]:
-    """Process one sample file. Returns (saved, attempted, exhausted).
+def process_file(file_path: Path) -> tuple[int, int, bool]:
+    """Один файл: куски → мозг → база. Returns (saved, attempted, ok).
 
-    exhausted=True означает что ротатор кончился (StopIteration) пока этот
-    файл пытался обработаться — значит весь pass надо остановить.
+    ok=False — хоть один кусок остался без ответа: сайдкар не ставится, файл вернётся в
+    следующий проход. Извлечённое из удачных кусков при этом уже в базе (id детерминирован,
+    повтор их не задвоит).
     """
     try:
         content = file_path.read_text(encoding="utf-8")
     except Exception as e:
         log.error("extraction: read failed for %s: %s", file_path, e)
         return 0, 0, False
-    if not content.strip():
-        return 0, 0, False
+    chunks = split_content(content, CHUNK_CHARS)
+    if not chunks:
+        return 0, 0, True
 
-    api_resp: dict | None = None
-    for attempt, wait_after in enumerate([0] + _RETRY_DELAYS_S):
-        if wait_after:
+    saved = attempted = 0
+    idx_offset = 0
+    ok = True
+    for n, chunk in enumerate(chunks, 1):
+        if len(chunks) > 1:
+            log.info("extraction: %s — кусок %d/%d", file_path.name, n, len(chunks))
+        patterns = ask(chunk)
+        if patterns is None:
             log.warning(
-                "extraction: retry %d/%d after %.0fs for %s",
-                attempt,
-                len(_RETRY_DELAYS_S),
-                wait_after,
+                "extraction: %s — кусок %d/%d без ответа",
                 file_path.name,
+                n,
+                len(chunks),
             )
-            time.sleep(wait_after)
-        try:
-            model, api_key = next(rotator)
-        except StopIteration:
-            log.warning(
-                "extraction: ротатор пуст до обработки %s — pass завершён",
-                file_path.name,
-            )
-            return 0, 0, True
-
-        log.info("extraction: %s → %s (attempt %d)", file_path.name, model, attempt + 1)
-        api_resp, status = _gemini_generate_json(content, model, api_key)
-
-        # Счётчик инкрементим только при реальном использовании квоты: 200 и 4xx/5xx
-        # Google считает попытками тоже, а 429 = превышение → пару помечаем exhausted.
-        # ⛔ status == 0 значит запрос НЕ УШЁЛ (транспорт: имя не разрешилось, IPv6 повис).
-        # Квота Google не тронута — списывать нельзя. Раньше списывали всегда, хотя коммент
-        # утверждал обратное: 19.08 резолверы провайдера легли на десять минут, и каждая
-        # непосланная попытка съедала RPD на бумаге. Счётчик врал ровно там, где по нему
-        # принимают решение «ключи на сегодня кончились».
-        kh = _key_hash(api_key)
-        if status:
-            quota_increment(kh, model)
-        if status == 429:
-            log.warning(
-                "extraction: 429 на (%s, %s…) — пара забанена до UTC-полуночи",
-                model,
-                api_key[:6],
-            )
-            quota_ban_today(kh, model)
-        elif status == 503:
-            log.warning(
-                "extraction: 503 на модели %s — модель в откате на %.0fs, не ключ виноват",
-                model,
-                _MODEL_OVERLOAD_COOLDOWN_S,
-            )
-            _mark_model_overloaded(model)
-
-        if api_resp:
-            break
-
-    if api_resp is None:
-        log.warning("extraction: %s — Gemini failed after retries", file_path.name)
-        return 0, 0, False
-
-    patterns = _extract_patterns_from_response(api_resp)
-    if not patterns:
+            ok = False
+            # смещение держим стабильным: у куска — своё окно индексов, независимо от исхода
+            idx_offset += _IDX_STRIDE
+            continue
+        if patterns:
+            s, a = _persist_patterns(file_path.name, patterns, idx_offset)
+            saved += s
+            attempted += a
+        idx_offset += _IDX_STRIDE
+    if not ok:
+        return saved, attempted, False
+    if attempted == 0:
         log.info("extraction: %s — 0 patterns extracted", file_path.name)
-        return 0, 0, False
+    else:
+        log.info(
+            "extraction: %s — saved=%d (of %d attempted)",
+            file_path.name,
+            saved,
+            attempted,
+        )
+    return saved, attempted, True
 
-    saved, attempted = _persist_patterns(file_path.name, patterns)
-    log.info(
-        "extraction: %s — patterns=%d saved=%d (of %d attempted)",
-        file_path.name,
-        len(patterns),
-        saved,
-        attempted,
+
+# Окно индексов на кусок: id = sha1(файл:idx). Смещение фиксированное, а не «сколько
+# вернул прошлый кусок»: иначе повторный прогон после провала одного куска сдвинул бы
+# индексы следующих и задвоил их мухи под новыми id.
+_IDX_STRIDE = 1000
+
+
+def _mark(file_path: Path, marker: str) -> None:
+    try:
+        file_path.with_suffix(file_path.suffix + marker).write_text(
+            dt.datetime.now(dt.timezone.utc).isoformat(), encoding="utf-8"
+        )
+    except Exception as e:
+        log.warning("extraction: marker write failed for %s: %s", file_path.name, e)
+
+
+def _is_done(f: Path) -> bool:
+    return any(
+        f.with_suffix(f.suffix + m).exists() for m in (_PROCESSED_MARKER, _EMPTY_MARKER)
     )
-    return saved, attempted, False
+
+
+def _any_model_alive() -> bool:
+    return any(keybroker.any_alive(m, ROLE) for m in MODELS)
 
 
 def run_extraction_pass(
@@ -539,20 +440,12 @@ def run_extraction_pass(
     """Walk samples_dir, process unprocessed files. Returns (files_processed,
     total_saved, total_attempted).
 
-    Per-file:
-      - sidecar `{name}.processed` создаётся если хотя бы один pattern
-        извлечён (иначе оставляем непомеченным для ретрая).
+    Per-file сайдкар: `.processed` — извлечено хоть что-то; `.empty` — паттернов ноль при
+    полном ответе; ничего — провал, файл вернётся. Проход останавливается, когда у мозга
+    не осталось живых ключей ни на одной модели (до PT-полуночи ждать нечего).
     max_files = cap для предсказуемости (None = все).
     """
     init_extraction_tables()
-    cfg = get_config()
-    keys = list(cfg.gemini.api_keys) if cfg.gemini.api_keys else []
-    if not keys and cfg.gemini.api_key:
-        keys = [cfg.gemini.api_key]
-    if not keys:
-        log.error("extraction: ни один GEMINI ключ не настроен")
-        return 0, 0, 0
-
     if samples_dir is None:
         from .daily_samples import get_samples_dir
 
@@ -569,8 +462,7 @@ def run_extraction_pass(
         for f in country_dir.iterdir():
             if not f.is_file() or f.suffix != ".txt":
                 continue
-            marker = f.with_suffix(f.suffix + _PROCESSED_MARKER)
-            if marker.exists() and not force_reprocess:
+            if _is_done(f) and not force_reprocess:
                 continue
             files.append(f)
 
@@ -578,37 +470,26 @@ def run_extraction_pass(
     if max_files:
         files = files[:max_files]
 
-    log.info(
-        "extraction: %d sample files queued, %d ключей в pool", len(files), len(keys)
-    )
+    log.info("extraction: %d sample files queued (мозг: %s)", len(files), CONSUMER)
 
-    rotator = iter_model_key_pairs(keys)
     files_processed = 0
     total_saved = 0
     total_attempted = 0
 
-    for i, f in enumerate(files):
-        if i > 0:
-            time.sleep(_INTER_FILE_PAUSE_S)
-        saved, attempted, exhausted = process_file(f, rotator)
-        total_saved += saved
-        total_attempted += attempted
-        if attempted > 0:
-            marker = f.with_suffix(f.suffix + _PROCESSED_MARKER)
-            try:
-                marker.write_text(
-                    dt.datetime.now(dt.timezone.utc).isoformat(), encoding="utf-8"
-                )
-            except Exception as e:
-                log.warning("extraction: marker write failed for %s: %s", f.name, e)
-        files_processed += 1
-        if exhausted:
+    for f in files:
+        if not _any_model_alive():
             log.warning(
-                "extraction: pass прерван — все квоты исчерпаны. Обработано %d/%d",
+                "extraction: pass прерван — у мозга нет живых ключей. Обработано %d/%d",
                 files_processed,
                 len(files),
             )
             break
+        saved, attempted, ok = process_file(f)
+        total_saved += saved
+        total_attempted += attempted
+        if ok:
+            _mark(f, _PROCESSED_MARKER if attempted > 0 else _EMPTY_MARKER)
+        files_processed += 1
 
     log.info(
         "extraction DONE: files_processed=%d total_saved=%d total_attempted=%d",
