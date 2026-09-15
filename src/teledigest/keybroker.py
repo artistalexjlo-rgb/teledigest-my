@@ -231,9 +231,8 @@ _BODY_LOG = os.path.join(os.path.dirname(DB) or ".", "error_bodies.log")
 _HDR_LOG = os.path.join(os.path.dirname(DB) or ".", "ratelimit_headers.log")
 _HDR_SEEN = [0]  # первые N ответов логируем ВСЕ имена заголовков (разведка)
 _TRACE = os.path.join(os.path.dirname(DB) or ".", "grant_trace.tsv")
-_TRACE_CTX = (
-    {}
-)  # контекст последнего гранта (acquire кладёт, call пишет строку с исходом)
+# контекст последнего гранта (acquire кладёт, call пишет строку с исходом)
+_TRACE_CTX: dict = {}
 _CALL_SEQ = [0]  # сквозной номер логического вызова в этом процессе
 
 
@@ -387,7 +386,8 @@ def _conn():
 
 def init():
     c = _conn()
-    c.executescript("""
+    c.executescript(
+        """
         CREATE TABLE IF NOT EXISTS key_clock(
             key_hash TEXT PRIMARY KEY,
             cooldown_until REAL DEFAULT 0
@@ -411,7 +411,8 @@ def init():
             consumer TEXT, pt_day TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY(consumer, pt_day)
         );
-        """)
+        """
+    )
     # очередь пула: busy_ts в broker_global = время последней выдачи (такт);
     # busy_consumer — кто взял последним (диагностика)
     c.execute(
