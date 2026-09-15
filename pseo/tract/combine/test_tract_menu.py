@@ -860,4 +860,5 @@ def test_broker_db_path_has_one_owner():
         if "test_" not in p.name
         and '"keybroker.db"' in p.read_text(encoding="utf-8")  # литерал, не комментарий
     ]
-    assert offenders == ["keybroker.py"], offenders
+    # в тракте лежит только загрузчик мозга; сам путь — в src/teledigest/keybroker.py
+    assert offenders == [], offenders
