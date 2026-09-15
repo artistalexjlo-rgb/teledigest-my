@@ -56,7 +56,6 @@ TESTS = "tests"
 # Лежит файлом рядом с данными пробы, меняется командой `/geo <код>`; пусто = весь корпус.
 GEO_FILE = os.path.join(BRAIN, TESTS, "GEO")
 JOBS_DB = os.path.join(BRAIN, "combine_jobs.db")
-KB_DB = os.path.join(BRAIN, "keybroker.db")
 # два флага: facet-рты чтут RUNNER_STOP, lang_runner — LANG_RUNNER_STOP
 STOP_FLAGS = [
     os.path.join(BRAIN, "RUNNER_STOP"),
@@ -312,7 +311,9 @@ def close_interrupted_jobs():
 
 
 def kb():
-    return sqlite3.connect(f"file:{KB_DB}?mode=ro", uri=True, timeout=30)
+    # ⛔ Путь к базе — ТОЛЬКО у мозга (keybroker.DB). Своя копия здесь пережила переезд базы
+    # в brain/ (15.09) и полчаса ругалась «unable to open database file» на живом пульте.
+    return sqlite3.connect(f"file:{keybroker.DB}?mode=ro", uri=True, timeout=30)
 
 
 def pt_day():
