@@ -845,3 +845,20 @@ def test_state_counts_the_test_folder():
     src = (HERE / "bot.py").read_text(encoding="utf-8")
     assert 'TESTS = "tests"' in src
     assert "{BRAIN}/{TESTS}/tags/" in src, "состояние читает боевые теги"
+
+
+def test_broker_db_path_has_one_owner():
+    """⛔ 15.09: у пульта была СВОЯ копия пути к базе мозга (`BRAIN/keybroker.db`); база
+    переехала в brain/ — копия осталась и ломала ban_watch на живом пульте. Путь знает
+    только мозг: в коде тракта имени файла быть не должно."""
+    import pathlib
+
+    tract = pathlib.Path(bot.TRACT)
+    offenders = [
+        p.relative_to(tract).as_posix()
+        for p in tract.rglob("*.py")
+        if "test_" not in p.name
+        and '"keybroker.db"' in p.read_text(encoding="utf-8")  # литерал, не комментарий
+    ]
+    # в тракте лежит только загрузчик мозга; сам путь — в src/teledigest/keybroker.py
+    assert offenders == [], offenders
