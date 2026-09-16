@@ -1,8 +1,33 @@
 {
  "html_lang": "de",
  "brand_sub": "Infoportal · jedes Land · ohne Geschwätz",
- "cta_btn": "Luky-App öffnen",
+ "cta_btn": "Zur Luky-App",
  "cta_pools": {
+  "hook": [
+   "Deinen Fall nicht gefunden?",
+   "Du brauchst es für deine Situation, nicht allgemein?",
+   "Allgemeine Artikel gibt es — aber eine Lösung für dich?",
+   "Willst du eine Antwort für dich, keinen Vortrag für alle?",
+   "Die halbe Suche durch und noch immer unsicher?",
+   "Die Antworten kreisen drumherum, treffen es aber nie?",
+   "Überall dasselbe, nur dein Fall ist besonders?",
+   "Die Suche antwortet allen — und dir?",
+   "Weißt du noch nicht, was in deinem Fall zu tun ist?",
+   "Müde davon, dasselbe zu googeln?"
+  ],
+  "assistant_lead": "Frag Luky —",
+  "assistant": [
+   "Antworten für deinen Fall, aus aktuellen Berichten statt aus allgemeinen Artikeln",
+   "gibt dir, was du wirklich brauchst: echte Erfahrung von Leuten, die es durchgemacht haben",
+   "baut die Antwort aus frischen Berichten aus erster Hand, nicht aus Werbetexten",
+   "keine allgemeinen Artikel, sondern Konkretes für deine Situation",
+   "was die Suche nicht zeigt und nicht jeder Blogger erzählt",
+   "frische Berichte, nicht ein fünf Jahre alter Artikel",
+   "erzählt wie jemand, der gerade zurück ist — ohne Geschwätz",
+   "aus der aktuellen Erfahrung der Leute, nicht aus Handbüchern",
+   "versucht deine Situation zu verstehen und genauer zu antworten",
+   "sagt dir, was gerade jetzt funktioniert — aus aktuellen Berichten"
+  ],
   "voice_lead": "Luky ist ein Live-Sprachübersetzer für echte Gespräche:",
   "voice": [
    "sprich direkt mit Einheimischen",
@@ -23,6 +48,18 @@
    "finde im Handyshop heraus, welchen Tarif man dir verkauft",
    "sprich mit dem Arbeitgeber oder im Prüfungsamt",
    "erklär die Lage dem Polizisten oder dem Rettungsdienst"
+  ],
+  "ps": [
+   "PS: wenn du magst, hilft Luky dir, Leute ohne Sprachbarriere kennenzulernen 😉",
+   "PS: ein Sprachanruf mit dieser Person aus einem anderen Land — auch Luky",
+   "PS: beim Date in einer fremden Sprache flirten? Kein Problem 😏",
+   "PS: im Voice-Chat eines Spiels versteht du Mitspieler aus halb der Welt",
+   "PS: komm mit einem Mitreisenden ins Gespräch, der kein Wort deiner Sprache spricht",
+   "PS: auf einem Festival im Ausland mit jemandem plaudern — ganz leicht",
+   "PS: sogar mit der Familie deines Partners, die kein Wort deiner Sprache spricht 😄",
+   "PS: stell Luky auf der Party auf einen Lautsprecher und sprich mit allen gleichzeitig",
+   "PS: lerne an der Bar jemanden kennen, der eine andere Sprache spricht",
+   "PS: sprich mit einem Freund im Ausland, als stünde er direkt neben dir"
   ]
  },
  "footer_brand_tail": "— echte Erfahrungen aus Community-Chats, ohne Geschwätz",

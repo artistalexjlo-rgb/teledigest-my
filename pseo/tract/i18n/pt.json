@@ -1,8 +1,33 @@
 {
  "html_lang": "pt",
  "brand_sub": "portal de info · qualquer país · sem enrolação",
- "cta_btn": "Abrir o app Luky",
+ "cta_btn": "Ir para o app Luky",
  "cta_pools": {
+  "hook": [
+   "Não encontrou o seu caso?",
+   "Precisa de algo para a sua situação, não em geral?",
+   "Existem artigos genéricos — mas uma solução para você?",
+   "Quer uma resposta para você, não uma palestra para todos?",
+   "Vasculhou a busca e ainda está na dúvida?",
+   "As respostas dão voltas e nunca chegam ao ponto?",
+   "Em todo lugar a mesma coisa, mas o seu caso é especial?",
+   "A busca responde a todos — mas a você?",
+   "Ainda não sabe o que fazer no seu caso?",
+   "Cansado de pesquisar a mesma coisa?"
+  ],
+  "assistant_lead": "Pergunte ao Luky —",
+  "assistant": [
+   "responde para o seu caso, com base em relatos recentes, não em artigos genéricos",
+   "dá o que você realmente precisa: experiência real de quem já passou por isso",
+   "monta a resposta a partir de relatos frescos em primeira mão, não de publicidade",
+   "não artigos genéricos, mas detalhes para a sua situação",
+   "o que a busca não mostra e nem todo blogueiro conta",
+   "relatos frescos, não um artigo de cinco anos atrás",
+   "fala como quem acabou de voltar de lá — sem enrolação",
+   "pela experiência recente das pessoas, não por manuais",
+   "tenta entender a sua situação e responder com mais precisão",
+   "diz o que funciona agora — com base em relatos recentes"
+  ],
   "voice_lead": "O Luky é um tradutor de voz para conversas reais:",
   "voice": [
    "fale com os locais diretamente",
@@ -23,6 +48,18 @@
    "descubra na loja de telefonia que plano estão te vendendo",
    "fale com o empregador ou na secretaria da faculdade",
    "explique a situação ao policial ou ao paramédico"
+  ],
+  "ps": [
+   "PS: se quiser, o Luky ajuda a conhecer gente sem barreira de idioma 😉",
+   "PS: uma chamada de voz com aquela pessoa de outro país — também é o Luky",
+   "PS: flertar num encontro em outra língua? Sem problema 😏",
+   "PS: num chat de voz de jogo você vai entender colegas de meio mundo",
+   "PS: puxe conversa com um companheiro de viagem que não fala nada da sua língua",
+   "PS: conversar com alguém num festival no exterior — fácil",
+   "PS: até com a família do seu par que não fala nada da sua língua 😄",
+   "PS: coloque o Luky numa caixa de som portátil numa festa e fale com todos de uma vez",
+   "PS: conheça alguém num bar que fala outra língua",
+   "PS: tenha uma conversa por voz com um amigo no exterior como se estivesse ao lado"
   ]
  },
  "footer_brand_tail": "— experiência real dos chats de comunidades, sem enrolação",

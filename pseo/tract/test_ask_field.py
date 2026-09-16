@@ -53,7 +53,6 @@ def test_one_field_on_top_with_country_context(monkeypatch, tmp_path):
     assert 'data-page="Документы на визу"' in html
     assert "Найди или спроси…" in html
     assert 'id="askForm"' not in html, "нижнего виджета больше нет"
-    assert "Спроси Luky об этой стране" not in html
 
 
 def test_field_is_on_home_without_country(monkeypatch, tmp_path):
@@ -126,13 +125,21 @@ def test_home_shows_popular_with_vibe_and_regions(monkeypatch, tmp_path):
     assert "href='#luky'" not in html and "/ru/go/luky/" in html, "интро ведёт в дверь"
 
 
-def test_cta_is_one_voice_line_plus_button(monkeypatch, tmp_path):
+def test_luky_plate_is_on_top_with_field_phrases_and_button(monkeypatch, tmp_path):
+    """Эскиз 17.09: плашка Luky НАВЕРХУ — поле, крючок, помощник, голос, PS, кнопка;
+    итоги (подсказки/ответ) — ПОД плашкой, над содержимым; внизу плашки нет."""
     render = _render(monkeypatch, tmp_path)
     html = render.render_page(_page())
-    cta = html[html.index('class="plate cta"') :]
-    cta = cta[: cta.index("</div></div>")]
-    assert "<h2>" not in cta and 'class="ps"' not in cta
-    assert "голосовой переводчик" in cta and "Открыть приложение Luky" in cta
+    plate_at = html.index('class="plate cta luky"')
+    assert plate_at < html.index("<h1>"), "плашка выше содержимого"
+    plate = html[plate_at : html.index("</div></div>", plate_at)]
+    assert 'id="gq"' in plate and "Спросить" in plate
+    assert "<h2>" in plate and 'class="ps"' in plate
+    assert "Спроси Luky —" in plate and "голосовой переводчик" in plate
+    assert "Перейти в приложение Luky" in plate
+    log_at = html.index('id="askLog"')
+    assert plate_at < log_at < html.index("<h1>"), "итоги под плашкой, над содержимым"
+    assert html.count('class="plate cta') == 1, "внизу плашки нет"
 
 
 def test_i18n_keys_are_symmetric_and_regions_named():
@@ -144,7 +151,14 @@ def test_i18n_keys_are_symmetric_and_regions_named():
         assert (
             set(d) == ref
         ), f"{lang}: лишние {sorted(set(d) - ref)}, нет {sorted(ref - set(d))}"
-        assert set(d["cta_pools"]) == {"voice_lead", "voice"}, lang
+        assert set(d["cta_pools"]) == {
+            "hook",
+            "assistant_lead",
+            "assistant",
+            "voice_lead",
+            "voice",
+            "ps",
+        }, lang
     for k in (
         "ask_ph",
         "ask_btn",
