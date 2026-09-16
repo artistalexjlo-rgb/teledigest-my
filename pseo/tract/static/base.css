@@ -159,6 +159,9 @@ details.reg .cnt{font-family:var(--font-mono);font-weight:700;font-size:.9rem;co
 .rlist a:hover{color:var(--hud);text-decoration:none}
 
 .cta{margin-top:34px}
+.cta.luky{margin:10px 0 6px}
+.cta.luky .search{width:100%;margin:0 0 6px}
+.cta.luky .search input{padding:12px 16px;font-size:.98rem}
 .cta .oct path{fill:#160c02;stroke:var(--amber-edge)}
 [data-theme="light"] .cta .oct path{fill:#fdf1d8}
 .cta .pad{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
@@ -181,15 +184,16 @@ footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--border);color
 .f-disc{font-size:.82rem;line-height:1.5;max-width:560px;margin:10px 0}
 .f-copy{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;margin-top:10px}
 
-/* одно поле: поиск + помощник (17.09) */
+/* поле в плашке Luky; итоги — под плашкой (17.09) */
 .gsearch{display:flex;align-items:center;gap:10px}
 .gsearch input{flex:1;min-width:0}
 .gsearch .askbtn{border:0;cursor:pointer;margin-right:10px;flex:none;color:var(--hud);font-family:var(--font-mono);font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;padding:9px 14px;background:transparent}
 .gsearch .askbtn .oct path{fill:var(--card);stroke:var(--hud-dim)}
 .gsearch .askbtn:hover .oct path{stroke:var(--hud)}
-.gsearch.busy .askbtn{opacity:.5;pointer-events:none}
+.luky.busy .askbtn{opacity:.5;pointer-events:none}
+#gsugg{margin:0 0 10px}
 #askLog:empty{display:none}
-#askLog{display:flex;flex-direction:column;gap:8px;margin:2px 0 14px;max-height:60vh;overflow:auto}
+#askLog{display:flex;flex-direction:column;gap:8px;margin:0 0 18px;max-height:60vh;overflow:auto}
 .ask-u,.ask-m,.ask-w{padding:10px 14px;border-radius:6px;white-space:pre-wrap;line-height:1.5}
 .ask-u{align-self:flex-end;background:rgba(167,139,250,.14);max-width:85%}
 .ask-m{background:var(--card);border:1px solid var(--hud-dim)}

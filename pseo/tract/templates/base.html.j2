@@ -60,30 +60,28 @@
     </div>
   </div>
 
-  {#- ПОИСК ПО ЗАГОЛОВКАМ (шаг 7) — на КАЖДОЙ странице, поэтому живёт в базовом шаблоне.
-      Индекс не инлайнится: он тянется одним файлом `/<язык>/search.json` по первому вводу
-      (замер: ru — 3124 заголовка, 352 КБ, 77 КБ в gzip; инлайн = те же 352 КБ на каждую из
-      41 630 страниц). Ввод + Enter уводит на `/<язык>/find/?s=…`, и запрос человека
-      оседает в логе веб-сервера — это и есть прибор замера спроса.
-      ⛔ Где поле НЕ рисуем: на главной у неё своё (поиск по странам), а на самой странице
-      поиска поле стоит в содержимом и уже заполнено запросом. Первый заход рисовал два
-      поля подряд — видно на превью сразу, тестами нет. #}
-  {#- ⭐ 19.08: поле стоит и на ГЛАВНОЙ — одно поле на весь сайт, ищет и страны, и
-      заголовки. Своё поле главной (по названиям стран, индекс инлайном) снято. #}
-  {#- ⭐ 17.09: ОДНО поле = поиск по заголовкам + помощник Luky (юзер: «у Luky есть поле,
-      просто его надо доработать и поднять наверх»). Набор → подсказки по заголовкам;
-      Enter/кнопка → вопрос помощнику, ответ плашкой ПОД полем, история на странице.
-      Помощник везде, включая главную (страны нет — уточнит сам). Ходит на
-      /api/assistant/ своего домена, nginx проксирует в приложение Luky. #}
+  {#- ПЛАШКА LUKY — НАВЕРХУ КАЖДОЙ СТРАНИЦЫ (17.09, эскиз согласован). Внутри: поле
+      «Найди или спроси…» (поиск по заголовкам подсказками + вопрос помощнику), крючок,
+      фраза про помощника, фраза про голос по разделу, PS, кнопка в приложение. Итоги
+      (подсказки, ответ помощника) — ПОД плашкой, над содержимым: плашка не растягивается.
+      Поле не рисуем только на странице поиска — там своё, заполненное запросом.
+      Индекс подсказок — `/<язык>/search.json`, тянется по первому вводу. Помощник ходит
+      на /api/assistant/ своего домена, nginx проксирует в приложение Luky. #}
   {%- if page.template != 'find.html.j2' %}
-  <div class="search gsearch" id="ask" data-api="/api/assistant/ask"
+  <div class="plate cta luky" id="ask" data-api="/api/assistant/ask"
        data-country="{{ geo_en or '' }}" data-page="{{ page.h1 or page.title or '' }}"
-       data-wait="{{ t.ask_wait }}" data-err="{{ t.ask_err }}">{{ oct(OCT_BOX, 10, 3) }}
-    <input id="gq" placeholder="{{ t.ask_ph }}" autocomplete="off" aria-label="{{ t.ask_ph }}" maxlength="500"
-           data-find="/{{ t.html_lang }}/find/" data-index="/{{ t.html_lang }}/search.json"
-           data-none="{{ t.home_search_none }}">
-    <button class="chip askbtn" id="askBtn" type="button">{{ oct(OCT_CHIP, 5, 2) }}{{ t.ask_btn }}</button>
-  </div>
+       data-wait="{{ t.ask_wait }}" data-err="{{ t.ask_err }}">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
+    <div class="search gsearch">{{ oct(OCT_BOX, 8, 3) }}
+      <input id="gq" placeholder="{{ t.ask_ph }}" autocomplete="off" aria-label="{{ t.ask_ph }}" maxlength="500"
+             data-index="/{{ t.html_lang }}/search.json" data-none="{{ t.home_search_none }}">
+      <button class="chip askbtn" id="askBtn" type="button">{{ oct(OCT_CHIP, 5, 2) }}{{ t.ask_btn }}</button>
+    </div>
+    <h2>{{ cta.hook }}</h2>
+    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
+    <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
+    <p class="ps">{{ cta.ps }}</p>
+    <a class="btn" href="{{ door }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
+  </div></div>
   <div id="gsugg"></div>
   <div id="askLog" aria-live="polite"></div>
   {%- endif %}

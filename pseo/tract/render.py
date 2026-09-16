@@ -121,17 +121,22 @@ def door_url(page: dict) -> str:
 
 
 def build_cta(t: dict, page: dict) -> dict:
-    """CTA — ОДНА строка про голосовой переводчик (по разделу) + кнопка в приложение.
+    """Плашка Luky: hook + assistant(L1) + voice(L2, по разделу) + ps(оффтоп). Слоты
+    варьируем по пути страницы; PS — свой сид.
 
-    ⛔ 17.09: «бутерброд» hook + assistant + voice + PS снят (юзер: «зачем плодить
-    вставки»): помощник теперь в поле наверху страницы, крючки про него — лишний текст.
-    Пулы hook/assistant/ps убраны из i18n вместе с ним.
+    ⭐ 17.09: плашка стоит НАВЕРХУ каждой страницы, в ней же поле «Найди или спроси…»
+    (base.html.j2). Днём 17.09 бутерброд был снят как «лишние вставки» — юзер вернул:
+    «старая плашка должна была подняться наверх, в ней добавиться строка поиска».
     """
     pools = t["cta_pools"]
     key = page.get("path", "")
     return {
+        "hook": _pick(pools["hook"], key + "|hook"),
+        "assistant_lead": pools["assistant_lead"],
+        "assistant": _pick(pools["assistant"], key + "|assistant"),
         "voice_lead": pools["voice_lead"],
         "voice": _pick(voice_pool(pools, page), key + "|voice"),
+        "ps": _pick(pools["ps"], key + "|ps"),
     }
 
 

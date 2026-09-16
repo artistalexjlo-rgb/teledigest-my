@@ -1,8 +1,33 @@
 {
  "html_lang": "en",
  "brand_sub": "info portal · any country · no fluff",
- "cta_btn": "Open the Luky app",
+ "cta_btn": "Go to the Luky app",
  "cta_pools": {
+  "hook": [
+   "Didn't find your case?",
+   "Need it for your situation, not in general?",
+   "Generic articles exist — but a solution for you?",
+   "Want an answer for you, not a lecture for everyone?",
+   "Dug through search and still unsure?",
+   "Answers dance around it, but never to the point?",
+   "Everywhere the same, but your case is special?",
+   "Search answers everyone — but you?",
+   "Still don't know what to do in your case?",
+   "Tired of googling the same thing?"
+  ],
+  "assistant_lead": "Ask Luky —",
+  "assistant": [
+   "answers for your case, from recent reports, not generic articles",
+   "gives what you actually need: real experience of people who went through it",
+   "builds the answer from fresh first-hand reports, not marketing copy",
+   "not generic articles, but specifics for your situation",
+   "what search won't show and not every blogger will tell",
+   "fresh reports, not a five-year-old article",
+   "talks like someone just back from there — no fluff",
+   "from people's recent experience, not from manuals",
+   "tries to understand your situation and answer more precisely",
+   "tells you what works right now — from recent reports"
+  ],
   "voice_lead": "Luky is a live voice translator for real conversations:",
   "voice": [
    "talk to locals directly",
@@ -23,6 +48,18 @@
    "figure out at the phone shop what plan they're selling you",
    "talk to your employer or the dean's office",
    "explain the situation to a police officer or a paramedic"
+  ],
+  "ps": [
+   "PS: if you like, Luky helps you meet people with no language barrier 😉",
+   "PS: a voice call with that person from another country — also Luky",
+   "PS: flirt on a date in a foreign language? No problem 😏",
+   "PS: in a voice game chat you'll understand teammates from half the world",
+   "PS: strike up a chat with a fellow traveller who speaks not a word of yours",
+   "PS: chatting with someone at a festival abroad — easy",
+   "PS: even with your partner's family who don't speak a word of yours 😄",
+   "PS: put Luky on a portable speaker at a party and talk to everyone at once",
+   "PS: meet someone at a bar who speaks another language",
+   "PS: have a voice chat with a friend abroad like they're right next to you"
   ]
  },
  "footer_brand_tail": "— real experience from community chats, no fluff",

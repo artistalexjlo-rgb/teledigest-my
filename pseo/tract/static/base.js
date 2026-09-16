@@ -76,7 +76,7 @@
   q.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();ask();}});
   if(btn) btn.addEventListener("click",ask);
   document.addEventListener("click",function(e){
-    if(!e.target.closest(".gsearch")&&e.target.id!=="gq") sg.style.display="none";
+    if(!e.target.closest("#ask")&&e.target.id!=="gq") sg.style.display="none";
   });
 })();
 
