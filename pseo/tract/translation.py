@@ -359,10 +359,33 @@ def translate_all(geo, langs=None):
         translate_geo(geo, lang)
 
 
+VIBES_FLAG = "--vibes"
+
+
+def vibes_all(langs=None):
+    """Вайбы для всех языков сайта — отдельная работа шага 5 (17.09).
+
+    ⛔ Покупка внутри `translate_geo` срабатывает только когда какой-то стране есть что
+    переводить; при свежих переводах у всех 94 гео кнопка «делать нечего», и вайбы не
+    покупались бы никогда. Купленное `vibe_texts` пропускает сам, повтор бесплатен.
+    """
+    n = 0
+    for lang in langs or list(LANG_NAME):
+        if os.path.exists("RUNNER_STOP"):
+            print(f"  стоп перед языком {lang}", flush=True)
+            break
+        if vibe_texts(lang):
+            n += 1
+    print(f"вайбы: языков с текстами {n} из {len(langs or LANG_NAME)}", flush=True)
+    return n
+
+
 if __name__ == "__main__":
     _geo = sys.argv[1] if len(sys.argv) > 1 else ""
     _langs = [x for x in sys.argv[2:] if x in LANG_NAME] or None
-    if not _geo:
-        print("нужен гео: python translation.py <гео> [языки]")
+    if _geo == VIBES_FLAG:
+        vibes_all(_langs)
+    elif not _geo:
+        print("нужен гео: python translation.py <гео> [языки] | --vibes")
     else:
         translate_all(_geo, _langs)

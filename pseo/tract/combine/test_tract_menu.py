@@ -950,3 +950,51 @@ def test_blocked_publish_is_not_marked_done():
     assert (
         next(x for x in bot.pipeline_steps(s) if x["kind"] == "publish")["done"] is True
     )
+
+
+def test_vibes_are_a_job_of_step_5_until_every_language_is_bought(
+    tmp_path, monkeypatch
+):
+    """⛔ 17.09, юзер: «шаг 5 не работает» — покупка вайбов сидела внутри перевода гео, а
+    при свежих переводах у шага не было работы вовсе. Теперь работа шага 5 = недостающие
+    языки в tests/vibes.json; купили все — работы нет; в цепочке — не страна."""
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "TRACT", str(tmp_path))
+    (tmp_path / "tests").mkdir()
+
+    def step5():
+        return next(
+            x
+            for x in bot.pipeline_steps(bot.pipeline_state())
+            if x["kind"] == "translate"
+        )
+
+    assert ("translate", bot.VIBES_GEO) in step5()["jobs"]
+    assert "вайбы" in step5()["label"]
+
+    langs = {lang: {"gr": "x"} for lang in bot._SITE["languages"]}
+    (tmp_path / "tests" / "vibes.json").write_text(json.dumps(langs), encoding="utf-8")
+    assert ("translate", bot.VIBES_GEO) not in step5()["jobs"]
+
+    s = {
+        "collapse": ["gr"],
+        "mark": [{"geo": "gr", "n": 1}],
+        "mark_n": 1,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": [],
+        "vibes_missing": ["de"],
+        "geos": 1,
+        "views": 1,
+        "build_done": True,
+        "readiness_done": True,
+        "publish_done": True,
+    }
+    chain = bot._country_major_chain(bot.pipeline_steps(s))
+    assert ("collapse", bot.VIBES_GEO) not in chain, "вайбы не страна"
+    assert chain.index(("translate", bot.VIBES_GEO)) == chain.index(("build", None)) - 1
+    s["collapse"], s["mark"], s["mark_n"] = [], [], 0
+    assert bot._country_major_chain(bot.pipeline_steps(s))[0] == (
+        "translate",
+        bot.VIBES_GEO,
+    )
