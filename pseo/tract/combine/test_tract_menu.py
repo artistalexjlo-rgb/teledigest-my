@@ -924,3 +924,29 @@ def test_publish_closes_the_chain_when_no_country_needs_work():
         "publish_done": False,
     }
     assert bot._country_major_chain(bot.pipeline_steps(s)) == [("publish", None)]
+
+
+def test_blocked_publish_is_not_marked_done():
+    """⛔ 16.09: у «8. Публикация» без ✅ готовности нет работы, но она НЕ сделана —
+    флаг `done` False; у сделанных шагов флага нет = True по умолчанию."""
+    s = {
+        "collapse": [],
+        "mark": [],
+        "mark_n": 0,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": [],
+        "geos": 1,
+        "views": 1,
+        "build_done": True,
+        "readiness_done": False,
+        "publish_done": False,
+    }
+    steps = {st["kind"]: st for st in bot.pipeline_steps(s)}
+    assert steps["publish"]["jobs"] == [] and steps["publish"]["done"] is False
+    assert steps["build"]["jobs"] == [] and steps["build"].get("done", True) is True
+    s["readiness_done"] = True
+    s["publish_done"] = True
+    assert (
+        next(x for x in bot.pipeline_steps(s) if x["kind"] == "publish")["done"] is True
+    )
