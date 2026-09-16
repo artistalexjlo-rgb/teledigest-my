@@ -80,5 +80,11 @@
  "home_by_region": "地域別",
  "home_search_ph": "国名を入力…",
  "search_ph": "見出しを検索…",
- "home_search_none": "見つかりません"
+ "home_search_none": "見つかりません",
+ "ask_title": "この国についてLukyに聞く",
+ "ask_ph": "質問を入力…",
+ "ask_btn": "聞く",
+ "ask_wait": "最新の体験談を検索中…",
+ "ask_err": "アシスタントは現在利用できません。後でもう一度",
+ "ask_more": "Lukyをフルで開く →"
 }

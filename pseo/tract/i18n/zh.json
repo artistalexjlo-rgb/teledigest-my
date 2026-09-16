@@ -80,5 +80,11 @@
  "home_by_region": "按地区",
  "home_search_ph": "输入国家名…",
  "search_ph": "搜索标题…",
- "home_search_none": "没有找到"
+ "home_search_none": "没有找到",
+ "ask_title": "向 Luky 询问这个国家",
+ "ask_ph": "你的问题…",
+ "ask_btn": "提问",
+ "ask_wait": "正在搜索最新经验…",
+ "ask_err": "助手暂时不可用，请稍后再试",
+ "ask_more": "打开完整的 Luky →"
 }

@@ -80,5 +80,11 @@
  "home_by_region": "حسب المنطقة",
  "home_search_ph": "ابدأ بكتابة اسم بلد…",
  "search_ph": "ابحث في العناوين…",
- "home_search_none": "لا نتائج"
+ "home_search_none": "لا نتائج",
+ "ask_title": "اسأل Luky عن هذا البلد",
+ "ask_ph": "سؤالك…",
+ "ask_btn": "اسأل",
+ "ask_wait": "أبحث في التجارب الحديثة…",
+ "ask_err": "المساعد غير متاح الآن، حاول لاحقاً",
+ "ask_more": "افتح Luky بالكامل ←"
 }

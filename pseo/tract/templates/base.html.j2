@@ -83,6 +83,27 @@
 
   {% block content %}{% endblock %}
 
+  {#- ПОМОЩНИК LUKY НА СТРАНИЦЕ (16.09). Сайт — библиотека для поиска, а не витрина:
+      ответ на вопрос читателя должен быть здесь, а не «попробуй в другом окне». Виджет
+      ходит в /api/assistant/ СВОЕГО домена — nginx pseosite проксирует в приложение Luky
+      по внутренней сети (docs/vps_window.sh), CORS не нужен, лимита нет (source=site).
+      Контекст: английское имя страны (промпт Luky ждёт имя) и заголовок страницы —
+      первой репликой истории. Только на страницах страны: у главной/about/поиска/шлюза
+      страны нет. #}
+  {%- if page.geo and page.template not in ('find.html.j2', 'go.html.j2') %}
+  <div class="plate ask" id="ask" data-api="/api/assistant/ask"
+       data-country="{{ geo_en or page.geo }}" data-page="{{ page.h1 or page.title }}"
+       data-wait="{{ t.ask_wait }}" data-err="{{ t.ask_err }}">{{ oct(OCT_BOX, 10, 3) }}<div class="pad">
+    <h2>{{ t.ask_title }}</h2>
+    <form id="askForm" autocomplete="off">
+      <input id="askQ" placeholder="{{ t.ask_ph }}" maxlength="500" aria-label="{{ t.ask_ph }}">
+      <button class="btn" type="submit">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.ask_btn }}</span></button>
+    </form>
+    <div id="askLog" aria-live="polite"></div>
+    <a class="ask-more" href="{{ door }}" target="_blank" rel="noopener">{{ t.ask_more }}</a>
+  </div></div>
+  {%- endif %}
+
   <footer>
     <div class="f-brand">Lu<b>ky</b> {{ t.footer_brand_tail }}</div>
     <nav class="f-links">

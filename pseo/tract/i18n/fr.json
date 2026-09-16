@@ -80,5 +80,11 @@
  "home_by_region": "Par région",
  "home_search_ph": "Commence à taper un pays…",
  "search_ph": "Rechercher dans les titres…",
- "home_search_none": "rien trouvé"
+ "home_search_none": "rien trouvé",
+ "ask_title": "Demande à Luky sur ce pays",
+ "ask_ph": "Ta question…",
+ "ask_btn": "Demander",
+ "ask_wait": "Recherche dans les retours récents…",
+ "ask_err": "L’assistant est indisponible pour le moment, réessaie plus tard",
+ "ask_more": "Ouvrir Luky en entier →"
 }

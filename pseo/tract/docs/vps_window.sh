@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Окно на BuyVM для звена 8 (PLAN.md §3.2, шаг 3, 12.09). Запускать root'ом на VPS ОДИН раз.
+# Окно на BuyVM для звена 8 (PLAN.md §3.2, шаг 3, 12.09). Запускать root'ом на VPS; идемпотентно —
+# повторный запуск только перезаписывает site.conf и делает reload (16.09: location помощника).
 # Dokploy не трогается, редеплоя нет: маунт site/online → /usr/share/nginx/html остаётся,
 # версии и симлинк current живут ВНУТРИ online/. Идемпотентно: если current уже есть — пропуск.
 set -euo pipefail
@@ -41,6 +42,17 @@ server {
 
     location / {
         try_files $uri $uri/ $uri/index.html =404;
+    }
+
+    # Помощник Luky на страницах (16.09): виджет ходит на СВОЙ домен, nginx проксирует
+    # в приложение Luky по dokploy-network (имя сервиса стабильно, порт приложения 3000).
+    # Host подменяем на домен продукта — приложение различает .online/.ru по нему.
+    location /api/assistant/ {
+        proxy_pass http://bots-luky3-muoa7b:3000/api/assistant/;
+        proxy_set_header Host multyspeak.online;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 90s;
+        client_max_body_size 64k;
     }
 
     error_page 404 /404.html;
