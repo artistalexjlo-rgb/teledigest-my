@@ -490,6 +490,7 @@ def pipeline_state():
         "build_corpus": [],
         "geos": 0,
         "to_translate": [],  # гео, у которых хоть один целевой язык отстал от корпуса
+        "vibes_missing": [],  # языки сайта, для которых вайбы главной ещё не куплены
         "views": 0,
         "langs": [],
         "no_vec": 0,  # мух пробы без bge-m3-вектора (28.08) — ВИДИМОСТЬ, не действие:
@@ -622,6 +623,17 @@ def pipeline_state():
                 st["to_translate"].append(geo)
                 break
 
+    # Вайбы главной (17.09): работа шага 5 сама по себе — языки сайта, которых нет в
+    # `tests/vibes.json` (русский — источник, его не покупают). Не по гео: один файл на
+    # весь сайт, покупается один раз на язык.
+    try:
+        vibes = json.load(open(f"{BRAIN}/{TESTS}/vibes.json", encoding="utf-8"))
+    except Exception:
+        vibes = {}
+    st["vibes_missing"] = [
+        lang for lang in _SITE["languages"] if lang != "ru" and not vibes.get(lang)
+    ]
+
     # ⛔ «Сборка сайта» и «Готовность» — той же болезни свежести, что переводы, и той же
     # пробы, что всё остальное. Имя данных — `<язык>_<гео>[...].json`, гео вторым куском.
     if only:
@@ -738,8 +750,15 @@ def pipeline_steps(s):
         },
         {
             "kind": "translate",
-            "jobs": [("translate", g) for g in s.get("to_translate") or []],
-            "label": "5. Переводы — 13 языков",
+            # Вайбы — отдельная работа того же шага, гео `--vibes` (translation.py его
+            # понимает); в цепочке по странам стоит после всех стран, страной не считается.
+            "jobs": [("translate", g) for g in s.get("to_translate") or []]
+            + ([("translate", VIBES_GEO)] if s.get("vibes_missing") else []),
+            "label": (
+                f"5. Переводы — вайбы: {len(s['vibes_missing'])} языков"
+                if s.get("vibes_missing")
+                else "5. Переводы — 13 языков"
+            ),
             "note": "ключи; английский бесплатно",
         },
         {
@@ -1253,6 +1272,7 @@ def send_geo_picker():
 # Гео-шаги — определяют, КАКИЕ страны вообще в очереди (есть хоть один шаг). «Сборка»/
 # «Готовность» сюда не входят: они не по гео, их местоположение — в самой ПОСЛЕДОВАТЕЛЬНОСТИ.
 _CONTENT_KINDS = ("collapse", "mark", "summarize", "build_corpus", "translate")
+VIBES_GEO = "--vibes"  # псевдо-гео работы «вайбы» у шага 5: не страна, в цикл по странам не идёт
 # Полный порядок на ОДНУ страну — фиксированный, не зависит от того, что именно этой
 # стране сейчас нужно: каждый шаг УЖЕ умеет сказать себе «мне нечего делать» и выйти
 # быстро (mark сверяется с undone(), summarize печатает «новых советов нет», `_write` в
@@ -1295,11 +1315,14 @@ def _country_major_chain(steps):
     geos = []
     for kind in _CONTENT_KINDS:
         for _k, geo in by_kind.get(kind) or []:
-            if geo not in geos:
+            if geo not in geos and geo != VIBES_GEO:
                 geos.append(geo)
+    # вайбы — после всех стран, перед сборкой: один раз на сайт, не на страну
+    vibes = [j for j in by_kind.get("translate") or [] if j[1] == VIBES_GEO]
     if not geos:
         return list(
-            (by_kind.get("build") or [])
+            vibes
+            + (by_kind.get("build") or [])
             + (by_kind.get("readiness") or [])
             + (by_kind.get("publish") or [])
         )
@@ -1307,6 +1330,9 @@ def _country_major_chain(steps):
     for geo in geos:
         for kind in _FULL_SEQUENCE:
             chain.append((kind, None if kind in ("build", "readiness") else geo))
+    if vibes:
+        last_build = max(i for i, (k, _g) in enumerate(chain) if k == "build")
+        chain[last_build:last_build] = vibes
     return chain
 
 

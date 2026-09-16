@@ -343,3 +343,19 @@ def test_country_vibes_are_bought_once_per_language_from_russian(tmp_path, monke
 def test_vibes_file_lives_on_the_mounted_volume():
     assert translation.VIBES_FILE == f"{translation.BUILT}/vibes.json"
     assert translation.SEED_HOME_FILE != translation.VIBES_FILE
+
+
+def test_vibes_all_buys_only_missing_languages(tmp_path, monkeypatch):
+    """`translation.py --vibes`: покупает языки, которых нет в файле, купленные не трогает."""
+    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a"])])
+    (tmp_path / "vibes.json").write_text(
+        json.dumps({"ru": {"gr": "сид"}, "de": {"gr": "готово"}}), encoding="utf-8"
+    )
+    schet = {}
+    _rot(monkeypatch, schet)
+    n = translation.vibes_all(["de", "fr"])
+    assert n == 2
+    on_disk = json.loads((tmp_path / "vibes.json").read_text(encoding="utf-8"))
+    assert on_disk["de"]["gr"] == "готово", "купленное перекуплено"
+    assert on_disk["fr"]["gr"].endswith("сид")
+    assert schet["labels"] == ["сид"], schet
