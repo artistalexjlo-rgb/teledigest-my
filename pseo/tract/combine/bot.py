@@ -770,8 +770,11 @@ def pipeline_steps(s):
             "label": (
                 "8. Публикация"
                 if s.get("readiness_done") or s.get("publish_done")
-                else "8. Публикация — ждёт ✅ готовности"
+                else "8. Публикация — ждёт готовности"
             ),
+            # ⛔ 16.09: «нет работы» у этого шага значит «заблокирован гейтом», а не
+            # «сделан» — меню ставит ✅ только по `done`, а не по пустому jobs.
+            "done": bool(s.get("publish_done")),
             "note": "снимок → site/online_v<ts>, current → на него; .online",
         },
     ]
@@ -1182,8 +1185,18 @@ def send_menu(job):
         )
     first = next((st["kind"] for st in steps if st["jobs"]), None)
     for st in steps:
-        if not st["jobs"]:  # сделано — место держим, стрелку не ставим
-            rows.append([{"text": st["label"] + " ✅", "callback_data": "menu"}])
+        if not st["jobs"]:  # место держим, стрелку не ставим
+            # ✅ — только СДЕЛАННОМУ шагу. У шага без работы, но с `done=False` (публикация
+            # за закрытым гейтом) галки нет: 16.09 юзер видел «ждёт готовности ✅».
+            done = st.get("done", True)
+            rows.append(
+                [
+                    {
+                        "text": st["label"] + (" ✅" if done else ""),
+                        "callback_data": "menu",
+                    }
+                ]
+            )
             continue
         mark = "➡️ " if st["kind"] == first else "　　"  # ровно ОДНА стрелка на меню
         rows.append(
@@ -1392,7 +1405,10 @@ def handle_update(u, job):
                 )
                 jobs = (st or {}).get("jobs") or []
                 if not jobs:
-                    say(f"шагу «{kind}» делать нечего.")
+                    if st is not None and not st.get("done", True):
+                        say(f"шаг заблокирован: {st['label']}")
+                    else:
+                        say(f"шагу «{kind}» делать нечего.")
                 else:
                     job.chain = jobs[1:]
                     job.start(jobs[0][0], jobs[0][1], _chain=True)
