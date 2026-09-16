@@ -23,6 +23,18 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract — тут же readycheck.py
 
 
+def ready_path(out_dir):
+    """Где лежит отчёт гейта: РЯДОМ со снимком, который он судил (`tests/ready.json`).
+
+    ⛔ 12.09: раньше писался в каталог кода (`/app` в образе пульта) — слой образа, не
+    маунт. Каждый редеплой пульта его стирал, `readiness_done` гас, и кнопка публикации
+    (она включается только по ✅ готовности) не дожила бы до нажатия. Единственный
+    владелец пути — эта функция: readycheck пишет, readiness и пульт читают ТОЛЬКО через
+    неё.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(out_dir)), "ready.json")
+
+
 def check(built_dir, data_dir, out_dir):
     """Прогон readycheck.py на указанные каталоги. Возвращает (готово_ли, отчёт)."""
     env = dict(os.environ)
@@ -36,10 +48,10 @@ def check(built_dir, data_dir, out_dir):
         capture_output=True,
         text=True,
     )
-    ready_path = f"{HERE}/ready.json"
+    rp = ready_path(out_dir)
     rep = None
-    if os.path.exists(ready_path):
-        rep = json.load(open(ready_path, encoding="utf-8"))
+    if os.path.exists(rp):
+        rep = json.load(open(rp, encoding="utf-8"))
     if r.returncode != 0 or not rep:
         return False, rep or {"ошибка": (r.stderr or r.stdout)[-500:]}
     return not rep.get("проблем"), rep

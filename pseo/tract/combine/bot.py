@@ -50,6 +50,11 @@ LIVE_EVERY = int(
 # ⛔ Прогоны новой схемы живут в своей папке (заказ юзера 20.08). Боевые `tags/` и
 # `out_facet/` пульт не трогает, пока схема не принята.
 TESTS = "tests"
+# Папка раздачи живого сайта: bind-mount `bots-pseosite` (→ /usr/share/nginx/html).
+# ⭐ 12.09: ВНУТРИ неё версии `online_v<ts>/` + симлинк `current`, nginx `root .../current`.
+# Маунт в Dokploy не трогается — стабильная папка и есть сам `online` (PLAN.md §3.2, шаг 3).
+SITE_DIR = os.environ.get("SITE_DIR", "/root/pseo_builder/site/online")
+PUBLISH_KEEP = 3  # сколько версий хранить рядом с живой (откат = переставить current)
 # ⛔ СТРАНА ПРОБЫ. Пока схема испытывается, работа идёт по ОДНОЙ стране, и меню обязано
 # показывать её одну: без этого пульт рисовал 94 гео на каждый шаг — полотно кнопок,
 # в котором нужную строку надо искать, а «ВСЁ ПО ПОРЯДКУ» звало на весь корпус.
@@ -164,6 +169,29 @@ MENU = {
             "bash",
             "-lc",
             f"BRAIN_DIR={BRAIN} python -u {TRACT}/readiness.py",
+        ],
+    ),
+    # ЗВЕНО 8. Публикация — код, ключей не тратит. Снимок песочницы `tests/out` целиком
+    # копируется новой версией в `SITE_DIR`, `current` переставляется атомарно, старые
+    # версии старше `PUBLISH_KEEP` убираются. Кнопка включается ТОЛЬКО по ✅ готовности
+    # (см. pipeline_steps) — публикация ничего не решает о содержимом, только переносит.
+    # Отчёт `tests/published.json` = штамп «что и когда ушло»; по нему считается ✅ шага.
+    # ⛔ Пока ОДИН домен (.online). `.ru` встанет в ЭТУ ЖЕ кнопку (юзер 30.08: «оба или
+    # ни одного»), когда появится путь на РФ-сервере и доступ туда — не отдельной кнопкой.
+    "publish": (
+        "Публикация",
+        [
+            "python",
+            "-u",
+            f"{TRACT}/publish.py",
+            "--out",
+            f"{BRAIN}/{TESTS}/out",
+            "--site",
+            SITE_DIR,
+            "--keep",
+            str(PUBLISH_KEEP),
+            "--stamp",
+            f"{BRAIN}/{TESTS}/published.json",
         ],
     ),
 }
@@ -613,13 +641,26 @@ def pipeline_state():
     else:
         st["build_done"] = False
 
-    ready_fn = f"{TRACT}/ready.json"
+    # ⛔ Путь к ready.json — ТОЛЬКО через readiness.ready_path (12.09): своя копия
+    # `f"{TRACT}/ready.json"` смотрела в слой образа, который редеплой стирает.
+    import readiness as _readiness
+
+    ready_fn = _readiness.ready_path(f"{BRAIN}/{TESTS}/out")
     if data_all and os.path.exists(ready_fn):
         st["readiness_done"] = os.path.getmtime(ready_fn) >= max(
             os.path.getmtime(p) for p in data_all
         )
     else:
         st["readiness_done"] = False
+    # Публикация ✅ = штамп не старше ПРОВЕРЕННОГО снимка: та же идиома свежести, что
+    # везде. Без ✅ готовности публикации нет вовсе (кнопка не включается), поэтому
+    # «готовность устарела» автоматически значит и «публикация устарела».
+    stamp = f"{BRAIN}/{TESTS}/published.json"
+    st["publish_done"] = bool(
+        st["readiness_done"]
+        and os.path.exists(stamp)
+        and os.path.getmtime(stamp) >= os.path.getmtime(ready_fn)
+    )
     return st
 
 
@@ -715,7 +756,23 @@ def pipeline_steps(s):
                 else []
             ),
             "label": "7. Готовность снимка",
-            "note": "гейт над песочницей; каталога раздачи ещё нет — не публикация",
+            "note": "гейт над песочницей: битые ссылки, пустые страницы, sitemap",
+        },
+        {
+            # ⛔ Работа есть ТОЛЬКО при ✅ готовности: шаг работает над тем, что проверил
+            # предыдущий. Готовность не ✅ → кнопка без работы, но и без галки (label).
+            "kind": "publish",
+            "jobs": (
+                [("publish", None)]
+                if s.get("readiness_done") and not s.get("publish_done")
+                else []
+            ),
+            "label": (
+                "8. Публикация"
+                if s.get("readiness_done") or s.get("publish_done")
+                else "8. Публикация — ждёт ✅ готовности"
+            ),
+            "note": "снимок → site/online_v<ts>, current → на него; .online",
         },
     ]
 
@@ -1228,7 +1285,11 @@ def _country_major_chain(steps):
             if geo not in geos:
                 geos.append(geo)
     if not geos:
-        return list((by_kind.get("build") or []) + (by_kind.get("readiness") or []))
+        return list(
+            (by_kind.get("build") or [])
+            + (by_kind.get("readiness") or [])
+            + (by_kind.get("publish") or [])
+        )
     chain = []
     for geo in geos:
         for kind in _FULL_SEQUENCE:

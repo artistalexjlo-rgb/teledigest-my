@@ -18,7 +18,8 @@
   5. site.py --all                корпус → страницы дерева              [ключей НЕТ]
      render.py --all              страницы → HTML                       [ключей НЕТ]
   6. translation.py <geo>         13 языков, английский копией          [рты translate, labels]
-  7. публикация                   ЗВЕНО НЕ НАПИСАНО (кнопки нет)
+  7. readiness.py                 гейт над снимком, tests/ready.json      [ключей НЕТ]
+  8. publish.py                   снимок → site/online/online_v<ts>, current [ключей НЕТ]
 ```
 
 ⚠️ **Публикации сейчас нет.** Старый путь (`ship.py` = pull → `pages.py` → render → гейт →
