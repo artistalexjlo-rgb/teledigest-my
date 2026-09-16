@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, follow">
+<title>{{ site.brand }}</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+{#- КОРЕНЬ САЙТА (16.09). Своего содержимого у корня нет — главные живут по языкам
+    (`/<язык>/`). Человека ведём по языку БРАУЗЕРА: `navigator.languages` по приоритету,
+    первый из тех, что у сайта есть; нет ни одного — английский. Роботу — список ссылок
+    на все языки, noindex: главная для поисковиков — `/ru/` (x-default в hreflang).
+    ⛔ Это часть снимка, а не nginx-конфига: конфиг пульт применить не может (нет
+    reload), а снимок публикует сам — всё, что меняется, живёт в дереве. #}
+<link rel="stylesheet" href="/assets/base.css?v={{ asset_v }}">
+</head>
+<body class="luky-surface">
+<div class="wrap">
+  <h1>{{ site.brand }}</h1>
+  <ul class="root-langs">
+  {%- for l in site.languages %}
+    <li><a href="/{{ l }}/" lang="{{ l }}">{{ l | upper }}</a></li>
+  {%- endfor %}
+  </ul>
+</div>
+<script>
+(function(){
+  var have={{ site.languages | tojson }}, want=navigator.languages||[navigator.language||""];
+  for(var i=0;i<want.length;i++){var c=String(want[i]).slice(0,2).toLowerCase();if(have.indexOf(c)>=0){location.replace("/"+c+"/");return;}}
+  location.replace("/en/");
+})();
+</script>
+</body>
+</html>

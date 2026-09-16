@@ -275,6 +275,18 @@ def _save_tail_manifest(m: dict) -> None:
     )
 
 
+def write_root_index() -> None:
+    """Корневой `/index.html`: выбор языка браузера → `/<язык>/`, роботу — ссылки на все.
+
+    ⛔ 16.09: без него корень отдавал 403 (папка без index, листинг запрещён) — раньше это
+    прикрывал редирект `/ → /ru/` в старой карте nginx, снятой вместе с редиректами 20.08.
+    Один список языков — `SITE["languages"]`, тот же, что у переключателя на страницах.
+    """
+    html = _env.get_template("root.html.j2").render(site=SITE, asset_v=asset_version())
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "index.html").write_text(html, encoding="utf-8")
+
+
 def render_page(page: dict, lang: str | None = None) -> str:
     lang = lang or page.get("lang", "ru")
     t = load_i18n(lang)
@@ -422,6 +434,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         f"Sitemap: {SITE['domain']}/sitemap.xml\n"
     )
     (OUT / "robots.txt").write_text(robots, encoding="utf-8")
+    write_root_index()
     # ПОИСК ПО ЗАГОЛОВКАМ — один файл на язык, тянется по первому нажатию. Инлайнить в
     # каждую страницу нельзя — вес умножился бы на число страниц.
     n_search = 0

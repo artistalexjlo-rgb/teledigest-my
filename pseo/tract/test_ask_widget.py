@@ -94,3 +94,19 @@ def test_layout_change_forces_rerender(monkeypatch, tmp_path):
     assert st3["rendered"] == 1, "шаблон изменился — страница обязана перерисоваться"
     out = tmp_path / "out"
     assert (out / ".layout_version").read_text(encoding="utf-8") == "changed"
+
+
+def test_root_index_picks_browser_language_and_lists_all(monkeypatch, tmp_path):
+    """⛔ 16.09: корень отдавал 403 — папка без index.html. Теперь `/index.html` в снимке:
+    JS ведёт по языку браузера (первый из 14, иначе en), роботу — ссылки на все языки.
+    """
+    render = _render(monkeypatch, tmp_path)
+    (tmp_path / "data").mkdir()
+    render.build_all()
+    root = tmp_path / "out" / "index.html"
+    assert root.exists()
+    html = root.read_text(encoding="utf-8")
+    for lang in render.SITE["languages"]:
+        assert f'href="/{lang}/"' in html, lang
+    assert "navigator.languages" in html and 'location.replace("/en/")' in html
+    assert 'name="robots" content="noindex' in html

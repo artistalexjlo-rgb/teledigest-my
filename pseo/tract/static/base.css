@@ -199,3 +199,5 @@ footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--border);color
 .ask-w{color:var(--muted);font-style:italic}
 .ask-more{align-self:flex-start;font-size:.92rem;opacity:.8}
 @media (max-width:520px){.ask form{flex-direction:column}}
+.root-langs{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:10px}
+.root-langs a{display:inline-block;padding:8px 14px;border:1px solid var(--hud-dim);border-radius:6px;color:var(--text);text-decoration:none}
