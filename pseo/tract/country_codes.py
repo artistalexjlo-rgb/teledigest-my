@@ -3,7 +3,9 @@ country_codes.py — ISO 3166-1 alpha-2 country codes with Russian names.
 Single source of truth for country code resolution.
 """
 
+import json
 import logging
+import pathlib
 
 log = logging.getLogger("teledigest")
 
@@ -322,147 +324,33 @@ def display_name(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# English country names — for embedding text and other places where we need
-# a stable English label (Apps Script, wiki import, migration). Single source
-# of truth: import from here, do NOT redefine locally.
+# English country names — ОДНА таблица на бота и сайт: Unicode CLDR из `countries.json`
+# (249 стран × 14 языков, снято пакетом Babel 2026-08-27, лежит рядом с этим файлом).
 #
-# SYNC WITH apps_script/Code.gs::COUNTRY_NAMES — keep the two lists identical.
-# When you add a row here, mirror it there.
+# ⛔ 17.09: до этого здесь была РУЧНАЯ таблица на 124 страны с пометкой «синхронизировать
+# с Apps Script» (которого давно нет). Австралии в ней не было — `embed_pump` писал в
+# текст эмбеддинга «AU» и предупреждал в лог; следующая новая страна в чатах дала бы то
+# же. Исключения ниже закрепляют написания, которые УЖЕ лежат в текстах `wisdom_base`:
+# менять их значило бы два написания одной страны в векторной базе.
 # ---------------------------------------------------------------------------
-COUNTRY_NAMES_EN: dict[str, str] = {
-    # Special pseudo-codes (not ISO 3166).
-    # 'any' is emitted by extraction.py when a pattern is universal — not tied
-    # to a single country. Mapping it to "Universal" makes the embed text
-    # ("Universal. <title>. <tag>. <lesson>") semantically meaningful for the
-    # МОЗГ retrieval, instead of leaking the literal "ANY" upper-case fallback.
+_CLDR_EN: dict[str, str] = (
+    json.loads(
+        pathlib.Path(__file__).with_name("countries.json").read_text(encoding="utf-8")
+    ).get("en")
+    or {}
+)
+_EN_OVERRIDES: dict[str, str] = {
+    # псевдокод extraction.py для универсального совета: в тексте эмбеддинга «Universal»
     "any": "Universal",
-    # Tier 0 — active user chats
-    "ar": "Argentina",
-    "at": "Austria",
-    "be": "Belgium",
-    "bg": "Bulgaria",
-    "br": "Brazil",
-    "ch": "Switzerland",
-    "de": "Germany",
-    "fr": "France",
-    "id": "Indonesia",
-    "lk": "Sri Lanka",
-    "mu": "Mauritius",
-    "ph": "Philippines",
-    "th": "Thailand",
-    "tr": "Turkey",
-    "vn": "Vietnam",
-    # Tier 1 — popular expat/digital-nomad destinations
-    "ae": "United Arab Emirates",
-    "am": "Armenia",
-    "az": "Azerbaijan",
+    # написания, под которыми страны уже лежат в wisdom_base (замер 17.09: 6 расхождений)
     "ba": "Bosnia and Herzegovina",
-    "by": "Belarus",
-    "ca": "Canada",
-    "cl": "Chile",
-    "cn": "China",
-    "co": "Colombia",
-    "cr": "Costa Rica",
-    "cy": "Cyprus",
     "cz": "Czech Republic",
-    "dk": "Denmark",
-    "ec": "Ecuador",
-    "ee": "Estonia",
-    "eg": "Egypt",
-    "es": "Spain",
-    "fi": "Finland",
-    "gb": "United Kingdom",
-    "ge": "Georgia",
-    "gr": "Greece",
-    "hr": "Croatia",
-    "hu": "Hungary",
-    "ie": "Ireland",
-    "il": "Israel",
-    "in": "India",
-    "it": "Italy",
-    "jo": "Jordan",
-    "jp": "Japan",
-    "ke": "Kenya",
-    "kg": "Kyrgyzstan",
-    "kh": "Cambodia",
-    "kr": "South Korea",
-    "kz": "Kazakhstan",
-    "la": "Laos",
-    "lb": "Lebanon",
-    "lt": "Lithuania",
-    "lv": "Latvia",
-    "ma": "Morocco",
-    "md": "Moldova",
-    "me": "Montenegro",
-    "mk": "North Macedonia",
     "mm": "Myanmar",
-    "mn": "Mongolia",
-    "mx": "Mexico",
-    "my": "Malaysia",
-    "nl": "Netherlands",
-    "no": "Norway",
-    "np": "Nepal",
-    "nz": "New Zealand",
-    "pe": "Peru",
-    "pk": "Pakistan",
-    "pl": "Poland",
-    "pt": "Portugal",
-    "py": "Paraguay",
-    "ro": "Romania",
-    "rs": "Serbia",
-    "ru": "Russia",
-    "sa": "Saudi Arabia",
-    "se": "Sweden",
-    "sg": "Singapore",
-    "si": "Slovenia",
-    "sk": "Slovakia",
-    "tn": "Tunisia",
-    "tw": "Taiwan",
-    "ua": "Ukraine",
     "us": "United States of America",
-    "uy": "Uruguay",
-    "uz": "Uzbekistan",
-    "za": "South Africa",
-    # Tier 2 — extended coverage
-    "bd": "Bangladesh",
-    "bo": "Bolivia",
     "cd": "Democratic Republic of Congo",
     "ci": "Ivory Coast",
-    "cm": "Cameroon",
-    "cu": "Cuba",
-    "do": "Dominican Republic",
-    "dz": "Algeria",
-    "et": "Ethiopia",
-    "gh": "Ghana",
-    "gt": "Guatemala",
-    "hn": "Honduras",
-    "ht": "Haiti",
-    "li": "Liechtenstein",
-    "lu": "Luxembourg",
-    "ly": "Libya",
-    "mg": "Madagascar",
-    "ml": "Mali",
-    "mw": "Malawi",
-    "mz": "Mozambique",
-    "na": "Namibia",
-    "ng": "Nigeria",
-    "ni": "Nicaragua",
-    "om": "Oman",
-    "pa": "Panama",
-    "qa": "Qatar",
-    "rw": "Rwanda",
-    "sd": "Sudan",
-    "sn": "Senegal",
-    "sv": "El Salvador",
-    "sy": "Syria",
-    "tz": "Tanzania",
-    "ug": "Uganda",
-    "ve": "Venezuela",
-    "xk": "Kosovo",
-    "ye": "Yemen",
-    "zm": "Zambia",
-    "zw": "Zimbabwe",
 }
+COUNTRY_NAMES_EN: dict[str, str] = {**_CLDR_EN, **_EN_OVERRIDES}
 
 
 def country_full_name_en(code: str) -> str:

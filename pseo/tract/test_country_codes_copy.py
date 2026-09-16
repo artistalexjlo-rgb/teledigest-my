@@ -18,6 +18,9 @@ import pathlib
 HERE = pathlib.Path(__file__).resolve().parent
 COPY = HERE / "country_codes.py"
 ORIGIN = HERE.parent.parent / "src" / "teledigest" / "country_codes.py"
+# 17.09: английские имена бот берёт из CLDR-таблицы — она тоже копия, тем же правилом
+DATA_COPY = HERE / "countries.json"
+DATA_ORIGIN = HERE.parent.parent / "src" / "teledigest" / "countries.json"
 
 
 def _norm(p: pathlib.Path) -> bytes:
@@ -38,6 +41,9 @@ def test_copy_is_byte_identical():
         "копия справочника отстала от `src/teledigest/country_codes.py`: "
         "скопировать файл заново (он данные, конфликтов правок в нём не бывает)"
     )
+    assert _norm(DATA_COPY) == _norm(
+        DATA_ORIGIN
+    ), "копия countries.json отстала от `src/teledigest/countries.json`"
 
 
 def test_copy_has_no_dependencies():
@@ -49,4 +55,8 @@ def test_copy_has_no_dependencies():
         for ln in src.splitlines()
         if ln.startswith("import ") or ln.startswith("from ")
     ]
-    assert imports == ["import logging"], f"справочник оброс зависимостями: {imports}"
+    assert imports == [
+        "import json",
+        "import logging",
+        "import pathlib",
+    ], f"справочник оброс зависимостями: {imports}"

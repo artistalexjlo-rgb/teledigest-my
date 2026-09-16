@@ -36,3 +36,18 @@ def test_embedding_text_gets_real_names():
     """То, ради чего правка: в текст эмбеддинга уходят имена, а не заглушка."""
     txt = _build_embed_text("de, ru", "Bank account", "Finance", "Совет про счёт.")
     assert txt.startswith("Germany, Russia. "), txt
+
+
+def test_every_iso_country_has_an_english_name_and_overrides_hold():
+    """⛔ 17.09, лог бота: `missing English name for ISO code 'au'` — ручная таблица на
+    124 страны. Теперь имена из CLDR (249), исключения держат старые написания в базе.
+    """
+    from teledigest.country_codes import COUNTRIES, COUNTRY_NAMES_EN
+
+    missing = [c for c in COUNTRIES if c not in COUNTRY_NAMES_EN]
+    assert not missing, missing
+    assert country_full_name_en("au") == "Australia"
+    assert country_full_name_en("mv") == "Maldives"
+    assert country_full_name_en("cz") == "Czech Republic"
+    assert country_full_name_en("us") == "United States of America"
+    assert country_full_name_en("any") == "Universal"
