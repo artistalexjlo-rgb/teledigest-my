@@ -182,6 +182,29 @@ def test_site_home_ranks_popular_and_groups_regions(monkeypatch):
     ] == ["/ru/xx/"]
 
 
+def test_home_prefers_bought_vibes_from_the_volume(tmp_path):
+    """Главная читает купленные вайбы с тома (`vibes.json`), сид ru — запасной."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("sitebuild_vibes", HERE / "site.py")
+    sm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sm)
+    (tmp_path / "vibes.json").write_text(
+        json.dumps({"ru": {"gr": "сид"}, "de": {"gr": "Inseln und Ruinen"}}),
+        encoding="utf-8",
+    )
+    sm.VIBES_FILE = str(tmp_path / "vibes.json")
+    _, de = sm.home([("gr", 40)], "de")
+    assert de["popular"][0]["vibe"] == "Inseln und Ruinen"
+    _, ru = sm.home([("gr", 40)], "ru")
+    assert ru["popular"][0]["vibe"] == "сид", "том важнее сида и для ru"
+    sm.VIBES_FILE = str(tmp_path / "нет.json")
+    _, ru2 = sm.home([("gr", 40)], "ru")
+    assert ru2["popular"][0]["vibe"].startswith(
+        "Острова"
+    ), "нет тома — сид из home.json"
+
+
 def test_favicon_lands_in_the_snapshot(monkeypatch, tmp_path):
     render = _render(monkeypatch, tmp_path)
     (tmp_path / "data").mkdir()

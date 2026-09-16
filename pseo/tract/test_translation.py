@@ -33,6 +33,7 @@ def _korpus(tmp_path, monkeypatch, views, shelves=()):
             json.dumps({"en": {"visa": "Visa Procedures"}}), encoding="utf-8"
         )
     monkeypatch.setattr(translation, "THEMES_FILE", str(themes_file))
+    monkeypatch.setattr(translation, "VIBES_FILE", str(tmp_path / "vibes.json"))
     os.makedirs(tmp_path / "out_facet_en", exist_ok=True)
     with open(tmp_path / "out_facet_en" / "gr.json", "w", encoding="utf-8") as fh:
         json.dump(
@@ -142,6 +143,10 @@ def test_branch_name_is_bought_once_for_all_its_parts(tmp_path, monkeypatch):
             {"en": {"visa": "Visa Procedures"}, "ru": {"visa": "Визовые процедуры"}}
         ),
         encoding="utf-8",
+    )
+    # вайбы (17.09) — тоже рот `labels`, но тест про ветки: кладём купленными заранее
+    (tmp_path / "vibes.json").write_text(
+        json.dumps({"ru": {"gr": "x"}, "en": {"gr": "x"}}), encoding="utf-8"
     )
     schet = {}
     _rot(monkeypatch, schet)
@@ -309,3 +314,32 @@ def test_by_batches_stops_when_pool_confirmed_dead(monkeypatch):
     out, stop = translation._by_batches(pairs, "sys", "translate", batch=1)
     assert out == {}, out
     assert stop and "мозг подтвердил" in stop, stop
+
+
+def test_country_vibes_are_bought_once_per_language_from_russian(tmp_path, monkeypatch):
+    """Вайбы главной — авторский русский текст; покупаются ротом `labels` один раз на
+    язык (включая английский — его в LANGS нет, а главная на en без них не собирается),
+    живут на томе рядом с themes.json, второй прогон не платит."""
+    _korpus(tmp_path, monkeypatch, [_view("visa documents", "visa-documents", ["a"])])
+    schet = {}
+    _rot(monkeypatch, schet)
+    translation.translate_geo("gr", "de")
+    on_disk = json.loads((tmp_path / "vibes.json").read_text(encoding="utf-8"))
+    assert on_disk["ru"]["gr"].startswith("Острова"), "русский сид не скопирован на том"
+    assert on_disk["de"]["gr"].endswith(
+        on_disk["ru"]["gr"]
+    ), "немецкий куплен с русского"
+    assert on_disk["en"]["gr"].endswith(on_disk["ru"]["gr"]), "английский куплен заодно"
+    assert "Острова и руины. Оливки и сиеста" in schet["labels"]
+
+    schet2 = {}
+    _rot(monkeypatch, schet2)
+    translation.translate_geo("gr", "de")
+    assert "Острова и руины. Оливки и сиеста" not in schet2.get(
+        "labels", []
+    ), "куплено дважды"
+
+
+def test_vibes_file_lives_on_the_mounted_volume():
+    assert translation.VIBES_FILE == f"{translation.BUILT}/vibes.json"
+    assert translation.SEED_HOME_FILE != translation.VIBES_FILE

@@ -277,7 +277,9 @@ def hub(geo, themes, lang):
 
 
 # Регионы и «вайбы» стран — справочник рядом с кодом (17.09, перенесён из архива данными).
+# Вайбы на языках покупает звено 6 в `{BUILT}/vibes.json` (как themes.json); здесь — сид ru.
 HOME = _load(f"{os.path.dirname(os.path.abspath(__file__))}/home.json") or {}
+VIBES_FILE = f"{BUILT}/vibes.json"
 POPULAR_N = 8
 
 
@@ -297,7 +299,9 @@ def home(geos, lang):
     — из i18n при рендере, здесь только структура.
     """
     path = f"/{lang}/"
-    vibes = (HOME.get("vibes") or {}).get(lang) or {}
+    vibes = (
+        (_load(VIBES_FILE) or {}).get(lang) or (HOME.get("vibes") or {}).get(lang) or {}
+    )
 
     def tile(g, n):
         return {

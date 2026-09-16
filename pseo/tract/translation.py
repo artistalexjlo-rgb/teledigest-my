@@ -67,6 +67,13 @@ LANGS = [
 # касании; дальше том живёт своей жизнью, сид не читается.
 SEED_THEMES_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/themes.json"
 THEMES_FILE = f"{BUILT}/themes.json"
+# «Вайбы» стран на главной («Карнавалы и фавелы. Самба и футбол») — авторский РУССКИЙ
+# текст (единственное место тракта, где источник не английский: писались руками по-русски
+# в июле, перенесены из архива 17.09). Покупаются один раз на язык, включая английский,
+# и живут на томе тем же правилом, что themes.json; сид — home.json в git.
+SEED_HOME_FILE = f"{os.path.dirname(os.path.abspath(__file__))}/home.json"
+VIBES_FILE = f"{BUILT}/vibes.json"
+VIBE_SOURCE = "ru"
 
 
 def _load(path, default=None):
@@ -111,6 +118,42 @@ def names_sys(lang):
         'no trailing period. Input is JSON {"0": english, ...}. Return STRICT JSON with '
         'the SAME numeric keys: {"0": translated, ...}. Translate ALL, lose none.'
     )
+
+
+def vibes_sys(lang):
+    return (
+        f"Translate each short Russian country tagline into natural {LANG_NAME[lang]}. "
+        "Each tagline is two vivid strokes separated by a period, like "
+        "'Карнавалы и фавелы. Самба и футбол' — keep that two-stroke form and the period, "
+        "keep it concrete and playful, no explanation, no trailing period at the end. "
+        'Input is JSON {"0": russian, ...}. Return STRICT JSON with the SAME numeric keys: '
+        '{"0": translated, ...}. Translate ALL, lose none.'
+    )
+
+
+def vibe_texts(lang):
+    """Вайбы стран на языке — один путь для любого языка: есть в файле — берём, нет —
+    покупаем ротом `labels` и дописываем файл. Источник — русский сид из home.json."""
+    vse = _load(VIBES_FILE, {}) or {}
+    if not vse.get(VIBE_SOURCE):
+        seed = ((_load(SEED_HOME_FILE, {}) or {}).get("vibes") or {}).get(
+            VIBE_SOURCE, {}
+        )
+        vse[VIBE_SOURCE] = seed
+        _save(VIBES_FILE, vse)
+    if lang == VIBE_SOURCE or vse.get(lang):
+        return vse.get(lang) or {}
+    pairs = sorted((vse.get(VIBE_SOURCE) or {}).items())
+    if not pairs:
+        return {}
+    mp, stop = _by_batches(pairs, vibes_sys(lang), "labels", NAME_BATCH)
+    if stop:
+        print(f"  вайбы {lang}: {stop}", flush=True)
+        return {}
+    vse[lang] = mp
+    _save(VIBES_FILE, vse)
+    print(f"вайбы {lang}: {len(mp)} строк -> {VIBES_FILE}", flush=True)
+    return mp
 
 
 def _by_batches(pairs, sysprompt, consumer, batch):
@@ -294,6 +337,10 @@ def translate_geo(geo, lang):
 
     _save(f"{BUILT}/out_facet_{lang}/{geo}.json", out)
     theme_names(lang)  # имена тем — один раз на язык, отдельным файлом
+    vibe_texts(lang)  # вайбы стран для главной — тоже один раз на язык
+    # Английский в LANGS не входит (корпус и так английский), а вайбы — русские, и
+    # английскую главную без них не собрать: покупаем заодно, после первого раза бесплатно.
+    vibe_texts("en")
 
     print(
         f"{geo} {lang}: советов {len(teksty)} из {len(pairs)} (куплено {len(bought)}), "
