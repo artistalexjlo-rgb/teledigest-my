@@ -18,21 +18,21 @@
   if(!ro){window.addEventListener("load",init);var t;window.addEventListener("resize",function(){clearTimeout(t);t=setTimeout(init,120);});}
 })();
 
-/* ПОИСК ПО ЗАГОЛОВКАМ (шаг 7). Индекс языка тянем ОДИН раз по первому вводу:
-   ru — 3124 заголовка, 352 КБ (77 КБ в gzip). Инлайн в страницу означал бы те же
-   352 КБ × 41 630 страниц. Ни ключей, ни сервера, ни продукта — только статика.
-   Enter уводит на /<язык>/find/?s=…: это обычная навигация, поэтому запрос виден в
-   логе веб-сервера, и мы наконец знаем, ЧТО люди спрашивают. */
+/* ОДНО ПОЛЕ: ПОИСК ПО ЗАГОЛОВКАМ + ПОМОЩНИК LUKY (17.09). Набор → подсказки из
+   /<язык>/search.json (тянется один раз по первому вводу; клик по подсказке — переход).
+   Enter/кнопка → POST /api/assistant/ask своего домена (nginx → приложение Luky),
+   контракт Luky: {message, history:[{role,text}], country, source}; ответ
+   {answer|degraded|empty}. Ответ — плашкой под полем, история на странице; первая
+   пара реплик — контекст «какую страницу читает человек». Ни ключей, ни бэкенда. */
 (function(){
-  var q=document.getElementById("gq"); if(!q) return;
-  var sg=document.getElementById("gsugg"), IDX=null, loading=false;
-  function go(){var v=q.value.trim(); if(v) location.href=q.dataset.find+"?s="+encodeURIComponent(v);}
+  var q=document.getElementById("gq"), box=document.getElementById("ask"); if(!q||!box) return;
+  var sg=document.getElementById("gsugg"), log=document.getElementById("askLog"), btn=document.getElementById("askBtn");
+  var IDX=null, loading=false, busy=false;
+  var hist=box.dataset.page?[{role:"user",text:"Я читаю страницу: «"+box.dataset.page+"»"},{role:"model",text:"Понял."}]:[];
   function show(){
     var v=q.value.trim().toLowerCase();
     if(!v||!IDX){sg.style.display="none";return;}
-    /* Страны — вперёд: на главной человек чаще ищет страну, а индекс отсортирован по
-       алфавиту, и «гре» иначе выдало бы шесть заголовков раньше самой Греции.
-       Хаб страны узнаём по адресу: /<язык>/<страна>/ — ровно два сегмента. */
+    /* Страны — вперёд: хаб страны узнаём по адресу /<язык>/<страна>/ — ровно два сегмента. */
     var hits=[],i,r,seg;
     for(i=0;i<IDX.length;i++){
       r=IDX[i];
@@ -43,19 +43,38 @@
     }
     hits.sort(function(a,b){return a[0]-b[0];});
     var m=hits.slice(0,8).map(function(h){return h[1];});
-    sg.innerHTML = m.length
-      ? m.map(function(r){return '<a href="'+r[1]+'">'+r[0]+"</a>";}).join("")
-      : '<a class="nores">'+q.dataset.none+"</a>";
-    sg.style.display="block";
+    sg.innerHTML = m.map(function(r){return '<a href="'+r[1]+'">'+r[0]+"</a>";}).join("");
+    sg.style.display=m.length?"block":"none";
   }
   function load(){
     if(IDX||loading) return; loading=true;
     fetch(q.dataset.index).then(function(r){return r.json();}).then(function(j){IDX=j;show();})
-      .catch(function(){loading=false;});  /* индекс не доехал — поле просто уводит на find */
+      .catch(function(){loading=false;});
+  }
+  function line(cls,text){var d=document.createElement("div");d.className="ask-"+cls;d.textContent=text;log.appendChild(d);return d;}
+  function ask(){
+    if(busy) return;
+    var text=q.value.trim(); if(!text) return;
+    q.value=""; sg.style.display="none"; busy=true; box.classList.add("busy");
+    line("u",text);
+    var w=line("w",box.dataset.wait);
+    var body={message:text,history:hist.slice(),country:box.dataset.country||undefined,source:"site"};
+    fetch(box.dataset.api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        w.remove();
+        var a=(d&&!d.degraded&&!d.empty&&d.answer)?d.answer:null;
+        line("m",a||box.dataset.err);
+        hist.push({role:"user",text:text}); if(a) hist.push({role:"model",text:a});
+        if(hist.length>22) hist.splice(hist.length-22,2);
+      })
+      .catch(function(){w.remove();line("m",box.dataset.err);})
+      .then(function(){busy=false;box.classList.remove("busy");q.focus();});
   }
   q.addEventListener("focus",load);
   q.addEventListener("input",function(){load();show();});
-  q.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();go();}});
+  q.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();ask();}});
+  if(btn) btn.addEventListener("click",ask);
   document.addEventListener("click",function(e){
     if(!e.target.closest(".gsearch")&&e.target.id!=="gq") sg.style.display="none";
   });
@@ -77,32 +96,3 @@
   }).catch(function(){box.innerHTML='<p class="nores">'+box.dataset.none+"</p>";});
 })();
 
-/* ПОМОЩНИК LUKY НА СТРАНИЦЕ (16.09). POST /api/assistant/ask своего домена
-   (nginx → приложение Luky). Контракт Luky: {message, history:[{role,text}], country,
-   source}; ответ {answer, sourcesUsed, degraded?, empty?, error?}. История — в памяти
-   страницы; первая пара реплик — контекст «какую страницу читает человек». */
-(function(){
-  var box=document.getElementById("ask"); if(!box) return;
-  var form=document.getElementById("askForm"), q=document.getElementById("askQ"), log=document.getElementById("askLog");
-  var hist=[{role:"user",text:"Я читаю страницу: «"+(box.dataset.page||"")+"»"},{role:"model",text:"Понял."}];
-  var busy=false;
-  function line(cls,text){var d=document.createElement("div");d.className="ask-"+cls;d.textContent=text;log.appendChild(d);d.scrollIntoView({block:"nearest"});return d;}
-  form.addEventListener("submit",function(e){
-    e.preventDefault(); if(busy) return;
-    var text=q.value.trim(); if(!text) return;
-    q.value=""; busy=true; line("u",text);
-    var w=line("w",box.dataset.wait);
-    var body={message:text,history:hist.slice(),country:box.dataset.country||undefined,source:"site"};
-    fetch(box.dataset.api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        w.remove();
-        var a=(d&&!d.degraded&&!d.empty&&d.answer)?d.answer:null;
-        line("m",a||box.dataset.err);
-        hist.push({role:"user",text:text}); if(a) hist.push({role:"model",text:a});
-        if(hist.length>22) hist.splice(2,2);
-      })
-      .catch(function(){w.remove();line("m",box.dataset.err);})
-      .then(function(){busy=false;q.focus();});
-  });
-})();

@@ -15,6 +15,35 @@
 {% endblock %}
 
 {% block content %}
+  {%- if page.home %}
+  {#- ГЛАВНАЯ (17.09, устройство старой): h1 + интро + «Популярные» с вайбом + регионы
+      аккордеоном. Тексты — i18n (home_*), структура — site.home(). #}
+  <h1>{{ t.home_h1 }}</h1>
+  <div class="plate answer">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">{{ t.home_intro | safe }}</div></div>
+  {%- if page.popular %}
+  <h2>{{ t.home_countries_label }}</h2>
+  <span class="section-label">{{ t.home_popular }}</span>
+  <div class="grid">
+    {%- for c in page.popular %}
+    <a class="card" href="{{ c.url }}">{{ oct(OCT_BOX, 12, 3) }}<span class="ti"><span class="fl">{{ c.flag }}</span> {{ c.name }}</span><span class="ds">{{ c.vibe or t.geo_blurb }} · {{ c.n }}</span></a>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+  {%- if page.regions %}
+  <span class="section-label" style="margin-top:22px">{{ t.home_by_region }}</span>
+  <div class="regions">
+    {%- for r in page.regions %}
+    <details class="reg"{% if loop.first %} open{% endif %}><summary>{{ t.region_names[r.key] }}<span class="cnt">{{ r.geos | length }}</span></summary>
+      <div class="rlist">
+        {%- for c in r.geos %}
+        <a href="{{ c.url }}">{{ c.flag }} {{ c.name }}</a>
+        {%- endfor %}
+      </div>
+    </details>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+  {%- else %}
   <h1>{{ page.h1 }}</h1>
 
   {%- if page.image %}
@@ -47,17 +76,10 @@
   {%- endfor %}
   </div>
   {%- endif %}
+  {%- endif %}
 
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
-  {%- if cta %}
-    <h2>{{ cta.hook }}</h2>
-    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
     <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
-    <p class="ps">{{ cta.ps }}</p>
-  {%- else %}
-    <h2>{{ t.cta_hook }}</h2>
-    <p>{{ page.cta_text }}</p>
-  {%- endif %}
     <a class="btn" href="{{ door }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
   </div></div>
 {% endblock %}

@@ -30,14 +30,7 @@
   </div>
 
   <div class="plate cta">{{ oct(OCT_BOX, 12, 3) }}<div class="pad">
-  {%- if cta %}
-    <h2>{{ cta.hook }}</h2>
-    <p>{{ cta.assistant_lead }} {{ cta.assistant }}.</p>
     <p>{{ cta.voice_lead }} {{ cta.voice }}.</p>
-    <p class="ps">{{ cta.ps }}</p>
-  {%- else %}
-    <h2>{{ t.cta_hook }}</h2>
-  {%- endif %}
     <a class="btn" href="{{ door }}" target="_blank" rel="noopener">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.cta_btn }}</span></a>
   </div></div>
 {% endblock %}

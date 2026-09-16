@@ -120,21 +120,18 @@ def door_url(page: dict) -> str:
     return f"/{lang}/go/luky/" + (f"?{tail}" if tail else "")
 
 
-def build_cta(t: dict, page: dict) -> dict | None:
-    """Собирает CTA-«бутер» из cta_pools: hook + assistant(L1) + voice(L2) + ps(оффтоп).
-    Слоты варьируем по пути страницы; голос — по РАЗДЕЛУ; PS — свой сид (оффтоп, не по теме).
+def build_cta(t: dict, page: dict) -> dict:
+    """CTA — ОДНА строка про голосовой переводчик (по разделу) + кнопка в приложение.
+
+    ⛔ 17.09: «бутерброд» hook + assistant + voice + PS снят (юзер: «зачем плодить
+    вставки»): помощник теперь в поле наверху страницы, крючки про него — лишний текст.
+    Пулы hook/assistant/ps убраны из i18n вместе с ним.
     """
-    pools = t.get("cta_pools")
-    if not pools:
-        return None
+    pools = t["cta_pools"]
     key = page.get("path", "")
     return {
-        "hook": _pick(pools["hook"], key + "|hook"),
-        "assistant_lead": pools["assistant_lead"],
-        "assistant": _pick(pools["assistant"], key + "|assistant"),
         "voice_lead": pools["voice_lead"],
         "voice": _pick(voice_pool(pools, page), key + "|voice"),
-        "ps": _pick(pools["ps"], key + "|ps"),
     }
 
 
@@ -175,6 +172,9 @@ def layout_version() -> str:
         for f in sorted(d.glob("*")) if d.is_dir() else []:
             h.update(f.name.encode())
             h.update(f.read_bytes())
+    fav = HERE / "favicon.svg"
+    if fav.is_file():
+        h.update(fav.read_bytes())
     return h.hexdigest()[:12]
 
 
@@ -192,7 +192,11 @@ except Exception:
 
 
 def copy_assets() -> int:
-    """static/ → out/assets/. Возвращает число файлов."""
+    """static/ → out/assets/ + favicon.svg в корень. Возвращает число файлов.
+
+    ⛔ 17.09: `favicon.svg` лежал рядом с кодом, шаблон ссылался на `/favicon.svg`, а в
+    снимок его никто не клал — 404 на каждой странице с 26.08.
+    """
     src, dst = HERE / "static", OUT / "assets"
     if not src.is_dir():
         return 0
@@ -200,6 +204,10 @@ def copy_assets() -> int:
     n = 0
     for f in sorted(src.glob("*")):
         (dst / f.name).write_bytes(f.read_bytes())
+        n += 1
+    fav = HERE / "favicon.svg"
+    if fav.is_file():
+        (OUT / "favicon.svg").write_bytes(fav.read_bytes())
         n += 1
     return n
 
