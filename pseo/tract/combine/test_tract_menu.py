@@ -86,6 +86,7 @@ def test_steps_go_in_tract_order():
         "translate",
         "build",
         "readiness",
+        "publish",
     ], kinds
 
 
@@ -280,7 +281,7 @@ def test_readiness_is_done_only_when_ready_json_is_fresh(tmp_path, monkeypatch):
         st["readiness_done"] is False
     ), "ready.json ещё нет — шаг обязан быть НЕ готов"
 
-    ready_fn = tmp_path / "ready.json"
+    ready_fn = tmp_path / "tests" / "ready.json"
     ready_fn.write_text("{}", encoding="utf-8")
     old = os.path.getmtime(data_dir / "en_gr.json") - 10
     os.utime(ready_fn, (old, old))
@@ -313,7 +314,7 @@ def test_switching_probe_does_not_borrow_another_geos_readiness(tmp_path, monkey
     )
     (tmp_path / "tests" / "data").mkdir(parents=True)
     (tmp_path / "tests" / "data" / "en_gr.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "ready.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "tests" / "ready.json").write_text("{}", encoding="utf-8")
 
     bot.set_test_geo("gr")
     st = bot.pipeline_state()
@@ -862,3 +863,64 @@ def test_broker_db_path_has_one_owner():
     ]
     # в тракте лежит только загрузчик мозга; сам путь — в src/teledigest/keybroker.py
     assert offenders == [], offenders
+
+
+def test_publish_is_gated_by_readiness_and_stamp_freshness(tmp_path, monkeypatch):
+    """Кнопка «Публикация»: без ✅ готовности — без работы; с готовностью и без штампа —
+    работа есть; штамп свежее готовности — ✅; готовность обновилась — снова работа."""
+    monkeypatch.setattr(bot, "BRAIN", str(tmp_path))
+    monkeypatch.setattr(bot, "TRACT", str(tmp_path))
+    data_dir = tmp_path / "tests" / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "en_gr.json").write_text("{}", encoding="utf-8")
+    t = os.path.getmtime(data_dir / "en_gr.json")
+
+    def step():
+        return next(
+            x
+            for x in bot.pipeline_steps(bot.pipeline_state())
+            if x["kind"] == "publish"
+        )
+
+    assert step()["jobs"] == [], "нет готовности — публиковать нельзя"
+    assert "ждёт" in step()["label"]
+
+    ready_fn = tmp_path / "tests" / "ready.json"
+    ready_fn.write_text("{}", encoding="utf-8")
+    os.utime(ready_fn, (t + 10, t + 10))
+    assert step()["jobs"] == [("publish", None)], "готово, штампа нет — есть работа"
+
+    stamp = tmp_path / "tests" / "published.json"
+    stamp.write_text("{}", encoding="utf-8")
+    os.utime(stamp, (t + 20, t + 20))
+    assert step()["jobs"] == [], "опубликовано после проверки — ✅"
+    assert bot.pipeline_state()["publish_done"] is True
+
+    os.utime(ready_fn, (t + 30, t + 30))
+    assert step()["jobs"] == [
+        ("publish", None)
+    ], "готовность новее штампа — снова работа"
+
+
+def test_publish_button_calls_publish_py_on_the_sandbox_snapshot():
+    argv = bot.MENU["publish"][1]
+    assert any(a.endswith("publish.py") for a in argv), argv
+    assert argv[argv.index("--out") + 1].endswith("/tests/out"), argv
+    assert argv[argv.index("--site") + 1] == bot.SITE_DIR, argv
+
+
+def test_publish_closes_the_chain_when_no_country_needs_work():
+    s = {
+        "collapse": [],
+        "mark": [],
+        "mark_n": 0,
+        "summarize": [],
+        "build_corpus": [],
+        "to_translate": [],
+        "geos": 3,
+        "views": 10,
+        "build_done": True,
+        "readiness_done": True,
+        "publish_done": False,
+    }
+    assert bot._country_major_chain(bot.pipeline_steps(s)) == [("publish", None)]

@@ -20,6 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))  # …/pseo/tract
 sys.path.insert(0, HERE)
 # Каталог вывода объявлен ОДИН раз, в render.py — своего здесь не заводим.
+from readiness import ready_path  # noqa: E402
 from render import OUT as _OUT  # noqa: E402
 
 # ⛔ Своего `f"{ROOT}/out"` здесь быть не должно. Гейт обязан смотреть ТУДА, КУДА ПИСАЛ
@@ -115,7 +116,7 @@ def main():
     }
     json.dump(
         rep,
-        open(f"{HERE}/ready.json", "w", encoding="utf-8"),
+        open(ready_path(OUT), "w", encoding="utf-8"),
         ensure_ascii=False,
         indent=1,
     )

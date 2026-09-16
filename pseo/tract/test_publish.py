@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Сторож звена 8, шаг 3 (PLAN.md §3.2): подмена живого дерева атомарна и обратима.
+"""Сторож звена 8 (PLAN.md §3.2): выкладка версией + симлинк, старое не исчезает.
 
-Не про rsync (это забота вызывающего) — только про саму подмену: старое дерево не
-исчезает без следа, ошибка на подмене не оставляет живой путь пустым.
+⛔ 12.09: тесты `swap_in` сняты вместе с ним — один способ подмены, симлинк.
 """
 
 import os
@@ -30,99 +29,6 @@ def _tree(path, marker):
     os.makedirs(path, exist_ok=True)
     with open(os.path.join(path, "marker.txt"), "w", encoding="utf-8") as fh:
         fh.write(marker)
-
-
-def test_swap_puts_the_staging_content_live(tmp_path):
-    live = str(tmp_path / "online")
-    staging = str(tmp_path / "online_new")
-    _tree(live, "старое")
-    _tree(staging, "новое")
-
-    publish.swap_in(staging, live)
-
-    assert os.path.isdir(live)
-    assert open(os.path.join(live, "marker.txt"), encoding="utf-8").read() == "новое"
-    assert not os.path.isdir(staging), "staging должен был переехать, не скопироваться"
-
-
-def test_swap_keeps_the_old_tree_for_rollback(tmp_path):
-    live = str(tmp_path / "online")
-    staging = str(tmp_path / "online_new")
-    _tree(live, "старое")
-    _tree(staging, "новое")
-
-    prev = publish.swap_in(staging, live)
-
-    assert prev is not None
-    assert os.path.isdir(prev)
-    assert open(os.path.join(prev, "marker.txt"), encoding="utf-8").read() == "старое"
-
-
-def test_swap_with_keep_prev_false_removes_the_old_tree(tmp_path):
-    live = str(tmp_path / "online")
-    staging = str(tmp_path / "online_new")
-    _tree(live, "старое")
-    _tree(staging, "новое")
-
-    prev = publish.swap_in(staging, live, keep_prev=False)
-
-    assert prev is None
-
-
-def test_first_ever_publish_with_no_prior_live_tree(tmp_path):
-    """Живого дерева ещё нет вовсе — не первая публикация вообще, а первая
-    В ЭТОМ каталоге (например .ru-зеркало до своего первого прогона)."""
-    live = str(tmp_path / "online")
-    staging = str(tmp_path / "online_new")
-    _tree(staging, "новое")
-
-    prev = publish.swap_in(staging, live)
-
-    assert prev is None
-    assert open(os.path.join(live, "marker.txt"), encoding="utf-8").read() == "новое"
-
-
-def test_swap_refuses_a_missing_staging_tree(tmp_path):
-    live = str(tmp_path / "online")
-    _tree(live, "старое")
-
-    try:
-        publish.swap_in(str(tmp_path / "no_such_dir"), live)
-        assert False, "должно было упасть — staging не существует"
-    except FileNotFoundError:
-        pass
-
-    # живое дерево не тронуто отказавшейся подменой
-    assert open(os.path.join(live, "marker.txt"), encoding="utf-8").read() == "старое"
-
-
-def test_a_failed_second_rename_restores_the_live_tree(tmp_path, monkeypatch):
-    """Если вторая подмена (staging -> live) обломилась — живой путь не должен
-    остаться пустым: старое возвращается на место, а не теряется."""
-    live = str(tmp_path / "online")
-    staging = str(tmp_path / "online_new")
-    _tree(live, "старое")
-    _tree(staging, "новое")
-
-    real_rename = os.rename
-    calls = []
-
-    def _flaky_rename(src, dst):
-        calls.append((src, dst))
-        if src == staging:
-            raise OSError("диск кончился на середине")
-        real_rename(src, dst)
-
-    monkeypatch.setattr(os, "rename", _flaky_rename)
-
-    try:
-        publish.swap_in(staging, live)
-        assert False, "должно было упасть"
-    except OSError:
-        pass
-
-    assert os.path.isdir(live), "живой путь не должен остаться без каталога"
-    assert open(os.path.join(live, "marker.txt"), encoding="utf-8").read() == "старое"
 
 
 @needs_symlinks
@@ -199,3 +105,76 @@ def test_prune_versions_ignores_files_that_are_not_versions(tmp_path):
 
     assert doomed == ["online_v1"]
     assert os.path.isdir(site / "nginxconf"), "чужая папка не должна была пострадать"
+
+
+@needs_symlinks
+def test_publish_tree_copies_a_version_and_points_current_at_it(tmp_path):
+    out = tmp_path / "out"
+    _tree(str(out / "ru"), "новое")
+    site = str(tmp_path / "online")
+
+    rep = publish.publish_tree(str(out), site, keep=3, now=1000)
+
+    assert rep["version"] == "online_v1000"
+    assert rep["prev"] is None, "первая публикация — предыдущей версии нет"
+    assert os.readlink(os.path.join(site, "current")) == "online_v1000"
+    live = os.path.join(site, "current", "ru", "marker.txt")
+    assert open(live, encoding="utf-8").read() == "новое"
+    assert os.listdir(str(out)) == ["ru"], "песочница не тронута — копия, не переезд"
+    assert not any(d.endswith(".staging") for d in os.listdir(site)), "обрывков нет"
+
+
+@needs_symlinks
+def test_second_publish_keeps_previous_version_for_rollback(tmp_path):
+    out = tmp_path / "out"
+    site = str(tmp_path / "online")
+    _tree(str(out / "ru"), "v1")
+    publish.publish_tree(str(out), site, keep=3, now=1000)
+    _tree(str(out / "ru"), "v2")
+
+    rep = publish.publish_tree(str(out), site, keep=3, now=2000)
+
+    assert rep["prev"] == "online_v1000"
+    assert os.readlink(os.path.join(site, "current")) == "online_v2000"
+    old = os.path.join(site, "online_v1000", "ru", "marker.txt")
+    assert open(old, encoding="utf-8").read() == "v1", "путь отката лежит рядом"
+
+
+@needs_symlinks
+def test_publish_prunes_beyond_keep_but_never_current(tmp_path):
+    out = tmp_path / "out"
+    site = str(tmp_path / "online")
+    _tree(str(out / "ru"), "x")
+    for ts in (1000, 2000, 3000):
+        publish.publish_tree(str(out), site, keep=2, now=ts)
+
+    names = sorted(d for d in os.listdir(site) if d.startswith("online_v"))
+    assert names == ["online_v2000", "online_v3000"], names
+    assert os.readlink(os.path.join(site, "current")) == "online_v3000"
+
+
+@needs_symlinks
+def test_leftover_staging_from_a_failed_run_is_cleared(tmp_path):
+    out = tmp_path / "out"
+    site = tmp_path / "online"
+    _tree(str(out / "ru"), "ok")
+    _tree(str(site / "online_v1000.staging"), "обрывок")
+
+    publish.publish_tree(str(out), str(site), keep=3, now=1000)
+
+    assert not (site / "online_v1000.staging").exists()
+    live = site / "current" / "ru" / "marker.txt"
+    assert open(str(live), encoding="utf-8").read() == "ok"
+
+
+def test_publish_refuses_an_empty_snapshot(tmp_path):
+    """Пустая песочница — не «опубликовать пустой сайт», а ошибка до любого касания."""
+    (tmp_path / "out").mkdir()
+    with pytest.raises(FileNotFoundError):
+        publish.publish_tree(str(tmp_path / "out"), str(tmp_path / "online"))
+    assert not (tmp_path / "online" / "current").exists()
+
+
+def test_swap_in_is_gone():
+    """Один способ подмены — симлинк. Rename-подмена не должна вернуться (12.09)."""
+    assert not hasattr(publish, "swap_in")
