@@ -80,5 +80,11 @@
  "home_by_region": "Bölgeye göre",
  "home_search_ph": "Ülke yazmaya başla…",
  "search_ph": "Başlıklarda ara…",
- "home_search_none": "bir şey bulunamadı"
+ "home_search_none": "bir şey bulunamadı",
+ "ask_title": "Bu ülke hakkında Luky’ye sor",
+ "ask_ph": "Sorun…",
+ "ask_btn": "Sor",
+ "ask_wait": "Güncel deneyimlerde arıyorum…",
+ "ask_err": "Asistan şu an kullanılamıyor, daha sonra dene",
+ "ask_more": "Luky’yi tam aç →"
 }

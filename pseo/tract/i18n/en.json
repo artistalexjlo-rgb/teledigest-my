@@ -80,5 +80,11 @@
  "home_by_region": "By region",
  "home_search_ph": "Start typing a country…",
  "search_ph": "Search titles…",
- "home_search_none": "nothing found"
+ "home_search_none": "nothing found",
+ "ask_title": "Ask Luky about this country",
+ "ask_ph": "Your question…",
+ "ask_btn": "Ask",
+ "ask_wait": "Searching fresh reports…",
+ "ask_err": "The assistant is unavailable right now, try again later",
+ "ask_more": "Open full Luky →"
 }

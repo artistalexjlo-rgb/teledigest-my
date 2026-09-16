@@ -165,6 +165,32 @@ def asset_version() -> str:
     return h.hexdigest()[:8]
 
 
+def layout_version() -> str:
+    """Отпечаток ВСЕГО, что попадает в HTML помимо данных страницы: шаблоны, переводы
+    интерфейса, статика. ⛔ 16.09: инкремент рендера смотрел только на данные — правка
+    шаблона (виджет помощника) не перерисовала бы ни одной существующей страницы."""
+    h = hashlib.sha1()
+    for sub_dir in ("templates", "i18n", "static"):
+        d = HERE / sub_dir
+        for f in sorted(d.glob("*")) if d.is_dir() else []:
+            h.update(f.name.encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()[:12]
+
+
+_LAYOUT_STAMP = ".layout_version"  # OUT/… — не страница, как .tails.json
+
+# Английское имя страны — контекст для помощника (промпт Luky ждёт имя, не код).
+_COUNTRIES_EN: dict = {}
+try:
+    _COUNTRIES_EN = (
+        json.loads((HERE / "countries.json").read_text(encoding="utf-8")).get("en")
+        or {}
+    )
+except Exception:
+    _COUNTRIES_EN = {}
+
+
 def copy_assets() -> int:
     """static/ → out/assets/. Возвращает число файлов."""
     src, dst = HERE / "static", OUT / "assets"
@@ -249,6 +275,18 @@ def _save_tail_manifest(m: dict) -> None:
     )
 
 
+def write_root_index() -> None:
+    """Корневой `/index.html`: выбор языка браузера → `/<язык>/`, роботу — ссылки на все.
+
+    ⛔ 16.09: без него корень отдавал 403 (папка без index, листинг запрещён) — раньше это
+    прикрывал редирект `/ → /ru/` в старой карте nginx, снятой вместе с редиректами 20.08.
+    Один список языков — `SITE["languages"]`, тот же, что у переключателя на страницах.
+    """
+    html = _env.get_template("root.html.j2").render(site=SITE, asset_v=asset_version())
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "index.html").write_text(html, encoding="utf-8")
+
+
 def render_page(page: dict, lang: str | None = None) -> str:
     lang = lang or page.get("lang", "ru")
     t = load_i18n(lang)
@@ -265,6 +303,7 @@ def render_page(page: dict, lang: str | None = None) -> str:
         text_dir=text_dir(lang),
         alt_langs=alt_langs(page),
         asset_v=asset_version(),
+        geo_en=_COUNTRIES_EN.get(page.get("geo") or ""),
     )
     # Маркер #luky в текстах (интро/проза) → та же дверь, что у кнопки. Единый источник —
     # `door_url`, чтобы переходы из текста тоже считались.
@@ -316,6 +355,12 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
     copy_images()  # руками положенные картинки (28.08) — не в git, копия вслед за static/
 
     manifest = _load_tail_manifest()
+    # Шаблон/переводы/статика изменились → ВСЕ страницы устарели, данные тут ни при чём.
+    layout_now = layout_version()
+    stamp = OUT / _LAYOUT_STAMP
+    layout_changed = (
+        not stamp.exists() or stamp.read_text(encoding="utf-8") != layout_now
+    )
     current_tails: dict[str, set] = {}
     pages_by_file = {}
     for jf in sorted(data_dir.glob("*.json")):
@@ -341,7 +386,8 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         out_path = OUT / page["path"].strip("/") / "index.html"
         tail = _tail_of(page)
         stale = (
-            not out_path.exists()
+            layout_changed
+            or not out_path.exists()
             or jf.stat().st_mtime > out_path.stat().st_mtime
             or (tail is not None and tail in dirty_tails)
         )
@@ -365,6 +411,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
             n_noindex += 1
 
     _save_tail_manifest({t: sorted(langs) for t, langs in current_tails.items()})
+    stamp.write_text(layout_now, encoding="utf-8")
 
     # lastmod ПОСТРАНИЧНО: дату несёт сама страница (`updated_iso`, ставит сборщик и
     # только при РЕАЛЬНОМ изменении содержимого). Аргумент — запасной, у старых файлов
@@ -387,6 +434,7 @@ def build_all(lastmod: str = "", data_dir=None) -> dict:
         f"Sitemap: {SITE['domain']}/sitemap.xml\n"
     )
     (OUT / "robots.txt").write_text(robots, encoding="utf-8")
+    write_root_index()
     # ПОИСК ПО ЗАГОЛОВКАМ — один файл на язык, тянется по первому нажатию. Инлайнить в
     # каждую страницу нельзя — вес умножился бы на число страниц.
     n_search = 0

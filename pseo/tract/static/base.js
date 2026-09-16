@@ -76,3 +76,33 @@
       : '<p class="nores">'+box.dataset.none+"</p>";
   }).catch(function(){box.innerHTML='<p class="nores">'+box.dataset.none+"</p>";});
 })();
+
+/* ПОМОЩНИК LUKY НА СТРАНИЦЕ (16.09). POST /api/assistant/ask своего домена
+   (nginx → приложение Luky). Контракт Luky: {message, history:[{role,text}], country,
+   source}; ответ {answer, sourcesUsed, degraded?, empty?, error?}. История — в памяти
+   страницы; первая пара реплик — контекст «какую страницу читает человек». */
+(function(){
+  var box=document.getElementById("ask"); if(!box) return;
+  var form=document.getElementById("askForm"), q=document.getElementById("askQ"), log=document.getElementById("askLog");
+  var hist=[{role:"user",text:"Я читаю страницу: «"+(box.dataset.page||"")+"»"},{role:"model",text:"Понял."}];
+  var busy=false;
+  function line(cls,text){var d=document.createElement("div");d.className="ask-"+cls;d.textContent=text;log.appendChild(d);d.scrollIntoView({block:"nearest"});return d;}
+  form.addEventListener("submit",function(e){
+    e.preventDefault(); if(busy) return;
+    var text=q.value.trim(); if(!text) return;
+    q.value=""; busy=true; line("u",text);
+    var w=line("w",box.dataset.wait);
+    var body={message:text,history:hist.slice(),country:box.dataset.country||undefined,source:"site"};
+    fetch(box.dataset.api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        w.remove();
+        var a=(d&&!d.degraded&&!d.empty&&d.answer)?d.answer:null;
+        line("m",a||box.dataset.err);
+        hist.push({role:"user",text:text}); if(a) hist.push({role:"model",text:a});
+        if(hist.length>22) hist.splice(2,2);
+      })
+      .catch(function(){w.remove();line("m",box.dataset.err);})
+      .then(function(){busy=false;q.focus();});
+  });
+})();
