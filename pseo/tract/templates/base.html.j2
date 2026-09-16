@@ -70,39 +70,27 @@
       поля подряд — видно на превью сразу, тестами нет. #}
   {#- ⭐ 19.08: поле стоит и на ГЛАВНОЙ — одно поле на весь сайт, ищет и страны, и
       заголовки. Своё поле главной (по названиям стран, индекс инлайном) снято. #}
+  {#- ⭐ 17.09: ОДНО поле = поиск по заголовкам + помощник Luky (юзер: «у Luky есть поле,
+      просто его надо доработать и поднять наверх»). Набор → подсказки по заголовкам;
+      Enter/кнопка → вопрос помощнику, ответ плашкой ПОД полем, история на странице.
+      Помощник везде, включая главную (страны нет — уточнит сам). Ходит на
+      /api/assistant/ своего домена, nginx проксирует в приложение Luky. #}
   {%- if page.template != 'find.html.j2' %}
-  <div class="search gsearch">{{ oct(OCT_BOX, 10, 3) }}
-    <input id="gq" placeholder="{{ t.search_ph }}" autocomplete="off" aria-label="{{ t.search_ph }}"
+  <div class="search gsearch" id="ask" data-api="/api/assistant/ask"
+       data-country="{{ geo_en or '' }}" data-page="{{ page.h1 or page.title or '' }}"
+       data-wait="{{ t.ask_wait }}" data-err="{{ t.ask_err }}">{{ oct(OCT_BOX, 10, 3) }}
+    <input id="gq" placeholder="{{ t.ask_ph }}" autocomplete="off" aria-label="{{ t.ask_ph }}" maxlength="500"
            data-find="/{{ t.html_lang }}/find/" data-index="/{{ t.html_lang }}/search.json"
            data-none="{{ t.home_search_none }}">
+    <button class="chip askbtn" id="askBtn" type="button">{{ oct(OCT_CHIP, 5, 2) }}{{ t.ask_btn }}</button>
   </div>
   <div id="gsugg"></div>
+  <div id="askLog" aria-live="polite"></div>
   {%- endif %}
 
   {% block crumbs %}{% endblock %}
 
   {% block content %}{% endblock %}
-
-  {#- ПОМОЩНИК LUKY НА СТРАНИЦЕ (16.09). Сайт — библиотека для поиска, а не витрина:
-      ответ на вопрос читателя должен быть здесь, а не «попробуй в другом окне». Виджет
-      ходит в /api/assistant/ СВОЕГО домена — nginx pseosite проксирует в приложение Luky
-      по внутренней сети (docs/vps_window.sh), CORS не нужен, лимита нет (source=site).
-      Контекст: английское имя страны (промпт Luky ждёт имя) и заголовок страницы —
-      первой репликой истории. Только на страницах страны: у главной/about/поиска/шлюза
-      страны нет. #}
-  {%- if page.geo and page.template not in ('find.html.j2', 'go.html.j2') %}
-  <div class="plate ask" id="ask" data-api="/api/assistant/ask"
-       data-country="{{ geo_en or page.geo }}" data-page="{{ page.h1 or page.title }}"
-       data-wait="{{ t.ask_wait }}" data-err="{{ t.ask_err }}">{{ oct(OCT_BOX, 10, 3) }}<div class="pad">
-    <h2>{{ t.ask_title }}</h2>
-    <form id="askForm" autocomplete="off">
-      <input id="askQ" placeholder="{{ t.ask_ph }}" maxlength="500" aria-label="{{ t.ask_ph }}">
-      <button class="btn" type="submit">{{ oct(OCT_BTN, 6, 2) }}<span>{{ t.ask_btn }}</span></button>
-    </form>
-    <div id="askLog" aria-live="polite"></div>
-    <a class="ask-more" href="{{ door }}" target="_blank" rel="noopener">{{ t.ask_more }}</a>
-  </div></div>
-  {%- endif %}
 
   <footer>
     <div class="f-brand">Lu<b>ky</b> {{ t.footer_brand_tail }}</div>

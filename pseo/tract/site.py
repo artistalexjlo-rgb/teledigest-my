@@ -276,26 +276,58 @@ def hub(geo, themes, lang):
     }
 
 
+# Регионы и «вайбы» стран — справочник рядом с кодом (17.09, перенесён из архива данными).
+HOME = _load(f"{os.path.dirname(os.path.abspath(__file__))}/home.json") or {}
+POPULAR_N = 8
+
+
+def _region_of(geo):
+    for r, codes in (HOME.get("region_codes") or {}).items():
+        if geo in codes:
+            return r
+    return "other"
+
+
 def home(geos, lang):
-    """Главная языка: список стран, у которых есть хотя бы одна страница."""
+    """Главная языка: «Популярные» (по числу страниц, с вайбом) + страны по регионам.
+
+    ⛔ 17.09: с 26.08 главная была плоской сеткой по алфавиту с голым числом — юзер:
+    «раньше информативнее было». Устройство старой главной вернулось данными
+    (home.json + i18n), сам старый код остался в архиве. Тексты (h1, интро, подписи)
+    — из i18n при рендере, здесь только структура.
+    """
     path = f"/{lang}/"
-    tiles = [
-        {
-            "icon": _geo_flag(g),
-            "title": _geo_name(g, lang),
-            "blurb": f"{n}",
+    vibes = (HOME.get("vibes") or {}).get(lang) or {}
+
+    def tile(g, n):
+        return {
+            "flag": _geo_flag(g),
+            "name": _geo_name(g, lang),
             "url": f"/{lang}/{g}/",
+            "n": n,
+            "vibe": vibes.get(g, ""),
         }
-        for g, n in geos
+
+    ranked = sorted(geos, key=lambda gn: (-gn[1], gn[0]))
+    popular = [tile(g, n) for g, n in ranked[:POPULAR_N]]
+    groups = {}
+    for g, n in sorted(geos, key=lambda gn: _geo_name(gn[0], lang)):
+        groups.setdefault(_region_of(g), []).append(tile(g, n))
+    regions = [
+        {"key": r, "geos": groups[r]}
+        for r in (HOME.get("region_order") or [])
+        if r in groups
     ]
     return path, {
         "lang": lang,
         "path": path,
         "template": "index.html.j2",
         "shared_tail": False,  # у главной хвоста нет, альтернативы не объявляем
-        "h1": "",
+        "home": True,
+        "h1": "",  # текст — t.home_h1 при рендере (index.html.j2)
         "title": "",
-        "tiles": tiles,
+        "popular": popular,
+        "regions": regions,
         "noindex": False,
     }
 
